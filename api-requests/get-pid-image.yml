@@ -8,7 +8,7 @@ http:
   url: "{{BASE_URL}}/isolation-runs/:run_id/pid-image"
   params:
     - name: run_id
-      value: "{{RUN_ID}}"
+      value: f7b666ea8ee94dad90e13d67e72fa9a8
       type: path
   auth: inherit
 

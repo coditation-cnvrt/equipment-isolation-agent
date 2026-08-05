@@ -5,11 +5,15 @@ info:
 
 http:
   method: GET
-  url: "{{BASE_URL}}/isolation-runs/{{RUN_ID}}/events"
-  auth: inherit
+  url: "{{BASE_URL}}/isolation-runs/:run_id/events"
   headers:
     - name: Accept
       value: text/event-stream
+  params:
+    - name: run_id
+      value: f7b666ea8ee94dad90e13d67e72fa9a8
+      type: path
+  auth: inherit
 
 settings:
   encodeUrl: true

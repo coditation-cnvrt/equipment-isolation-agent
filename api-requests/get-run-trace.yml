@@ -5,7 +5,11 @@ info:
 
 http:
   method: GET
-  url: "{{BASE_URL}}/isolation-runs/{{RUN_ID}}/trace"
+  url: "{{BASE_URL}}/isolation-runs/:run_id/trace"
+  params:
+    - name: run_id
+      value: f7b666ea8ee94dad90e13d67e72fa9a8
+      type: path
   auth: inherit
 
 settings:

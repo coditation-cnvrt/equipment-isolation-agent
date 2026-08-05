@@ -149,8 +149,7 @@ def run_viewer(request: Request, run_id: str, authorization: str = Header(defaul
 
 
 @router.get("/isolation-runs/{run_id}/pid-image")
-def run_pid_image(request: Request, run_id: str, authorization: str = Header(default="")):
-    _require_run_read_auth(authorization)
+def run_pid_image(request: Request, run_id: str):
     record = _store(request).get(run_id)
     if record is None:
         raise HTTPException(status_code=404, detail={"kind": "unknown_run", "message": "Unknown run id."})

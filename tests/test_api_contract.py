@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from api.models import EquipmentListRequest, IsolationRunRequest, RunStatus
-from api.routes import create_run, equipment, health, list_runs, run_result, run_status
+from api.routes import create_run, equipment, health, list_runs, run_pid_image, run_result, run_status
 from api.runs import RunRecord, RunStore, _error_detail
 
 
@@ -299,6 +299,25 @@ class ApiContractTests(unittest.TestCase):
 
         self.assertEqual(caught.exception.status_code, 404)
         self.assertEqual(caught.exception.detail["kind"], "result_not_available")
+
+    def test_pid_image_route_is_public_for_embedded_viewer_image(self):
+        run_id = "c" * 32
+        run_dir = Path(self.tmp.name) / "runs" / run_id
+        run_dir.mkdir(parents=True)
+        image_path = run_dir / "P3_pid.png"
+        image_path.write_bytes(b"png")
+        record = RunRecord(
+            run_id=run_id,
+            equipment_tag="P3",
+            runner="agentic",
+            run_dir=run_dir,
+            status="succeeded",
+        )
+        self.store._records[record.run_id] = record
+
+        response = run_pid_image(self.request, record.run_id)
+
+        self.assertEqual(Path(response.path), image_path)
 
     def test_run_timeout_marks_stuck_worker_failed(self):
         self.store.shutdown()

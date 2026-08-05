@@ -31,6 +31,8 @@ def _portable_image_src(viewer_path: Path, image_url: str) -> str:
         return str(image_url)
     if parsed.scheme and parsed.scheme != "file":
         return str(image_url)
+    if str(image_url).startswith("/") and not Path(str(image_url)).exists():
+        return str(image_url)
 
     image_path = _local_image_path(parsed, image_url)
     if image_path is None:

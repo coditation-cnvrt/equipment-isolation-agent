@@ -128,6 +128,43 @@ Requires `GEMINI_API_KEY` in `.env`. Default model `gemini-2.5-flash` (override
 with `--model`). This is a POC decision-support aid, not a certified LOTO
 procedure.
 
+## HTTP API Server
+
+Run the FastAPI service for CNVRT integration:
+
+```bash
+uv run python -m api
+```
+
+By default, the server listens on `0.0.0.0:8088`. Override with `EIA_HOST` and
+`EIA_PORT`.
+
+API runs use the agentic runner, so `GEMINI_API_KEY` is required. Requests that
+need Plant360 data must send `Authorization: Bearer <token>`; for local/dev only,
+the service can fall back to `PLANT360_AUTH_TOKEN` from `.env`.
+
+API requests must provide project context explicitly: `cnvrt_project_id`,
+`collection_id`, and `unigraph_project_id`. The API does not use
+`project_config.json` / `active_profile`.
+
+Useful endpoints:
+
+```text
+GET  /health
+POST /equipment
+POST /isolation-runs
+GET  /isolation-runs/{run_id}
+GET  /isolation-runs/{run_id}/events
+GET  /isolation-runs/{run_id}/result
+GET  /isolation-runs/{run_id}/trace
+GET  /isolation-runs/{run_id}/viewer
+```
+
+Run artifacts are written under `EIA_RUNS_DIR` (default `api_runs/`). If
+`POSTGRES_HOST`, `POSTGRES_DB`, and `POSTGRES_USER` are set, run status/result
+metadata is also persisted to Postgres; set `EIA_AUTO_INIT_SCHEMA_ON_STARTUP=true`
+only when this process should initialize `schema.sql`.
+
 ## Tests
 
 Pure-logic unit tests run offline (no graph/API) via stdlib `unittest`:

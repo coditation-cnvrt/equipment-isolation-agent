@@ -462,6 +462,16 @@ class ViewerTests(unittest.TestCase):
 
         self.assertIn('src="https://example.test/pid.png"', text)
 
+    def test_output_write_viewer_preserves_root_relative_api_image_url(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            viewer_path = Path(tmp) / "viewer.html"
+
+            write_viewer(viewer_path, payload(), image_url="/isolation-runs/run-id/pid-image")
+            text = viewer_path.read_text(encoding="utf-8")
+
+        self.assertIn('src="/isolation-runs/run-id/pid-image"', text)
+        self.assertNotIn("../isolation-runs/run-id/pid-image", text)
+
 
 if __name__ == "__main__":
     unittest.main()
