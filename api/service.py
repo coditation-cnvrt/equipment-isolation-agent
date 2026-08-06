@@ -143,6 +143,11 @@ def list_cnvrt_drawings(cnvrt_project_id: int, collection_id: int, auth_token: s
     ]
 
 
+def get_cnvrt_drawing_image(cnvrt_project_id: int, collection_id: int, job_id: int, auth_token: str):
+    path = f"/projects/{cnvrt_project_id}/collections/{collection_id}/jobs/{job_id}/image/source"
+    return Plant360Client(ApiConfig(auth_token=auth_token)).get_bytes(path)
+
+
 def list_unigraph_projects(cnvrt_project_id: int, collection_id: int, auth_token: str) -> list[dict[str, str | bool]]:
     """Return every UniGraph project mapped to the selected CNVRT project and collection."""
     client = Plant360Client(ApiConfig(base_url=DEFAULT_UNIGRAPH_API_BASE_URL, auth_token=auth_token))

@@ -43,7 +43,11 @@ def create_app() -> FastAPI:
         run_store.shutdown()
 
     app = FastAPI(title="Equipment Isolation Agent API", version="0.1.0", lifespan=lifespan)
-    origins = [item.strip() for item in os.environ.get("EIA_CORS_ORIGINS", "").split(",") if item.strip()]
+    origins = [
+        item.strip()
+        for item in os.environ.get("EIA_CORS_ORIGINS", "http://localhost:5173").split(",")
+        if item.strip()
+    ]
     if origins:
         app.add_middleware(
             CORSMiddleware,

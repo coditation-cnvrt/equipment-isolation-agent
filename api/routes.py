@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from api.models import (
     EquipmentListRequest,
@@ -23,6 +23,7 @@ from api.runs import RunStore, event_stream
 from api.service import (
     list_cnvrt_collections,
     list_cnvrt_drawings,
+    get_cnvrt_drawing_image,
     list_cnvrt_projects,
     list_project_equipment,
     list_unigraph_projects,
@@ -119,6 +120,21 @@ def planning_context_drawings(cnvrt_project_id: int, collection_id: int, authori
         raise HTTPException(
             status_code=502,
             detail={"kind": "drawing_discovery_failed", "message": "Unable to load CNVRT drawings."},
+        ) from None
+
+
+@router.get("/planning-context/projects/{cnvrt_project_id}/collections/{collection_id}/drawings/{job_id}/image")
+def planning_context_drawing_image(cnvrt_project_id: int, collection_id: int, job_id: int, authorization: str = Header(default="")):
+    token = _plant360_token(authorization)
+    if not token:
+        raise HTTPException(status_code=400, detail={"kind": "missing_auth_token", "message": "Plant360 auth token is required."})
+    try:
+        content, content_type = get_cnvrt_drawing_image(cnvrt_project_id, collection_id, job_id, token)
+        return Response(content=content, media_type=content_type or "application/octet-stream")
+    except Exception:
+        raise HTTPException(
+            status_code=502,
+            detail={"kind": "drawing_image_failed", "message": "Unable to load CNVRT drawing image."},
         ) from None
 
 
