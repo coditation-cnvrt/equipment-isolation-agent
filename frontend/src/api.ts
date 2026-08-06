@@ -9,7 +9,15 @@ export type UniGraphProject = {
   export_type: string
   has_taxonomy: boolean
 }
-export type Equipment = { id: string; tag: string; name: string; entity_class: string }
+export type Equipment = {
+  id: string
+  tag: string
+  name: string
+  entity_class: string
+  node_id: string
+  job_id: string
+  job_name: string
+}
 
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8088').replace(/\/$/, '')
 
@@ -43,3 +51,8 @@ export const getEquipment = (cnvrtProjectId: string, collectionId: string, unigr
   postItems<Equipment>('/equipment', { cnvrt_project_id: cnvrtProjectId, collection_id: collectionId, unigraph_project_id: unigraphProjectId, collection_name: collectionName })
 export const drawingImageUrl = (projectId: string, collectionId: string, drawingId: string) =>
   `${apiBaseUrl}/planning-context/projects/${projectId}/collections/${collectionId}/drawings/${drawingId}/image`
+export async function getEquipmentBBox(jobId: string, nodeId: string): Promise<number[]> {
+  const response = await fetch(`${apiBaseUrl}/planning-context/drawings/${jobId}/equipment/${nodeId}/bbox`)
+  if (!response.ok) return []
+  return ((await response.json()) as { bbox?: number[] }).bbox ?? []
+}

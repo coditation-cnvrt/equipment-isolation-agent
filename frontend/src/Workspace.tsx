@@ -4,15 +4,17 @@ type WorkspaceProps = {
   drawingName: string
   graphName: string
   imageUrl: string
+  bbox: number[]
 }
 
 const MIN_ZOOM = 0.75
 const MAX_ZOOM = 4
 const DEFAULT_ZOOM = 1.3
 
-function Workspace({ drawingName, graphName, imageUrl }: WorkspaceProps) {
+function Workspace({ drawingName, graphName, imageUrl, bbox }: WorkspaceProps) {
   const [zoom, setZoom] = useState(DEFAULT_ZOOM)
   const [offset, setOffset] = useState({ x: 0, y: 0 })
+  const [imageSize, setImageSize] = useState({ width: 0, height: 0 })
   const dragStart = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null)
 
   function resetView() {
@@ -48,13 +50,16 @@ function Workspace({ drawingName, graphName, imageUrl }: WorkspaceProps) {
           setZoom((current) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, current - event.deltaY * 0.0015)))
         }}
       >
-        <img
-          alt={drawingName}
-          className="max-h-full max-w-full select-none object-contain"
-          draggable={false}
-          src={imageUrl}
-          style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})` }}
-        />
+        <div className="relative max-h-full max-w-full" style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})` }}>
+          <img
+            alt={drawingName}
+            className="max-h-full max-w-full select-none object-contain"
+            draggable={false}
+            onLoad={(event) => setImageSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
+            src={imageUrl}
+          />
+          {bbox.length === 4 && imageSize.width > 0 && <div className="pointer-events-none absolute border-[3px] border-blue-600 bg-blue-500/15 shadow-[0_0_0_2px_rgba(255,255,255,0.85)]" style={{ left: `${bbox[0] / imageSize.width * 100}%`, top: `${bbox[1] / imageSize.height * 100}%`, width: `${bbox[2] / imageSize.width * 100}%`, height: `${bbox[3] / imageSize.height * 100}%` }} />}
+        </div>
         <div className="absolute bottom-3 right-3 flex items-center gap-1 rounded-md border border-slate-300 bg-white/95 p-1 shadow-sm">
           <button aria-label="Zoom out" className="h-8 w-8 text-lg hover:bg-slate-100" onClick={() => setZoom((current) => Math.max(MIN_ZOOM, current - 0.2))} type="button">−</button>
           <button className="min-w-14 px-2 font-mono text-[11px] hover:bg-slate-100" onClick={resetView} type="button">{Math.round(zoom * 100)}%</button>

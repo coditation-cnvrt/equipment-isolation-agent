@@ -3,6 +3,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import {
   getCollections,
   getDrawings,
+  getEquipmentBBox,
   getEquipment,
   getProjects,
   getUniGraphProjects,
@@ -29,6 +30,7 @@ function App() {
   const [drawingId, setDrawingId] = useState('')
   const [unigraphProjectId, setUnigraphProjectId] = useState('')
   const [equipmentId, setEquipmentId] = useState('')
+  const [equipmentBBox, setEquipmentBBox] = useState<number[]>([])
   const [loading, setLoading] = useState('projects')
   const [error, setError] = useState('')
   const didLoadProjects = useRef(false)
@@ -37,18 +39,33 @@ function App() {
   const selectedCollection = collections.find((item) => item.id === collectionId)
   const selectedDrawing = drawings.find((item) => item.id === drawingId)
   const selectedUniGraph = unigraphProjects.find((item) => item.id === unigraphProjectId)
+  const selectedEquipment = equipment.find((item) => item.id === equipmentId)
   const ready = Boolean(selectedProject && selectedCollection && selectedDrawing && selectedUniGraph)
   const projectOptions = projects.map((item) => ({ value: item.id, label: `${item.name} (${item.id})`, searchText: `${item.name} ${item.id}` }))
   const collectionOptions = collections.map((item) => ({ value: item.id, label: `${item.name} (${item.id})`, searchText: `${item.name} ${item.id}` }))
   const drawingOptions = drawings.map((item) => ({ value: item.id, label: `${item.name} (${item.id})`, searchText: `${item.name} ${item.id}` }))
   const unigraphOptions = unigraphProjects.map((item) => ({ value: item.id, label: `${item.name} (${item.id})`, searchText: `${item.name} ${item.id}` }))
-  const equipmentOptions = equipment.map((item) => ({ value: item.id, label: `${item.tag || item.name} (${item.entity_class})`, searchText: `${item.tag} ${item.name} ${item.entity_class}` }))
+  const equipmentOptions = equipment
+    .filter((item) => item.job_id === drawingId)
+    .map((item) => ({ value: item.id, label: `${item.tag || item.name} (${item.entity_class})`, searchText: `${item.tag} ${item.name} ${item.entity_class}` }))
 
   useEffect(() => {
     if (didLoadProjects.current) return
     didLoadProjects.current = true
     void loadProjects()
   }, [])
+
+  useEffect(() => {
+    if (!selectedEquipment || !drawingId) {
+      setEquipmentBBox([])
+      return
+    }
+    let active = true
+    void getEquipmentBBox(drawingId, selectedEquipment.node_id).then((bbox) => {
+      if (active) setEquipmentBBox(bbox)
+    })
+    return () => { active = false }
+  }, [drawingId, selectedEquipment])
 
   async function loadProjects() {
     setLoading('projects')
@@ -68,6 +85,7 @@ function App() {
     setDrawingId('')
     setUnigraphProjectId('')
     setEquipmentId('')
+    setEquipmentBBox([])
     setEquipment([])
     setCollections([])
     setDrawings([])
@@ -89,6 +107,7 @@ function App() {
     setDrawingId('')
     setUnigraphProjectId('')
     setEquipmentId('')
+    setEquipmentBBox([])
     setEquipment([])
     setDrawings([])
     setUnigraphProjects([])
@@ -108,6 +127,8 @@ function App() {
     setDrawingId(nextDrawingId)
     setUnigraphProjectId('')
     setUnigraphProjects([])
+    setEquipmentId('')
+    setEquipment([])
     setError('')
     if (!projectId || !collectionId || !nextDrawingId) return
     setLoading('unigraph')
@@ -154,7 +175,7 @@ function App() {
             {error && <div className="border-l-2 border-red-500 bg-red-50 p-3 text-xs text-red-900" role="alert"><p>{error}</p>{!projects.length && <button className="mt-2 underline" onClick={() => void loadProjects()} type="button">Retry project load</button>}</div>}
           </div>
         </aside>
-        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden border-b border-slate-300 bg-slate-200 xl:border-b-0"><div className="border-b border-slate-300 bg-white px-5 py-3"><p className="font-mono text-[10px] tracking-[0.12em] text-slate-500">DRAWING WORKSPACE</p></div><div className="min-h-0 flex-1">{ready ? <Suspense fallback={<div className="h-full bg-white p-8"><Skeleton className="h-5 w-48" /><Skeleton className="mt-8 h-full w-full" /></div>}><Workspace drawingName={selectedDrawing?.name ?? ''} graphName={selectedUniGraph?.name ?? ''} imageUrl={drawingImageUrl(projectId, collectionId, drawingId)} /></Suspense> : <div className="flex h-full items-center justify-center bg-white p-8 text-center"><div><h2 className="text-lg font-medium">Complete context selection</h2><p className="mt-2 max-w-sm text-sm leading-5 text-slate-600">No CNVRT drawing content is loaded until all required selections are complete.</p></div></div>}</div></section>
+        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden border-b border-slate-300 bg-slate-200 xl:border-b-0"><div className="border-b border-slate-300 bg-white px-5 py-3"><p className="font-mono text-[10px] tracking-[0.12em] text-slate-500">DRAWING WORKSPACE</p></div><div className="min-h-0 flex-1">{ready ? <Suspense fallback={<div className="h-full bg-white p-8"><Skeleton className="h-5 w-48" /><Skeleton className="mt-8 h-full w-full" /></div>}><Workspace bbox={equipmentBBox} drawingName={selectedDrawing?.name ?? ''} graphName={selectedUniGraph?.name ?? ''} imageUrl={drawingImageUrl(projectId, collectionId, drawingId)} /></Suspense> : <div className="flex h-full items-center justify-center bg-white p-8 text-center"><div><h2 className="text-lg font-medium">Complete context selection</h2><p className="mt-2 max-w-sm text-sm leading-5 text-slate-600">No CNVRT drawing content is loaded until all required selections are complete.</p></div></div>}</div></section>
         <aside className="overflow-y-auto bg-white xl:border-l xl:border-slate-300"><div className="border-b border-slate-300 p-5"><p className="font-mono text-[10px] tracking-[0.12em] text-slate-500">REVIEW STATUS</p><h2 className="mt-3 text-xl font-medium">{ready ? 'Context ready' : 'Context required'}</h2></div><div className="p-5 text-sm leading-6 text-slate-600">{ready ? <dl className="space-y-3"><div><dt className="font-mono text-[10px] text-slate-500">DRAWING</dt><dd>{selectedDrawing?.name}</dd></div><div><dt className="font-mono text-[10px] text-slate-500">UNIGRAPH</dt><dd>{selectedUniGraph?.name}</dd></div></dl> : 'Select the complete source context before equipment, plan, or drawing data is requested.'}</div></aside>
       </main>
     </div>

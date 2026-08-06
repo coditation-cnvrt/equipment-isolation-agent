@@ -2,7 +2,11 @@
 from __future__ import annotations
 
 import os
+import hashlib
+import time
+from collections import OrderedDict
 from pathlib import Path
+from threading import Lock
 from typing import Callable
 from urllib.parse import urlparse
 
@@ -10,11 +14,18 @@ from agent.loop import DEFAULT_MODEL
 from agent.runner import AgentRunResult, run_agent_pipeline
 from api_client import Plant360Client
 from config import ApiConfig, DEFAULT_UNIGRAPH_API_BASE_URL, JOB_IDS_BY_NAME
+from domain.hilt_geometry import extract_symbols, symbol_bbox
 from image import resolve_pid_image
 from output import write_json, write_viewer
 from pipeline.config_builder import build_run_config
 from pipeline.equipment import add_equipment_jobs, add_equipment_jobs_from_metadata, list_equipment
 from pipeline.stages import resolve_project_metadata
+
+
+_STLM_BBOX_CACHE_TTL_SECONDS = 300
+_STLM_BBOX_CACHE_MAX_ENTRIES = 16
+_stlm_bbox_cache: OrderedDict[tuple[str, int], tuple[float, dict[str, list[int]]]] = OrderedDict()
+_stlm_bbox_cache_lock = Lock()
 
 
 def config_from_run_request(request, auth_token: str, output_dir: Path):
@@ -146,6 +157,35 @@ def list_cnvrt_drawings(cnvrt_project_id: int, collection_id: int, auth_token: s
 def get_cnvrt_drawing_image(cnvrt_project_id: int, collection_id: int, job_id: int, auth_token: str):
     path = f"/projects/{cnvrt_project_id}/collections/{collection_id}/jobs/{job_id}/image/source"
     return Plant360Client(ApiConfig(auth_token=auth_token)).get_bytes(path)
+
+
+def get_equipment_bbox(job_id: int, node_id: str, auth_token: str) -> list[int]:
+    token_key = hashlib.sha256(auth_token.encode("utf-8")).hexdigest()
+    cache_key = (token_key, job_id)
+    now = time.monotonic()
+    with _stlm_bbox_cache_lock:
+        cached = _stlm_bbox_cache.get(cache_key)
+        if cached and now - cached[0] < _STLM_BBOX_CACHE_TTL_SECONDS:
+            _stlm_bbox_cache.move_to_end(cache_key)
+            return cached[1].get(str(node_id), [])
+
+    symbols = extract_symbols(Plant360Client(ApiConfig(auth_token=auth_token)).stlm_symbols(job_id))
+    index = {}
+    for symbol in symbols:
+        bbox = symbol_bbox(symbol)
+        if not bbox:
+            continue
+        for key in ("uuid", "id", "source_id"):
+            value = symbol.get(key)
+            if value:
+                index[str(value)] = bbox
+
+    with _stlm_bbox_cache_lock:
+        _stlm_bbox_cache[cache_key] = (now, index)
+        _stlm_bbox_cache.move_to_end(cache_key)
+        while len(_stlm_bbox_cache) > _STLM_BBOX_CACHE_MAX_ENTRIES:
+            _stlm_bbox_cache.popitem(last=False)
+    return index.get(str(node_id), [])
 
 
 def list_unigraph_projects(cnvrt_project_id: int, collection_id: int, auth_token: str) -> list[dict[str, str | bool]]:
