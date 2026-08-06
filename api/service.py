@@ -4,12 +4,14 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlparse
 
 from agent.loop import DEFAULT_MODEL
 from agent.runner import AgentRunResult, run_agent_pipeline
+from api_client import Plant360Client
+from config import ApiConfig, DEFAULT_UNIGRAPH_API_BASE_URL, JOB_IDS_BY_NAME
 from image import resolve_pid_image
 from output import write_json, write_viewer
-from config import JOB_IDS_BY_NAME
 from pipeline.config_builder import build_run_config
 from pipeline.equipment import add_equipment_jobs, add_equipment_jobs_from_metadata, list_equipment
 from pipeline.stages import resolve_project_metadata
@@ -69,6 +71,113 @@ def list_project_equipment(request, auth_token: str):
     add_equipment_jobs_from_metadata(items, config.job_ids_by_name)
     add_equipment_jobs(items, config.api, config.job_ids_by_name or JOB_IDS_BY_NAME)
     return items
+
+
+def list_cnvrt_projects(auth_token: str) -> list[dict[str, str]]:
+    """Return the authenticated user's CNVRT projects for planning-context selection."""
+    client = Plant360Client(ApiConfig(auth_token=auth_token))
+    items = _list_cnvrt_pages(client, "/projects", "project")
+    return [
+        {
+            "id": str(project["id"]),
+            "name": str(project.get("name") or ""),
+            "status": str(project.get("status") or ""),
+        }
+        for project in items
+        if isinstance(project, dict) and project.get("id") not in (None, "")
+    ]
+
+
+def _list_cnvrt_pages(client: Plant360Client, path: str, item_name: str) -> list[dict]:
+    expected_path = urlparse(path).path
+    items = []
+    for _ in range(100):
+        payload = client.get_json(path)
+        page_items = payload.get("results") if isinstance(payload, dict) else payload
+        if not isinstance(page_items, list):
+            raise ValueError(f"CNVRT {item_name} response does not contain a list")
+        items.extend(page_items)
+
+        next_url = payload.get("next") if isinstance(payload, dict) else None
+        if not next_url:
+            return items
+        next_path = urlparse(str(next_url))
+        if next_path.path != expected_path:
+            raise ValueError(f"CNVRT {item_name} pagination returned an unexpected path")
+        path = next_path.path + (f"?{next_path.query}" if next_path.query else "")
+
+    raise ValueError(f"CNVRT {item_name} pagination exceeded 100 pages")
+
+
+def list_cnvrt_collections(cnvrt_project_id: int, auth_token: str) -> list[dict[str, str]]:
+    """Return the authenticated user's collections for a CNVRT project."""
+    client = Plant360Client(ApiConfig(auth_token=auth_token))
+    items = _list_cnvrt_pages(client, f"/projects/{cnvrt_project_id}/collections", "collection")
+
+    return [
+        {
+            "id": str(collection["id"]),
+            "name": str(collection.get("name") or ""),
+        }
+        for collection in items
+        if isinstance(collection, dict) and collection.get("id") not in (None, "")
+    ]
+
+
+def list_cnvrt_drawings(cnvrt_project_id: int, collection_id: int, auth_token: str) -> list[dict[str, str]]:
+    """Return the authenticated user's drawing jobs for a CNVRT collection."""
+    path = f"/projects/{cnvrt_project_id}/collections/{collection_id}/jobs"
+    client = Plant360Client(ApiConfig(auth_token=auth_token))
+    items = _list_cnvrt_pages(client, path, "drawing")
+
+    return [
+        {
+            "id": str(drawing["id"]),
+            "name": str(drawing.get("name") or ""),
+            "status": str(drawing.get("status") or ""),
+            "current_phase": str(drawing.get("current_phase") or ""),
+            "input_file_type": str(drawing.get("input_file_type") or ""),
+        }
+        for drawing in items
+        if isinstance(drawing, dict) and drawing.get("id") not in (None, "")
+    ]
+
+
+def list_unigraph_projects(cnvrt_project_id: int, collection_id: int, auth_token: str) -> list[dict[str, str | bool]]:
+    """Return every UniGraph project mapped to the selected CNVRT project and collection."""
+    client = Plant360Client(ApiConfig(base_url=DEFAULT_UNIGRAPH_API_BASE_URL, auth_token=auth_token))
+    project_exports = client.get_json(f"/api/projects/by-cnvrt?cnvrt_project_id={cnvrt_project_id}")
+    collection_exports = client.get_json(
+        f"/api/projects/by-cnvrt?cnvrt_project_id={cnvrt_project_id}&cnvrt_collection_id={collection_id}"
+    )
+    if not isinstance(project_exports, list) or not isinstance(collection_exports, list):
+        raise ValueError("UniGraph project response does not contain a project list")
+
+    candidates = {
+        str(project["id"]): project
+        for project in [*project_exports, *collection_exports]
+        if isinstance(project, dict) and project.get("id") not in (None, "")
+    }
+    selected = []
+    for project in candidates.values():
+        project_id = str(project["id"])
+        collections_payload = client.get_json(f"/api/projects/{project_id}/collections")
+        collections = collections_payload.get("collections") if isinstance(collections_payload, dict) else collections_payload
+        if not isinstance(collections, list):
+            raise ValueError("UniGraph collection response does not contain a collection list")
+        if not any(str(item.get("cnvrt_collection_id") or "") == str(collection_id) for item in collections if isinstance(item, dict)):
+            continue
+        selected.append(
+            {
+                "id": project_id,
+                "name": str(project.get("name") or ""),
+                "state": str(project.get("state") or ""),
+                "status": str(project.get("status") or ""),
+                "export_type": str(project.get("export_type") or ""),
+                "has_taxonomy": bool(project.get("has_taxonomy")),
+            }
+        )
+    return selected
 
 
 def execute_agent_request(

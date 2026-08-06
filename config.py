@@ -14,6 +14,8 @@ JOB_IDS_BY_NAME = {
     "pnid_6_bio_final": "2106",
 }
 
+DEFAULT_UNIGRAPH_API_BASE_URL = "https://api.plant360.ai/plantgraph"
+
 
 @dataclass(frozen=True)
 class GraphConfig:
@@ -120,7 +122,7 @@ class RunConfig:
     job_name: str = ""
     job_id: str = ""
     cnvrt_project_id: str = ""
-    unigraph_api_base_url: str = "https://api.plant360.ai/plantgraph"
+    unigraph_api_base_url: str = DEFAULT_UNIGRAPH_API_BASE_URL
     job_ids_by_name: dict[str, str] = field(default_factory=dict)
     collection_id: str = "196"
     collection_name: str = "Unit"

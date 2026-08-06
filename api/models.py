@@ -64,6 +64,50 @@ class EquipmentListRequest(BaseModel):
         return value
 
 
+class PlanningProject(BaseModel):
+    id: str
+    name: str
+    status: str
+
+
+class PlanningProjectList(BaseModel):
+    items: list[PlanningProject]
+
+
+class PlanningCollection(BaseModel):
+    id: str
+    name: str
+
+
+class PlanningCollectionList(BaseModel):
+    items: list[PlanningCollection]
+
+
+class PlanningDrawing(BaseModel):
+    id: str
+    name: str
+    status: str
+    current_phase: str
+    input_file_type: str
+
+
+class PlanningDrawingList(BaseModel):
+    items: list[PlanningDrawing]
+
+
+class PlanningUniGraphProject(BaseModel):
+    id: str
+    name: str
+    state: str
+    status: str
+    export_type: str
+    has_taxonomy: bool
+
+
+class PlanningUniGraphProjectList(BaseModel):
+    items: list[PlanningUniGraphProject]
+
+
 class RunAccepted(BaseModel):
     run_id: str
     status: str

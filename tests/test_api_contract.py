@@ -10,7 +10,25 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from api.models import EquipmentListRequest, IsolationRunRequest, RunStatus
-from api.routes import create_run, equipment, health, list_runs, run_pid_image, run_result, run_status
+from api.routes import (
+    create_run,
+    equipment,
+    health,
+    list_runs,
+    planning_context_collections,
+    planning_context_drawings,
+    planning_context_projects,
+    planning_context_unigraph_projects,
+    run_pid_image,
+    run_result,
+    run_status,
+)
+from api.service import (
+    list_cnvrt_collections,
+    list_cnvrt_drawings,
+    list_cnvrt_projects,
+    list_unigraph_projects,
+)
 from api.runs import RunRecord, RunStore, _error_detail
 
 
@@ -187,6 +205,223 @@ class ApiContractTests(unittest.TestCase):
                 )
             )
         self.assertEqual(response, {"items": [{"tag": "P3"}]})
+
+    def test_planning_context_projects_forwards_bearer_token(self):
+        projects = [{"id": "277", "name": "Aker", "status": "ready"}]
+        with mock.patch("api.routes.list_cnvrt_projects", return_value=projects) as project_lookup:
+            response = planning_context_projects(authorization=self._read_auth("user-token"))
+
+        self.assertEqual(response, {"items": projects})
+        project_lookup.assert_called_once_with("user-token")
+
+    def test_planning_context_projects_requires_plant360_token(self):
+        os.environ.pop("PLANT360_AUTH_TOKEN", None)
+        with self.assertRaises(HTTPException) as caught:
+            planning_context_projects()
+        self.assertEqual(caught.exception.status_code, 400)
+        self.assertEqual(caught.exception.detail["kind"], "missing_auth_token")
+
+    def test_planning_context_projects_hides_upstream_failure(self):
+        with mock.patch("api.routes.list_cnvrt_projects", side_effect=RuntimeError("CNVRT details")):
+            with self.assertRaises(HTTPException) as caught:
+                planning_context_projects(authorization=self._read_auth())
+        self.assertEqual(caught.exception.status_code, 502)
+        self.assertEqual(caught.exception.detail["kind"], "project_discovery_failed")
+        self.assertNotIn("CNVRT details", str(caught.exception.detail))
+
+    def test_cnvrt_project_discovery_normalizes_paginated_response(self):
+        client = mock.Mock()
+        client.get_json.return_value = {
+            "count": 2,
+            "results": [
+                {"id": 277, "name": "Aker", "status": "ready", "description": "ignored"},
+                {"id": 278, "name": "Bio", "status": "processing"},
+            ],
+        }
+        with mock.patch("api.service.Plant360Client", return_value=client) as client_class:
+            projects = list_cnvrt_projects("user-token")
+
+        self.assertEqual(
+            projects,
+            [
+                {"id": "277", "name": "Aker", "status": "ready"},
+                {"id": "278", "name": "Bio", "status": "processing"},
+            ],
+        )
+        self.assertEqual(client_class.call_args.args[0].auth_token, "user-token")
+        client.get_json.assert_called_once_with("/projects")
+
+    def test_cnvrt_project_discovery_follows_all_pages(self):
+        client = mock.Mock()
+        client.get_json.side_effect = [
+            {
+                "count": 2,
+                "next": "https://api.plant360.ai/projects?page=2",
+                "results": [{"id": 314, "name": "Newest", "status": "created"}],
+            },
+            {
+                "count": 2,
+                "next": None,
+                "results": [{"id": 277, "name": "Aker", "status": "created"}],
+            },
+        ]
+        with mock.patch("api.service.Plant360Client", return_value=client):
+            projects = list_cnvrt_projects("user-token")
+
+        self.assertEqual([project["id"] for project in projects], ["314", "277"])
+        self.assertEqual(client.get_json.call_args_list, [mock.call("/projects"), mock.call("/projects?page=2")])
+
+    def test_planning_context_collections_forwards_project_and_bearer_token(self):
+        collections = [{"id": "206", "name": "Unit"}]
+        with mock.patch("api.routes.list_cnvrt_collections", return_value=collections) as collection_lookup:
+            response = planning_context_collections(277, authorization=self._read_auth("user-token"))
+
+        self.assertEqual(response, {"items": collections})
+        collection_lookup.assert_called_once_with(277, "user-token")
+
+    def test_cnvrt_collection_discovery_normalizes_paginated_response(self):
+        client = mock.Mock()
+        client.get_json.return_value = {
+            "count": 2,
+            "results": [
+                {"id": 206, "name": "Unit", "change_version": 3},
+                {"id": 207, "name": "Utilities"},
+            ],
+        }
+        with mock.patch("api.service.Plant360Client", return_value=client):
+            collections = list_cnvrt_collections(277, "user-token")
+
+        self.assertEqual(
+            collections,
+            [
+                {"id": "206", "name": "Unit"},
+                {"id": "207", "name": "Utilities"},
+            ],
+        )
+        client.get_json.assert_called_once_with("/projects/277/collections")
+
+    def test_cnvrt_collection_discovery_follows_all_pages(self):
+        client = mock.Mock()
+        client.get_json.side_effect = [
+            {
+                "next": "https://api.plant360.ai/projects/277/collections?page=2",
+                "results": [{"id": 206, "name": "Unit"}],
+            },
+            {"next": None, "results": [{"id": 207, "name": "Utilities"}]},
+        ]
+        with mock.patch("api.service.Plant360Client", return_value=client):
+            collections = list_cnvrt_collections(277, "user-token")
+
+        self.assertEqual([collection["id"] for collection in collections], ["206", "207"])
+        self.assertEqual(
+            client.get_json.call_args_list,
+            [mock.call("/projects/277/collections"), mock.call("/projects/277/collections?page=2")],
+        )
+
+    def test_planning_context_drawings_forwards_context_and_bearer_token(self):
+        drawings = [
+            {
+                "id": "2100",
+                "name": "P&ID 2",
+                "status": "complete",
+                "current_phase": "done",
+                "input_file_type": "pdf",
+            }
+        ]
+        with mock.patch("api.routes.list_cnvrt_drawings", return_value=drawings) as drawing_lookup:
+            response = planning_context_drawings(277, 206, authorization=self._read_auth("user-token"))
+
+        self.assertEqual(response, {"items": drawings})
+        drawing_lookup.assert_called_once_with(277, 206, "user-token")
+
+    def test_cnvrt_drawing_discovery_normalizes_paginated_response(self):
+        client = mock.Mock()
+        client.get_json.return_value = {
+            "count": 1,
+            "results": [
+                {
+                    "id": 2100,
+                    "name": "P&ID 2",
+                    "status": "complete",
+                    "current_phase": "post_process",
+                    "input_file_type": "pdf",
+                    "change_version": 7,
+                }
+            ],
+        }
+        with mock.patch("api.service.Plant360Client", return_value=client):
+            drawings = list_cnvrt_drawings(277, 206, "user-token")
+
+        self.assertEqual(
+            drawings,
+            [
+                {
+                    "id": "2100",
+                    "name": "P&ID 2",
+                    "status": "complete",
+                    "current_phase": "post_process",
+                    "input_file_type": "pdf",
+                }
+            ],
+        )
+        client.get_json.assert_called_once_with("/projects/277/collections/206/jobs")
+
+    def test_planning_context_unigraph_projects_forwards_context_and_bearer_token(self):
+        projects = [
+            {
+                "id": "15",
+                "name": "Aker graph",
+                "state": "ready",
+                "status": "complete",
+                "export_type": "collection_export",
+                "has_taxonomy": True,
+            }
+        ]
+        with mock.patch("api.routes.list_unigraph_projects", return_value=projects) as project_lookup:
+            response = planning_context_unigraph_projects(277, 206, authorization=self._read_auth("user-token"))
+
+        self.assertEqual(response, {"items": projects})
+        project_lookup.assert_called_once_with(277, 206, "user-token")
+
+    def test_unigraph_project_discovery_normalizes_all_collection_matches(self):
+        client = mock.Mock()
+        client.get_json.side_effect = [
+            [
+                {
+                    "id": 15,
+                    "name": "Aker graph A",
+                    "state": "ready",
+                    "status": "complete",
+                    "export_type": "project_export",
+                    "has_taxonomy": True,
+                },
+                {
+                    "id": 16,
+                    "name": "Aker graph B",
+                    "state": "draft",
+                    "status": "processing",
+                    "export_type": "project_export",
+                    "has_taxonomy": False,
+                },
+            ],
+            [],
+            {"collections": [{"cnvrt_collection_id": 206}]},
+            {"collections": [{"cnvrt_collection_id": 207}]},
+        ]
+        with mock.patch("api.service.Plant360Client", return_value=client):
+            projects = list_unigraph_projects(277, 206, "user-token")
+
+        self.assertEqual([project["id"] for project in projects], ["15"])
+        self.assertTrue(projects[0]["has_taxonomy"])
+        self.assertEqual(
+            client.get_json.call_args_list,
+            [
+                mock.call("/api/projects/by-cnvrt?cnvrt_project_id=277"),
+                mock.call("/api/projects/by-cnvrt?cnvrt_project_id=277&cnvrt_collection_id=206"),
+                mock.call("/api/projects/15/collections"),
+                mock.call("/api/projects/16/collections"),
+            ],
+        )
 
     def test_run_lifecycle_returns_payload_unmodified(self):
         with mock.patch("api.service.run_agent_pipeline", side_effect=lambda config, **_: _Result(config)), \

@@ -8,9 +8,25 @@ from typing import Annotated
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 
-from api.models import EquipmentListRequest, IsolationRunRequest, RunAccepted, RunList, RunStatus
+from api.models import (
+    EquipmentListRequest,
+    IsolationRunRequest,
+    PlanningCollectionList,
+    PlanningDrawingList,
+    PlanningProjectList,
+    PlanningUniGraphProjectList,
+    RunAccepted,
+    RunList,
+    RunStatus,
+)
 from api.runs import RunStore, event_stream
-from api.service import list_project_equipment
+from api.service import (
+    list_cnvrt_collections,
+    list_cnvrt_drawings,
+    list_cnvrt_projects,
+    list_project_equipment,
+    list_unigraph_projects,
+)
 from api.db import postgres_configured
 
 router = APIRouter()
@@ -59,6 +75,68 @@ def equipment(request_body: EquipmentListRequest, authorization: str = Header(de
     if not token:
         raise HTTPException(status_code=400, detail={"kind": "missing_auth_token", "message": "Plant360 auth token is required."})
     return {"items": list_project_equipment(request_body, token)}
+
+
+@router.get("/planning-context/projects", response_model=PlanningProjectList)
+def planning_context_projects(authorization: str = Header(default="")):
+    token = _plant360_token(authorization)
+    if not token:
+        raise HTTPException(status_code=400, detail={"kind": "missing_auth_token", "message": "Plant360 auth token is required."})
+    try:
+        return {"items": list_cnvrt_projects(token)}
+    except Exception:
+        raise HTTPException(
+            status_code=502,
+            detail={"kind": "project_discovery_failed", "message": "Unable to load CNVRT projects."},
+        ) from None
+
+
+@router.get("/planning-context/projects/{cnvrt_project_id}/collections", response_model=PlanningCollectionList)
+def planning_context_collections(cnvrt_project_id: int, authorization: str = Header(default="")):
+    token = _plant360_token(authorization)
+    if not token:
+        raise HTTPException(status_code=400, detail={"kind": "missing_auth_token", "message": "Plant360 auth token is required."})
+    try:
+        return {"items": list_cnvrt_collections(cnvrt_project_id, token)}
+    except Exception:
+        raise HTTPException(
+            status_code=502,
+            detail={"kind": "collection_discovery_failed", "message": "Unable to load CNVRT collections."},
+        ) from None
+
+
+@router.get(
+    "/planning-context/projects/{cnvrt_project_id}/collections/{collection_id}/drawings",
+    response_model=PlanningDrawingList,
+)
+def planning_context_drawings(cnvrt_project_id: int, collection_id: int, authorization: str = Header(default="")):
+    token = _plant360_token(authorization)
+    if not token:
+        raise HTTPException(status_code=400, detail={"kind": "missing_auth_token", "message": "Plant360 auth token is required."})
+    try:
+        return {"items": list_cnvrt_drawings(cnvrt_project_id, collection_id, token)}
+    except Exception:
+        raise HTTPException(
+            status_code=502,
+            detail={"kind": "drawing_discovery_failed", "message": "Unable to load CNVRT drawings."},
+        ) from None
+
+
+@router.get(
+    "/planning-context/projects/{cnvrt_project_id}/collections/{collection_id}/unigraph-projects",
+    response_model=PlanningUniGraphProjectList,
+)
+def planning_context_unigraph_projects(cnvrt_project_id: int, collection_id: int, authorization: str = Header(default="")):
+    token = _plant360_token(authorization)
+    if not token:
+        raise HTTPException(status_code=400, detail={"kind": "missing_auth_token", "message": "Plant360 auth token is required."})
+    try:
+        return {"items": list_unigraph_projects(cnvrt_project_id, collection_id, token)}
+    except Exception:
+        raise HTTPException(
+            status_code=502,
+            detail={"kind": "unigraph_project_discovery_failed", "message": "Unable to load UniGraph projects."},
+        ) from None
 
 
 @router.post("/isolation-runs", response_model=RunAccepted, status_code=202)
