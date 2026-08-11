@@ -12,8 +12,8 @@ importers:
         specifier: ^1.7.0
         version: 1.7.0(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@coditation-cnvrt/p360-hitl-viewer':
-        specifier: 0.1.1
-        version: 0.1.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        specifier: 0.1.2
+        version: 0.1.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@fontsource/ibm-plex-mono':
         specifier: ^5.3.0
         version: 5.3.0
@@ -167,8 +167,8 @@ packages:
       '@types/react':
         optional: true
 
-  '@coditation-cnvrt/p360-hitl-viewer@0.1.1':
-    resolution: {integrity: sha512-topxo5TnxSNr69R2fL21I1fhQKuyEYmlQlbb9TlsWQSBzCXCgHXOtZGPTkNT1BHl9RgRpHTtf1bjtVOHAUSBxg==}
+  '@coditation-cnvrt/p360-hitl-viewer@0.1.2':
+    resolution: {integrity: sha512-dpLrmulbd2C+pZTOMMTX6S8uk6SW7s1TStssOpU5xC6tL2BUFheFNAiZH5g7RERgSh4GwAcIaTAH9xM1GiJkBQ==}
     engines: {node: '>=20'}
     peerDependencies:
       react: '>=18 <20'
@@ -1087,7 +1087,7 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.2.18
 
-  '@coditation-cnvrt/p360-hitl-viewer@0.1.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@coditation-cnvrt/p360-hitl-viewer@0.1.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
       dompurify: 3.4.13
       react: 19.2.8
