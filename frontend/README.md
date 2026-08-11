@@ -6,12 +6,11 @@ React/Vite interface for selecting CNVRT and UniGraph context, viewing the HILT 
 
 ```bash
 cp .env.example .env.local
-export NODE_AUTH_TOKEN=github_pat_with_read_packages
 pnpm install
 pnpm dev
 ```
 
-`NODE_AUTH_TOKEN` must be a GitHub token with `read:packages` access because the HILT viewer is installed from private GitHub Packages. Never commit the token.
+The frontend currently uses the viewer through `link:../../../p360-hitl-viewer`, so keep the viewer repository at that sibling path during local development.
 
 Set `VITE_API_AUTH_TOKEN` in `.env.local` because isolation-run status and result endpoints require bearer authentication. The value is embedded in the local browser bundle, so use a read-only developer token and never commit it. Production deployments should inject the authenticated user's token through the hosting application rather than a build-time secret.
 
