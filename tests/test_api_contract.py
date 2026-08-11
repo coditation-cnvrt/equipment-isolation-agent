@@ -17,13 +17,17 @@ from api.routes import (
     list_runs,
     planning_context_collections,
     planning_context_drawings,
+    planning_context_hilt_graph,
     planning_context_projects,
+    planning_context_symbols,
     planning_context_unigraph_projects,
     run_pid_image,
     run_result,
     run_status,
 )
 from api.service import (
+    get_cnvrt_hilt_graph,
+    get_hilt_ui_symbols,
     list_cnvrt_collections,
     list_cnvrt_drawings,
     list_cnvrt_projects,
@@ -334,6 +338,33 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(response, {"items": drawings})
         drawing_lookup.assert_called_once_with(277, 206, "user-token")
 
+    def test_planning_context_hilt_graph_forwards_job_and_bearer_token(self):
+        payload = {"hilt_graph": {"nodes": [], "links": [], "imageSize": {"width": 1, "height": 1}}}
+        with mock.patch("api.routes.get_cnvrt_hilt_graph", return_value=payload) as graph_lookup:
+            response = planning_context_hilt_graph(2100, authorization=self._read_auth("user-token"))
+
+        self.assertEqual(response, payload)
+        graph_lookup.assert_called_once_with(2100, "user-token")
+
+    def test_planning_context_symbols_forwards_hilt_symbol_project_and_bearer_token(self):
+        payload = [{"pid_entity_type": "equipment", "pid_entity_class": "pump", "svg": "<svg/>"}]
+        with mock.patch("api.routes.get_hilt_ui_symbols", return_value=payload) as symbol_lookup:
+            response = planning_context_symbols(274, authorization=self._read_auth("user-token"))
+
+        self.assertEqual(response, payload)
+        symbol_lookup.assert_called_once_with(274, "user-token")
+
+    def test_hilt_payload_helpers_use_expected_plant360_endpoints(self):
+        client = mock.Mock()
+        client.hilt_graph.return_value = {"hilt_graph": {"nodes": [], "links": []}}
+        client.get_json.return_value = []
+        with mock.patch("api.service.Plant360Client", return_value=client):
+            self.assertIn("hilt_graph", get_cnvrt_hilt_graph(2100, "user-token"))
+            self.assertEqual(get_hilt_ui_symbols(274, "user-token"), [])
+
+        client.hilt_graph.assert_called_once_with(2100)
+        client.get_json.assert_called_once_with("/ui_symbol/get_ui_symbol_format?project_id=274")
+
     def test_cnvrt_drawing_discovery_normalizes_paginated_response(self):
         client = mock.Mock()
         client.get_json.return_value = {
@@ -468,6 +499,27 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(response["items"][0]["run_id"], accepted.run_id)
         self.assertEqual(response["items"][0]["status"], "succeeded")
         self.assertNotIn("result", response["items"][0])
+        self.assertEqual(response["items"][0]["request"]["job_id"], "")
+
+    def test_list_runs_filters_by_persisted_planning_context(self):
+        with mock.patch("api.service.run_agent_pipeline", side_effect=lambda config, **_: _Result(config)), \
+             mock.patch("api.service.resolve_pid_image", return_value=("", {})):
+            accepted = self._submit({"job_id": "2151", "job_name": "Drawing A"})
+            self._wait(accepted.run_id)
+
+        matching = list_runs(
+            self.request,
+            equipment_tag="P3",
+            job_id="2151",
+            cnvrt_project_id="277",
+            collection_id="206",
+            unigraph_project_id="15",
+            authorization=self._read_auth(),
+        )
+        missing = list_runs(self.request, equipment_tag="P3", job_id="9999", authorization=self._read_auth())
+
+        self.assertEqual([item["run_id"] for item in matching["items"]], [accepted.run_id])
+        self.assertEqual(missing["items"], [])
 
     def test_failed_run_records_structured_error(self):
         with mock.patch("api.service.run_agent_pipeline", side_effect=RuntimeError("boom")):

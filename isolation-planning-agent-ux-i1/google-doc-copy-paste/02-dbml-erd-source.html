@@ -1,0 +1,279 @@
+<!doctype html><html><head><meta charset="utf-8"><title>DBML ERD source</title><style>
+body { font-family: Arial, sans-serif; color: #161616; margin: 36px auto; max-width: 1200px; line-height: 1.45; }
+h1 { color: #163d71; font-size: 28px; border-bottom: 2px solid #163d71; padding-bottom: 10px; }
+h2 { color: #163d71; font-size: 21px; margin-top: 28px; } h3 { font-size: 17px; margin-top: 22px; }
+table { border-collapse: collapse; width: 100%; margin: 14px 0; } th, td { border: 1px solid #8d8d8d; padding: 8px; vertical-align: top; text-align: left; } th { background: #f4f4f4; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #161616; color: #f4f4f4; padding: 14px; font-size: 11px; }
+code { font-family: monospace; } .callout, .note { border-left: 4px solid #0f62fe; background: #f7faff; padding: 12px 16px; margin: 16px 0; }
+.note { border-left-color: #6929c4; background: #faf7ff; } .tag { display: inline-block; padding: 2px 6px; border: 1px solid #c6dbff; background: #edf5ff; color: #0043ce; }
+</style></head><body><h1>DBML ERD source</h1>
+<section class="sql"><h2>DBML ERD source</h2><div class="sql-toolbar"><label>Self-contained ERD source — copy this text into dbdiagram.io to render the relationship diagram.</label></div><pre id="dbml">Project isolation_planning_agent {
+  database_type: "PostgreSQL"
+  Note: "Logical ERD export. Derived records are immutable per plan_version."
+}
+
+Table isolation_plan {
+  plan_id uuid [pk]
+  plan_number text [not null, unique]
+  active_plan_version_id uuid
+  mode text [not null]
+  lifecycle_state text [not null]
+}
+
+Table plan_version {
+  plan_version_id uuid [pk]
+  plan_id uuid [not null]
+  parent_plan_version_id uuid
+  version_no int [not null]
+  derivation_status text [not null]
+  input_hash text [not null]
+  model_hash text [not null]
+  derived_at timestamptz [not null]
+  superseded_at timestamptz
+  Indexes { (plan_id, version_no) [unique] }
+}
+
+Table work_scope {
+  work_scope_id uuid [pk]
+  plan_version_id uuid [not null]
+  activity text [not null]
+  duration_hours numeric
+  break_containment boolean [not null]
+}
+
+Table asset_reference {
+  asset_ref_id uuid [pk]
+  external_system text [not null]
+  external_id text [not null]
+  tag text [not null]
+  asset_class text [not null]
+  Indexes { (external_system, external_id) [unique] }
+}
+
+Table work_scope_asset {
+  work_scope_id uuid [not null]
+  asset_ref_id uuid [not null]
+  scope_role text [not null]
+  selection_source text [not null]
+  Indexes { (work_scope_id, asset_ref_id) [pk] }
+}
+
+Table input_snapshot {
+  snapshot_id uuid [pk]
+  plan_version_id uuid [not null]
+  source_type text [not null]
+  revision text
+  content_hash text [not null]
+  expires_at timestamptz
+  payload jsonb [not null]
+}
+
+Table isolation_branch {
+  branch_id uuid [pk]
+  plan_version_id uuid [not null]
+  parent_branch_id uuid
+  branch_code text [not null]
+  disposition text [not null]
+  source_state text [not null]
+  topology_signature text [not null]
+  topology jsonb [not null]
+  Indexes { (plan_version_id, branch_code) [unique] }
+}
+
+Table path_assessment {
+  assessment_id uuid [pk]
+  branch_id uuid [not null, unique]
+  hazard_severity_class smallint [not null]
+  exposure_class text [not null]
+  barrier_config text [not null]
+}
+
+Table isolation_point {
+  isolation_point_id uuid [pk]
+  plan_version_id uuid [not null]
+  asset_ref_id uuid [not null]
+  point_type text [not null]
+  required_state text [not null]
+  barrier_role text
+}
+
+Table path_point {
+  branch_id uuid [not null]
+  isolation_point_id uuid [not null]
+  path_order int [not null]
+  live_side boolean [not null]
+  Indexes { (branch_id, isolation_point_id) [pk] }
+}
+
+Table finding {
+  finding_id uuid [pk]
+  plan_version_id uuid [not null]
+  finding_type text [not null]
+  severity text [not null]
+  state text [not null]
+  blocks_authorisation boolean [not null]
+}
+
+Table finding_context {
+  finding_context_id uuid [pk]
+  finding_id uuid [not null]
+  context_type text [not null]
+  asset_ref_id uuid
+  branch_id uuid
+  input_snapshot_id uuid
+  plan_step_id uuid
+  external_reference text
+  Note: "Exactly one optional context target is set per row."
+}
+
+Table plan_step {
+  step_id uuid [pk]
+  plan_version_id uuid [not null]
+  isolation_point_id uuid
+  step_no int [not null]
+  phase text [not null]
+  predecessor_step_id uuid
+  Indexes { (plan_version_id, step_no) [unique] }
+}
+
+Table step_execution {
+  execution_id uuid [pk]
+  step_id uuid [not null]
+  operator_id uuid [not null]
+  outcome text [not null]
+  occurred_at timestamptz [not null]
+}
+
+Table evidence_attachment {
+  evidence_id uuid [pk]
+  execution_id uuid [not null]
+  evidence_type text [not null]
+  uri text [not null]
+  content_hash text [not null]
+}
+
+Table authorisation {
+  authorisation_id uuid [pk]
+  plan_version_id uuid [not null]
+  approver_id uuid [not null]
+  authority_role text [not null]
+  decision text [not null]
+  signed_at timestamptz
+}
+
+Table protected_asset {
+  protection_id uuid [pk]
+  plan_id uuid [not null]
+  asset_ref_id uuid [not null]
+  tier text [not null]
+  active_to timestamptz
+}
+
+Table change_request {
+  change_id uuid [pk]
+  plan_id uuid [not null]
+  raised_against_version_id uuid [not null]
+  change_type text [not null]
+  target_type text [not null]
+  proposed_change jsonb [not null]
+  state text [not null]
+}
+
+Table plan_version_change {
+  plan_version_id uuid [not null]
+  change_id uuid [not null]
+  application_outcome text [not null]
+  Indexes { (plan_version_id, change_id) [pk] }
+}
+
+Table derivation_manifest {
+  manifest_id uuid [pk]
+  plan_id uuid [not null]
+  parent_plan_version_id uuid [not null]
+  child_plan_version_id uuid [unique]
+  state text [not null]
+  policy_hash text [not null]
+  created_by uuid
+  locked_at timestamptz
+}
+
+Table derivation_manifest_change {
+  manifest_id uuid [not null]
+  change_id uuid [not null]
+  mandatory boolean [not null]
+  required_effects jsonb [not null]
+  Indexes { (manifest_id, change_id) [pk] }
+}
+
+Table change_coverage_result {
+  coverage_result_id uuid [pk]
+  manifest_id uuid [not null]
+  change_id uuid [not null]
+  status text [not null]
+  evidence jsonb [not null]
+  reason text
+  validator text [not null]
+  validated_at timestamptz [not null]
+  Indexes { (manifest_id, change_id) [unique] }
+}
+
+Table audit_event {
+  audit_event_id uuid [pk]
+  plan_id uuid
+  plan_version_id uuid
+  event_type text [not null]
+  occurred_at timestamptz [not null]
+  payload jsonb [not null]
+}
+
+Table external_run_link {
+  run_link_id uuid [pk]
+  plan_version_id uuid [not null]
+  run_id text [not null]
+  runner text [not null]
+  result_uri text
+  trace_uri text
+}
+
+Ref: plan_version.plan_id &gt; isolation_plan.plan_id
+Ref: plan_version.parent_plan_version_id &gt; plan_version.plan_version_id
+Ref: isolation_plan.active_plan_version_id &gt; plan_version.plan_version_id
+Ref: work_scope.plan_version_id &gt; plan_version.plan_version_id
+Ref: work_scope_asset.work_scope_id &gt; work_scope.work_scope_id
+Ref: work_scope_asset.asset_ref_id &gt; asset_reference.asset_ref_id
+Ref: input_snapshot.plan_version_id &gt; plan_version.plan_version_id
+Ref: isolation_branch.plan_version_id &gt; plan_version.plan_version_id
+Ref: isolation_branch.parent_branch_id &gt; isolation_branch.branch_id
+Ref: path_assessment.branch_id &gt; isolation_branch.branch_id
+Ref: isolation_point.plan_version_id &gt; plan_version.plan_version_id
+Ref: isolation_point.asset_ref_id &gt; asset_reference.asset_ref_id
+Ref: path_point.branch_id &gt; isolation_branch.branch_id
+Ref: path_point.isolation_point_id &gt; isolation_point.isolation_point_id
+Ref: finding.plan_version_id &gt; plan_version.plan_version_id
+Ref: finding_context.finding_id &gt; finding.finding_id
+Ref: finding_context.asset_ref_id &gt; asset_reference.asset_ref_id
+Ref: finding_context.branch_id &gt; isolation_branch.branch_id
+Ref: finding_context.input_snapshot_id &gt; input_snapshot.snapshot_id
+Ref: finding_context.plan_step_id &gt; plan_step.step_id
+Ref: plan_step.plan_version_id &gt; plan_version.plan_version_id
+Ref: plan_step.isolation_point_id &gt; isolation_point.isolation_point_id
+Ref: plan_step.predecessor_step_id &gt; plan_step.step_id
+Ref: step_execution.step_id &gt; plan_step.step_id
+Ref: evidence_attachment.execution_id &gt; step_execution.execution_id
+Ref: authorisation.plan_version_id &gt; plan_version.plan_version_id
+Ref: protected_asset.plan_id &gt; isolation_plan.plan_id
+Ref: protected_asset.asset_ref_id &gt; asset_reference.asset_ref_id
+Ref: change_request.plan_id &gt; isolation_plan.plan_id
+Ref: change_request.raised_against_version_id &gt; plan_version.plan_version_id
+Ref: plan_version_change.plan_version_id &gt; plan_version.plan_version_id
+Ref: plan_version_change.change_id &gt; change_request.change_id
+Ref: derivation_manifest.plan_id &gt; isolation_plan.plan_id
+Ref: derivation_manifest.parent_plan_version_id &gt; plan_version.plan_version_id
+Ref: derivation_manifest.child_plan_version_id &gt; plan_version.plan_version_id
+Ref: derivation_manifest_change.manifest_id &gt; derivation_manifest.manifest_id
+Ref: derivation_manifest_change.change_id &gt; change_request.change_id
+Ref: change_coverage_result.(manifest_id, change_id) &gt; derivation_manifest_change.(manifest_id, change_id)
+Ref: audit_event.plan_id &gt; isolation_plan.plan_id
+Ref: audit_event.plan_version_id &gt; plan_version.plan_version_id
+Ref: external_run_link.plan_version_id &gt; plan_version.plan_version_id</pre></section>
+</body></html>

@@ -153,6 +153,7 @@ Useful endpoints:
 GET  /health
 POST /equipment
 POST /isolation-runs
+GET  /isolation-runs?equipment_tag=&job_id=&cnvrt_project_id=&collection_id=&unigraph_project_id=
 GET  /isolation-runs/{run_id}
 GET  /isolation-runs/{run_id}/events
 GET  /isolation-runs/{run_id}/result

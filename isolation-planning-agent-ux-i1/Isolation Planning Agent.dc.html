@@ -1,0 +1,1683 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="_ds/plant360-ai-design-system-796edff1-fcee-462f-ac89-8641bf82d6cb/tokens/fonts.css">
+  <link rel="stylesheet" href="_ds/plant360-ai-design-system-796edff1-fcee-462f-ac89-8641bf82d6cb/tokens/colors.css">
+  <link rel="stylesheet" href="_ds/plant360-ai-design-system-796edff1-fcee-462f-ac89-8641bf82d6cb/tokens/theme.css">
+  <link rel="stylesheet" href="_ds/plant360-ai-design-system-796edff1-fcee-462f-ac89-8641bf82d6cb/tokens/typography.css">
+  <link rel="stylesheet" href="_ds/plant360-ai-design-system-796edff1-fcee-462f-ac89-8641bf82d6cb/tokens/spacing.css">
+  <link rel="stylesheet" href="_ds/plant360-ai-design-system-796edff1-fcee-462f-ac89-8641bf82d6cb/tokens/motion.css">
+  <link rel="stylesheet" href="_ds/plant360-ai-design-system-796edff1-fcee-462f-ac89-8641bf82d6cb/styles.css">
+  <script src="_ds/plant360-ai-design-system-796edff1-fcee-462f-ac89-8641bf82d6cb/_ds_bundle.js"></script>
+  <style>
+    body { margin: 0; background: #ffffff; font-family: 'IBM Plex Sans', system-ui, sans-serif; color: #161616; }
+    a { color: #0f62fe; }
+    a:hover { color: #0043ce; }
+    * { box-sizing: border-box; }
+  </style>
+</helmet>
+
+<sc-if value="{{ isEmergency }}" hint-placeholder-val="{{ false }}">
+<div style="min-height: 100vh; background: #161616; color: #ffffff; padding: 0 0 96px">
+  <div style="display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 20px 40px; background: #da1e28; border-bottom: 4px solid #ffffff">
+    <div style="display: flex; align-items: baseline; gap: 20px">
+      <span style="font: 600 28px/1 'IBM Plex Sans'; letter-spacing: 0.5px">EMERGENCY ISOLATION ADVISORY</span>
+      <span style="font: 400 15px/1.3 'IBM Plex Mono'">M2 · advisory only · subordinate to ESD, alarm response and the incident commander</span>
+    </div>
+    <button type="button" onClick="{{ goU1 }}" style="height: 48px; padding: 0 20px; background: #161616; color: #ffffff; border: 1px solid #ffffff; font: 400 15px 'IBM Plex Sans'; cursor: pointer">Leave emergency mode</button>
+  </div>
+
+  <div style="display: grid; grid-template-columns: 420px 1fr; gap: 0; border-bottom: 1px solid #393939">
+    <div style="padding: 32px 40px; border-right: 1px solid #393939">
+      <div style="font: 400 12px/1 'IBM Plex Mono'; letter-spacing: 0.32px; color: #c6c6c6; text-transform: uppercase">Event as reported</div>
+      <div style="margin-top: 14px; font: 300 30px/1.15 'IBM Plex Sans'">Flange leak, live hydrocarbon</div>
+      <div style="margin-top: 18px; font: 400 17px/1.5 'IBM Plex Sans'; color: #e0e0e0">8"-HC-1102, PID-2101 grid D4, north pipe rack. Liquid spray, no ignition. Two persons in area, withdrawing.</div>
+      <div style="margin-top: 22px; display: flex; flex-wrap: wrap; gap: 8px">
+        <span style="height: 32px; display: inline-flex; align-items: center; padding: 0 12px; background: #393939; font: 400 13px 'IBM Plex Mono'">leak</span>
+        <span style="height: 32px; display: inline-flex; align-items: center; padding: 0 12px; background: #393939; font: 400 13px 'IBM Plex Mono'">8"-HC-1102</span>
+        <span style="height: 32px; display: inline-flex; align-items: center; padding: 0 12px; background: #393939; font: 400 13px 'IBM Plex Mono'">personnel in area</span>
+      </div>
+      <div style="margin-top: 26px; padding: 14px 16px; border: 1px solid #f1c21b; border-left-width: 4px">
+        <div style="font: 600 14px/1.3 'IBM Plex Sans'; color: #f1c21b">Degraded data</div>
+        <div style="margin-top: 6px; font: 400 14px/1.45 'IBM Plex Sans'; color: #e0e0e0">No current plant state declaration (PSD age 19 h). All systems assumed live and pressurised. Answers given regardless — REQ-E-12.</div>
+      </div>
+      <button type="button" onClick="{{ runEmg }}" style="margin-top: 26px; width: 100%; height: 56px; background: #da1e28; color: #ffffff; border: 0; font: 400 18px 'IBM Plex Sans'; text-align: left; padding: 0 20px; cursor: pointer">Re-run advisory</button>
+    </div>
+
+    <div style="padding: 32px 40px; display: flex; flex-direction: column; gap: 28px">
+      <div>
+        <div style="display: flex; align-items: baseline; gap: 14px">
+          <span style="font: 600 13px/1 'IBM Plex Mono'; color: #ff8389">1 · REMOTE ISOLATION</span>
+          <span style="font: 400 13px/1 'IBM Plex Mono'; color: #8d8d8d">returned in 6.4 s · ranked by time-to-effect</span>
+        </div>
+        <sc-if value="{{ emg1 }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top: 14px; display: flex; flex-direction: column; gap: 10px">
+          <sc-for list="{{ emgRemote }}" as="r" hint-placeholder-count="3">
+            <div style="display: grid; grid-template-columns: 200px 1fr 150px 160px; gap: 20px; align-items: center; padding: 18px 20px; background: #262626; border-left: 4px solid #ff8389">
+              <div style="font: 600 26px/1 'IBM Plex Mono'">{{ r.tag }}</div>
+              <div>
+                <div style="font: 400 17px/1.35 'IBM Plex Sans'">{{ r.action }}</div>
+                <div style="margin-top: 4px; font: 400 13px/1.4 'IBM Plex Sans'; color: #a8a8a8">{{ r.how }}</div>
+              </div>
+              <div>
+                <div style="font: 400 11px/1 'IBM Plex Mono'; color: #8d8d8d">TIME TO EFFECT</div>
+                <div style="margin-top: 4px; font: 300 24px/1 'IBM Plex Sans'">{{ r.tte }}</div>
+              </div>
+              <div>
+                <div style="font: 400 11px/1 'IBM Plex Mono'; color: #8d8d8d">CONFIDENCE</div>
+                <div style="margin-top: 4px; font: 400 15px/1.3 'IBM Plex Sans'">{{ r.conf }}</div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+        </sc-if>
+      </div>
+
+      <sc-if value="{{ emg2 }}" hint-placeholder-val="{{ true }}">
+      <div>
+        <div style="display: flex; align-items: baseline; gap: 14px">
+          <span style="font: 600 13px/1 'IBM Plex Mono'; color: #ff8389">2 · RESIDUAL INVENTORY AND BLOWDOWN</span>
+          <span style="font: 400 13px/1 'IBM Plex Mono'; color: #8d8d8d">14.1 s</span>
+        </div>
+        <div style="margin-top: 14px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px">
+          <div style="padding: 20px; background: #262626">
+            <div style="font: 400 11px/1 'IBM Plex Mono'; color: #8d8d8d">LIQUID BETWEEN SDV-1102 AND LEAK</div>
+            <div style="margin-top: 10px; font: 300 40px/1 'IBM Plex Sans'">4.2 m³</div>
+            <div style="margin-top: 8px; font: 400 13px/1.4 'IBM Plex Sans'; color: #c6c6c6">From line volumes, PID-2101 / PID-2104. Continues to feed the release after remote isolation acts.</div>
+          </div>
+          <div style="padding: 20px; background: #262626">
+            <div style="font: 400 11px/1 'IBM Plex Mono'; color: #8d8d8d">VAPOUR INVENTORY</div>
+            <div style="margin-top: 10px; font: 300 40px/1 'IBM Plex Sans'">1.1 m³</div>
+            <div style="margin-top: 8px; font: 400 13px/1.4 'IBM Plex Sans'; color: #c6c6c6">Header at 11 barg declared assumption — not confirmed.</div>
+          </div>
+          <div style="padding: 20px; background: #262626">
+            <div style="font: 400 11px/1 'IBM Plex Mono'; color: #8d8d8d">BLOWDOWN ROUTE</div>
+            <div style="margin-top: 10px; font: 400 20px/1.3 'IBM Plex Mono'">BDV-1103 → 12"-FG-1102 → KO V-1104</div>
+            <div style="margin-top: 8px; font: 400 13px/1.4 'IBM Plex Sans'; color: #c6c6c6">Destination status not declared. Flare KO drum liquid level unknown.</div>
+          </div>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ emg3 }}" hint-placeholder-val="{{ true }}">
+      <div>
+        <div style="display: flex; align-items: baseline; gap: 14px">
+          <span style="font: 600 13px/1 'IBM Plex Mono'; color: #ff8389">3 · MANUAL POINTS</span>
+          <span style="font: 400 13px/1 'IBM Plex Mono'; color: #8d8d8d">accessibility judged from the spatial register</span>
+        </div>
+        <div style="margin-top: 14px; display: flex; flex-direction: column; gap: 8px">
+          <sc-for list="{{ emgManual }}" as="m" hint-placeholder-count="3">
+            <div style="display: grid; grid-template-columns: 160px 220px 1fr; gap: 20px; align-items: center; padding: 16px 20px; background: #262626">
+              <div style="font: 600 22px/1 'IBM Plex Mono'">{{ m.tag }}</div>
+              <div style="display: inline-flex; align-items: center; gap: 10px; font: 400 15px/1.3 'IBM Plex Sans'; color: {{ m.fg }}">
+                <span style="width: 12px; height: 12px; border: 2px solid {{ m.fg }}; background: {{ m.fill }}"></span>{{ m.access }}
+              </div>
+              <div style="font: 400 14px/1.4 'IBM Plex Sans'; color: #c6c6c6">{{ m.why }}</div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ emg4 }}" hint-placeholder-val="{{ true }}">
+      <div>
+        <div style="display: flex; align-items: baseline; gap: 14px">
+          <span style="font: 600 13px/1 'IBM Plex Mono'; color: #ff8389">4 · ESCALATION TARGETS WITHIN 15 m</span>
+          <span style="font: 400 13px/1 'IBM Plex Mono'; color: #8d8d8d">ranked by consequence</span>
+        </div>
+        <div style="margin-top: 14px; display: flex; flex-direction: column; gap: 8px">
+          <sc-for list="{{ emgTargets }}" as="t" hint-placeholder-count="4">
+            <div style="display: grid; grid-template-columns: 160px 110px 1fr; gap: 20px; align-items: baseline; padding: 16px 20px; background: #262626">
+              <div style="font: 600 20px/1.2 'IBM Plex Mono'">{{ t.tag }}</div>
+              <div style="font: 400 15px/1.2 'IBM Plex Mono'; color: #f1c21b">{{ t.dist }}</div>
+              <div style="font: 400 15px/1.4 'IBM Plex Sans'; color: #e0e0e0">{{ t.detail }}</div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="margin-top: 20px; padding: 18px 20px; border: 1px solid #525252">
+          <div style="font: 600 14px/1.3 'IBM Plex Sans'">Consequences of the proposed actions, stated without recommendation</div>
+          <div style="margin-top: 8px; font: 400 15px/1.5 'IBM Plex Sans'; color: #e0e0e0">Closing SDV-1102 trips the unit 21 charge pumps and takes the crude preheat train off feed. Opening BDV-1103 loads the flare and will lift the KO drum level alarm. Both consequences are reported as information only.</div>
+        </div>
+        <div style="margin-top: 20px; font: 400 14px/1.5 'IBM Plex Sans'; color: #8d8d8d">No permit, no export and no authorisation is available in this mode. This query and every answer above has been written to the incident log — REQ-E-14, REQ-E-15.</div>
+      </div>
+      </sc-if>
+    </div>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isApp }}" hint-placeholder-val="{{ true }}">
+<div style="min-height: 100vh; background: #ffffff">
+  <x-import component-from-global-scope="Plant360AIDesignSystem_796edf.Header" logo-src="assets/plant360-ai-white.png" links="{{ headerLinks }}" current-link="Isolation planning" hint-size="100%,48px"></x-import>
+
+  <div style="display: flex; align-items: stretch; min-height: calc(100vh - 48px)">
+    <div style="flex: none; width: 256px; background: #f4f4f4; border-right: 1px solid #e0e0e0; display: flex; flex-direction: column">
+      <div style="padding: 20px 16px 16px; border-bottom: 1px solid #e0e0e0">
+        <div style="font: 400 12px/1 'IBM Plex Mono'; letter-spacing: 0.32px; color: #525252">{{ planVersion }}</div>
+        <div style="margin-top: 8px; font: 600 16px/1.3 'IBM Plex Sans'">P-1201A seal replacement</div>
+        <div style="margin-top: 10px; display: flex; align-items: center; gap: 8px">
+          <span style="display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 16px; background: #e0e0e0; font: 400 12px 'IBM Plex Mono'; letter-spacing: 0.32px">PLANNED · M1</span>
+          <span style="display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 16px; background: #e8daff; color: #6929c4; font: 400 12px 'IBM Plex Mono'; letter-spacing: 0.32px">{{ planState }}</span>
+        </div>
+      </div>
+
+      <nav style="display: flex; flex-direction: column; padding: 8px 0">
+        <button type="button" onClick="{{ goU1 }}" style="{{ nav.u1 }}">
+          <span style="font: 400 11px/1 'IBM Plex Mono'; color: #6f6f6f">U1</span>
+          <span>Plan review</span>
+          <span style="margin-left: auto; display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 20px; padding: 0 6px; background: #da1e28; color: #ffffff; font: 400 12px 'IBM Plex Mono'">{{ openCount }}</span>
+        </button>
+        <button type="button" onClick="{{ goU2 }}" style="{{ nav.u2 }}">
+          <span style="font: 400 11px/1 'IBM Plex Mono'; color: #6f6f6f">U2</span>
+          <span>Boundary explorer</span>
+        </button>
+        <button type="button" onClick="{{ goU3 }}" style="{{ nav.u3 }}">
+          <span style="font: 400 11px/1 'IBM Plex Mono'; color: #6f6f6f">U3</span>
+          <span>Field execution</span>
+        </button>
+        <button type="button" onClick="{{ goU4 }}" style="{{ nav.u4 }}">
+          <span style="font: 400 11px/1 'IBM Plex Mono'; color: #6f6f6f">U4</span>
+          <span>Isolation register</span>
+        </button>
+        <button type="button" onClick="{{ goU5 }}" style="{{ nav.u5 }}">
+          <span style="font: 400 11px/1 'IBM Plex Mono'; color: #6f6f6f">C1</span>
+          <span>Corrections</span>
+          <span style="margin-left: auto; display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 20px; padding: 0 6px; background: #f1c21b; color: #161616; font: 400 12px 'IBM Plex Mono'">2</span>
+        </button>
+        <button type="button" onClick="{{ goEmg }}" style="{{ nav.emg }}">
+          <span style="font: 400 11px/1 'IBM Plex Mono'; color: #a2191f">M2</span>
+          <span style="color: #a2191f">Emergency advisory</span>
+        </button>
+      </nav>
+
+      <div style="margin-top: auto; padding: 16px; border-top: 1px solid #e0e0e0">
+        <div style="font: 600 12px/1.3 'IBM Plex Sans'; letter-spacing: 0.32px; text-transform: uppercase; color: #525252">Not assessed by this system</div>
+        <div style="margin-top: 8px; font: 400 12px/1.5 'IBM Plex Sans'; color: #525252">Electrical isolation · environmental compliance · valve integrity and leak-test history · plant conditions not declared · package-unit internals · anything not on the source P&amp;IDs.</div>
+        <div style="margin-top: 8px; font: 400 11px/1 'IBM Plex Mono'; color: #8d8d8d">REQ-SA-08</div>
+      </div>
+    </div>
+
+    <div style="flex: 1 1 auto; min-width: 0">
+
+      <sc-if value="{{ isU1 }}" hint-placeholder-val="{{ true }}">
+      <div>
+        <div style="padding: 24px 32px 20px; border-bottom: 1px solid #e0e0e0">
+          <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 32px">
+            <div>
+              <div style="font: 400 12px/1 'IBM Plex Mono'; letter-spacing: 0.32px; color: #525252">PLAN REVIEW · U1</div>
+              <h1 style="margin: 10px 0 0; font: 300 32px/1.2 'IBM Plex Sans'">Replace mechanical seal, P-1201A crude charge pump</h1>
+              <div style="margin-top: 10px; font: 400 14px/1.4 'IBM Plex Sans'; color: #525252">WO-448213 · sour crude service · spare P-1201B running as duty · single shift, containment broken, no man-entry, no hot work</div>
+            </div>
+            <div style="flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 10px">
+              <div style="display: flex; gap: 8px">
+                <x-import component-from-global-scope="Plant360AIDesignSystem_796edf.Button" kind="tertiary" size="md" render-icon="download" hint-size="auto,40px">Export draft</x-import>
+                <x-import component-from-global-scope="Plant360AIDesignSystem_796edf.Button" kind="primary" size="md" disabled="{{ true }}" hint-size="auto,40px">Authorise plan</x-import>
+              </div>
+              <div style="display: inline-flex; align-items: center; gap: 8px; font: 400 13px/1.3 'IBM Plex Sans'; color: #a2191f">
+                <span style="width: 14px; height: 14px; border: 2px solid #a2191f; border-radius: 50%"></span>{{ blockLine }}
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top: 20px; display: flex; flex-wrap: wrap; gap: 0; border: 1px solid #e0e0e0">
+            <sc-for list="{{ provStrip }}" as="p" hint-placeholder-count="6">
+              <div style="flex: 1 1 0; min-width: 150px; padding: 12px 16px; border-right: 1px solid #e0e0e0; background: {{ p.bg }}">
+                <div style="font: 400 11px/1 'IBM Plex Mono'; letter-spacing: 0.32px; color: #525252">{{ p.label }}</div>
+                <div style="margin-top: 6px; font: 400 14px/1.3 'IBM Plex Mono'; color: {{ p.fg }}">{{ p.value }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="padding: 24px 32px 12px">
+          <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 24px">
+            <h2 style="margin: 0; font: 600 20px/1.3 'IBM Plex Sans'">Must read before authorising</h2>
+            <div style="font: 400 13px/1.3 'IBM Plex Sans'; color: #525252">Every item is acknowledged individually. There is no bulk accept — REQ-UX-N01.</div>
+          </div>
+
+          <div style="margin-top: 16px; border: 1px solid #e0e0e0">
+            <sc-for list="{{ mustRead }}" as="g" hint-placeholder-count="7">
+              <div style="border-bottom: 1px solid #e0e0e0">
+                <div style="display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: #f4f4f4">
+                  <span style="width: 10px; height: 10px; background: {{ g.dot }}; border-radius: {{ g.radius }}"></span>
+                  <span style="font: 600 14px/1.3 'IBM Plex Sans'">{{ g.group }}</span>
+                  <span style="font: 400 13px/1 'IBM Plex Mono'; color: #525252">{{ g.count }}</span>
+                  <span style="margin-left: auto; font: 400 11px/1 'IBM Plex Mono'; color: #6f6f6f">{{ g.req }}</span>
+                </div>
+                <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="2">
+                  <div style="display: grid; grid-template-columns: 1fr 220px; gap: 20px; align-items: start; padding: 14px 16px; border-top: 1px solid #e0e0e0; background: {{ it.bg }}">
+                    <div>
+                      <div style="display: flex; align-items: center; gap: 10px">
+                        <span style="display: inline-flex; align-items: center; height: 20px; padding: 0 8px; background: {{ it.pBg }}; color: {{ it.pFg }}; border-left: 3px {{ it.pEdge }} {{ it.pFg }}; font: 400 10px/1 'IBM Plex Mono'; letter-spacing: 0.32px">{{ it.pLabel }}</span>
+                        <span style="font: 600 15px/1.3 'IBM Plex Sans'">{{ it.title }}</span>
+                      </div>
+                      <div style="margin-top: 6px; font: 400 14px/1.5 'IBM Plex Sans'; color: #393939">{{ it.detail }}</div>
+                      <div style="margin-top: 6px; font: 400 11px/1 'IBM Plex Mono'; color: #6f6f6f">{{ it.meta }}</div>
+                    </div>
+                    <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px">
+                      <button type="button" onClick="{{ it.onAck }}" style="{{ it.btn }}">{{ it.btnLabel }}</button>
+                      <span style="font: 400 11px/1.3 'IBM Plex Mono'; color: #6f6f6f; text-align: right">{{ it.btnNote }}</span>
+                      <sc-if value="{{ it.canFix }}" hint-placeholder-val="{{ false }}">
+                        <button type="button" onClick="{{ it.onFix }}" style="height: 32px; padding: 0 12px; background: transparent; border: 1px solid #0f62fe; color: #0f62fe; font: 400 13px 'IBM Plex Sans'; cursor: pointer">Open correction</button>
+                      </sc-if>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="padding: 24px 32px 8px">
+          <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 24px">
+            <h2 style="margin: 0; font: 600 20px/1.3 'IBM Plex Sans'">Boundary schematic</h2>
+            <div style="font: 400 13px/1.3 'IBM Plex Sans'; color: #525252">Drawing-independent. Work zone centred, one spoke per boundary path. Click a path for its derivation trace — REQ-XD-12, P3.</div>
+          </div>
+
+          <div style="margin-top: 16px; position: relative; width: 100%; max-width: 1000px; height: 660px; background: #f4f4f4; border: 1px solid #e0e0e0">
+            <svg viewBox="0 0 1000 660" width="100%" height="100%" style="position: absolute; inset: 0" aria-hidden="true">
+              <line x1="500" y1="330" x2="700" y2="70" stroke="#a8a8a8" stroke-width="1"></line>
+              <line x1="500" y1="330" x2="700" y2="160" stroke="#a8a8a8" stroke-width="1"></line>
+              <line x1="500" y1="330" x2="700" y2="250" stroke="#a8a8a8" stroke-width="1"></line>
+              <line x1="500" y1="330" x2="700" y2="340" stroke="#a8a8a8" stroke-width="1"></line>
+              <line x1="500" y1="330" x2="700" y2="430" stroke="#a8a8a8" stroke-width="1"></line>
+              <line x1="500" y1="330" x2="700" y2="520" stroke="#a8a8a8" stroke-width="1"></line>
+              <line x1="500" y1="330" x2="300" y2="100" stroke="#a8a8a8" stroke-width="1"></line>
+              <line x1="500" y1="330" x2="300" y2="190" stroke="#a8a8a8" stroke-width="1"></line>
+              <line x1="500" y1="330" x2="300" y2="280" stroke="#a8a8a8" stroke-width="1"></line>
+              <line x1="500" y1="330" x2="300" y2="370" stroke="#a8a8a8" stroke-width="1"></line>
+              <line x1="500" y1="330" x2="300" y2="460" stroke="#a8a8a8" stroke-width="1"></line>
+              <circle cx="500" cy="330" r="150" fill="none" stroke="#c6c6c6" stroke-width="1" stroke-dasharray="6 5"></circle>
+            </svg>
+
+            <div style="position: absolute; left: 350px; top: 282px; width: 300px; height: 96px; background: #161616; color: #ffffff; padding: 14px 16px">
+              <div style="font: 400 11px/1 'IBM Plex Mono'; letter-spacing: 0.32px; color: #c6c6c6">T0 · WORK ZONE · 2 ITEMS</div>
+              <div style="margin-top: 8px; font: 600 20px/1.1 'IBM Plex Mono'">P-1201A + M-1201A</div>
+              <div style="margin-top: 6px; font: 400 12px/1.3 'IBM Plex Sans'; color: #e0e0e0">Mechanically inseparable — CI-10</div>
+            </div>
+
+            <div onClick="{{ pick.P01 }}" style="position: absolute; left: 706px; top: 44px; width: 288px; cursor: pointer; background: #ffffff; border: 1px solid #c6c6c6; border-left: 4px solid #0f62fe; padding: 8px 10px">
+              <div style="display: flex; align-items: center; gap: 6px">
+                <span style="width: 9px; height: 9px; border: 2px solid #0f62fe"></span>
+                <span style="width: 9px; height: 9px; background: #6929c4; transform: rotate(45deg)"></span>
+                <span style="width: 8px; height: 8px; border: 2px solid #009d9a; border-radius: 50%"></span>
+                <span style="margin-left: 4px; font: 600 13px/1 'IBM Plex Mono'">V-2210 · SP-01 · V-2211</span>
+              </div>
+              <div style="margin-top: 5px; font: 400 12px/1.3 'IBM Plex Sans'">6"-HC-1204 suction · sour crude</div>
+              <div style="margin-top: 3px; font: 400 11px/1 'IBM Plex Mono'; color: #525252">HSC-4 · EC-B · 2 barriers, ≥1 positive + bleed</div>
+            </div>
+
+            <div onClick="{{ pick.P02 }}" style="position: absolute; left: 706px; top: 134px; width: 288px; cursor: pointer; background: #ffffff; border: 1px solid #c6c6c6; border-left: 4px solid #0f62fe; padding: 8px 10px">
+              <div style="display: flex; align-items: center; gap: 6px">
+                <span style="width: 9px; height: 9px; border: 2px solid #0f62fe"></span>
+                <span style="width: 9px; height: 9px; background: #6929c4; transform: rotate(45deg)"></span>
+                <span style="width: 8px; height: 8px; border: 2px solid #009d9a; border-radius: 50%"></span>
+                <span style="margin-left: 4px; font: 600 13px/1 'IBM Plex Mono'">V-2213 · SP-02 · V-2214</span>
+              </div>
+              <div style="margin-top: 5px; font: 400 12px/1.3 'IBM Plex Sans'">4"-HC-1207 discharge · sour crude</div>
+              <div style="margin-top: 3px; font: 400 11px/1 'IBM Plex Mono'; color: #a2191f">CV-1201 rejected as barrier — §6.4</div>
+            </div>
+
+            <div onClick="{{ pick.P03 }}" style="position: absolute; left: 706px; top: 224px; width: 288px; cursor: pointer; background: #ffffff; border: 1px solid #c6c6c6; border-left: 4px solid #f1c21b; padding: 8px 10px">
+              <div style="display: flex; align-items: center; gap: 6px">
+                <span style="width: 9px; height: 9px; border: 2px solid #0f62fe"></span>
+                <span style="margin-left: 4px; font: 600 13px/1 'IBM Plex Mono'">SDV-1203 + air lock</span>
+              </div>
+              <div style="margin-top: 5px; font: 400 12px/1.3 'IBM Plex Sans'">4"-HC-1207 discharge, second barrier</div>
+              <div style="margin-top: 3px; font: 400 11px/1 'IBM Plex Mono'; color: #684e00">Deviation D-1 · actuated valve as barrier</div>
+            </div>
+
+            <div onClick="{{ pick.P04 }}" style="position: absolute; left: 706px; top: 314px; width: 288px; cursor: pointer; background: #ffffff; border: 1px solid #c6c6c6; border-left: 4px solid #0f62fe; padding: 8px 10px">
+              <div style="display: flex; align-items: center; gap: 6px">
+                <span style="width: 9px; height: 9px; border: 2px solid #0f62fe"></span>
+                <span style="width: 9px; height: 9px; background: #6929c4; transform: rotate(45deg)"></span>
+                <span style="margin-left: 4px; font: 600 13px/1 'IBM Plex Mono'">V-2219 + plug PL-01</span>
+              </div>
+              <div style="margin-top: 5px; font: 400 12px/1.3 'IBM Plex Sans'">2"-HC-1219 min-flow to V-1205</div>
+              <div style="margin-top: 3px; font: 400 11px/1 'IBM Plex Mono'; color: #525252">HSC-4 · small-bore rule REQ-D-02</div>
+            </div>
+
+            <div onClick="{{ pick.P05 }}" style="position: absolute; left: 706px; top: 404px; width: 288px; cursor: pointer; background: #ffffff; border: 1px solid #c6c6c6; border-left: 4px solid #0043ce; padding: 8px 10px">
+              <div style="display: flex; align-items: center; gap: 6px">
+                <span style="width: 9px; height: 9px; border: 2px solid #0f62fe"></span>
+                <span style="width: 9px; height: 9px; background: #6929c4; transform: rotate(45deg)"></span>
+                <span style="margin-left: 4px; font: 600 13px/1 'IBM Plex Mono'">V-2222 · blind BL-03</span>
+              </div>
+              <div style="margin-top: 5px; font: 400 12px/1.3 'IBM Plex Sans'">1"-FG casing vent → flare FG-1102</div>
+              <div style="margin-top: 3px; font: 400 11px/1 'IBM Plex Mono'; color: #0043ce">Header LIVE — declared by J. Okafor</div>
+            </div>
+
+            <div onClick="{{ pick.P06 }}" style="position: absolute; left: 706px; top: 494px; width: 288px; cursor: pointer; background: #ffffff; border: 1px solid #c6c6c6; border-left: 4px solid #0043ce; padding: 8px 10px">
+              <div style="display: flex; align-items: center; gap: 6px">
+                <span style="width: 9px; height: 9px; border: 2px solid #0f62fe"></span>
+                <span style="width: 9px; height: 9px; background: #6929c4; transform: rotate(45deg)"></span>
+                <span style="margin-left: 4px; font: 600 13px/1 'IBM Plex Mono'">V-2221 · cap CP-01</span>
+              </div>
+              <div style="margin-top: 5px; font: 400 12px/1.3 'IBM Plex Sans'">1"-CD casing drain → CD-1101</div>
+              <div style="margin-top: 3px; font: 400 11px/1 'IBM Plex Mono'; color: #0043ce">Header depressurised — declared</div>
+            </div>
+
+            <div onClick="{{ pick.P07 }}" style="position: absolute; left: 6px; top: 74px; width: 288px; cursor: pointer; background: #ffffff; border: 1px solid #c6c6c6; border-right: 4px solid #0f62fe; padding: 8px 10px; text-align: right">
+              <div style="display: flex; align-items: center; justify-content: flex-end; gap: 6px">
+                <span style="font: 600 13px/1 'IBM Plex Mono'">V-2231 · V-2232 · V-2233</span>
+                <span style="width: 9px; height: 9px; border: 2px solid #0f62fe"></span>
+                <span style="width: 9px; height: 9px; border: 2px solid #0f62fe"></span>
+                <span style="width: 8px; height: 8px; border: 2px solid #009d9a; border-radius: 50%"></span>
+              </div>
+              <div style="margin-top: 5px; font: 400 12px/1.3 'IBM Plex Sans'">1½"-SF-1108 seal flush, API 682 Plan 32</div>
+              <div style="margin-top: 3px; font: 400 11px/1 'IBM Plex Mono'; color: #525252">HSC-3 · EC-B · double block and bleed</div>
+            </div>
+
+            <div onClick="{{ pick.P08 }}" style="position: absolute; left: 6px; top: 164px; width: 288px; cursor: pointer; background: #fff1f1; border: 1px solid #ff8389; border-right: 4px solid #da1e28; padding: 8px 10px; text-align: right">
+              <div style="display: flex; align-items: center; justify-content: flex-end; gap: 6px">
+                <span style="font: 600 13px/1 'IBM Plex Mono'">V-2236 · V-2237</span>
+                <span style="width: 9px; height: 9px; border: 2px solid #0f62fe"></span>
+                <span style="width: 9px; height: 9px; border: 2px solid #0f62fe"></span>
+              </div>
+              <div style="margin-top: 5px; font: 400 12px/1.3 'IBM Plex Sans'">¾"-BF-1109 barrier fluid supply</div>
+              <div style="margin-top: 3px; font: 400 11px/1 'IBM Plex Mono'; color: #a2191f">Fluid unmapped → HSC-4 default · GAP</div>
+            </div>
+
+            <div onClick="{{ pick.P09 }}" style="position: absolute; left: 6px; top: 254px; width: 288px; cursor: pointer; background: #ffffff; border: 1px solid #c6c6c6; border-right: 4px solid #0f62fe; padding: 8px 10px; text-align: right">
+              <div style="display: flex; align-items: center; justify-content: flex-end; gap: 6px">
+                <span style="font: 600 13px/1 'IBM Plex Mono'">V-2241 · V-2242</span>
+                <span style="width: 9px; height: 9px; border: 2px solid #0f62fe"></span>
+                <span style="width: 8px; height: 8px; border: 2px solid #009d9a; border-radius: 50%"></span>
+              </div>
+              <div style="margin-top: 5px; font: 400 12px/1.3 'IBM Plex Sans'">2"-CW-1106 seal cooler supply</div>
+              <div style="margin-top: 3px; font: 400 11px/1 'IBM Plex Mono'; color: #525252">HSC-1 · one valve + bleed · Area 11</div>
+            </div>
+
+            <div onClick="{{ pick.P10 }}" style="position: absolute; left: 6px; top: 344px; width: 288px; cursor: pointer; background: #ffffff; border: 1px solid #c6c6c6; border-right: 4px solid #0f62fe; padding: 8px 10px; text-align: right">
+              <div style="display: flex; align-items: center; justify-content: flex-end; gap: 6px">
+                <span style="font: 600 13px/1 'IBM Plex Mono'">V-2243</span>
+                <span style="width: 9px; height: 9px; border: 2px solid #0f62fe"></span>
+              </div>
+              <div style="margin-top: 5px; font: 400 12px/1.3 'IBM Plex Sans'">2"-CW-1106 cooler return</div>
+              <div style="margin-top: 3px; font: 400 11px/1 'IBM Plex Mono'; color: #525252">HSC-1 · one valve · Area 11</div>
+            </div>
+
+            <div onClick="{{ pick.P11 }}" style="position: absolute; left: 6px; top: 434px; width: 288px; cursor: pointer; background: #ffffff; border: 1px solid #c6c6c6; border-right: 4px solid #0f62fe; padding: 8px 10px; text-align: right">
+              <div style="display: flex; align-items: center; justify-content: flex-end; gap: 6px">
+                <span style="font: 600 13px/1 'IBM Plex Mono'">V-2251 · V-2252 + plugs</span>
+                <span style="width: 9px; height: 9px; border: 2px solid #0f62fe"></span>
+                <span style="width: 9px; height: 9px; background: #6929c4; transform: rotate(45deg)"></span>
+              </div>
+              <div style="margin-top: 5px; font: 400 12px/1.3 'IBM Plex Sans'">½" PI-1204 / PG-1207 tappings</div>
+              <div style="margin-top: 3px; font: 400 11px/1 'IBM Plex Mono'; color: #525252">Valve plus plug regardless of matrix</div>
+            </div>
+
+            <div style="position: absolute; left: 16px; bottom: 16px; display: flex; flex-wrap: wrap; gap: 18px; padding: 10px 14px; background: #ffffff; border: 1px solid #e0e0e0">
+              <span style="display: inline-flex; align-items: center; gap: 7px; font: 400 12px/1 'IBM Plex Sans'"><span style="width: 9px; height: 9px; border: 2px solid #0f62fe"></span>valve barrier</span>
+              <span style="display: inline-flex; align-items: center; gap: 7px; font: 400 12px/1 'IBM Plex Sans'"><span style="width: 9px; height: 9px; background: #6929c4; transform: rotate(45deg)"></span>positive isolation</span>
+              <span style="display: inline-flex; align-items: center; gap: 7px; font: 400 12px/1 'IBM Plex Sans'"><span style="width: 8px; height: 8px; border: 2px solid #009d9a; border-radius: 50%"></span>bleed / vent</span>
+              <span style="display: inline-flex; align-items: center; gap: 7px; font: 400 12px/1 'IBM Plex Sans'"><span style="width: 3px; height: 12px; background: #0043ce"></span>depends on a declaration</span>
+              <span style="display: inline-flex; align-items: center; gap: 7px; font: 400 12px/1 'IBM Plex Sans'"><span style="width: 3px; height: 12px; background: #da1e28"></span>blocking gap</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="padding: 24px 32px 8px">
+          <h2 style="margin: 0; font: 600 20px/1.3 'IBM Plex Sans'">Cascade and dependency tree</h2>
+          <div style="margin-top: 6px; font: 400 13px/1.3 'IBM Plex Sans'; color: #525252">T2 is expanded by default — those are the items that make a plan fail in execution. Each row names the rule that fired — REQ-CI-01, REQ-CI-04.</div>
+          <div style="margin-top: 16px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px; background: #e0e0e0; border: 1px solid #e0e0e0">
+            <sc-for list="{{ tiers }}" as="t" hint-placeholder-count="5">
+              <div style="background: #ffffff; padding: 14px 14px 16px">
+                <div style="display: flex; align-items: baseline; gap: 8px">
+                  <span style="font: 600 15px/1 'IBM Plex Mono'; color: {{ t.fg }}">{{ t.id }}</span>
+                  <span style="font: 400 12px/1.3 'IBM Plex Sans'; color: #525252">{{ t.meaning }}</span>
+                </div>
+                <div style="margin-top: 4px; font: 400 11px/1.4 'IBM Plex Mono'; color: #6f6f6f">{{ t.obligation }}</div>
+                <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px">
+                  <sc-for list="{{ t.items }}" as="i" hint-placeholder-count="2">
+                    <div style="padding: 10px 12px; background: #f4f4f4; border-left: 3px solid {{ t.fg }}">
+                      <div style="font: 600 14px/1.2 'IBM Plex Mono'">{{ i.tag }}</div>
+                      <div style="margin-top: 5px; font: 400 12px/1.4 'IBM Plex Sans'; color: #393939">{{ i.note }}</div>
+                      <div style="margin-top: 6px; font: 400 11px/1 'IBM Plex Mono'; color: #6f6f6f">{{ i.rule }}</div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="padding: 24px 32px 8px">
+          <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 24px">
+            <h2 style="margin: 0; font: 600 20px/1.3 'IBM Plex Sans'">Isolation schedule</h2>
+            <div style="font: 400 13px/1.3 'IBM Plex Sans'; color: #525252">Grouped by area — this boundary needs two authorities. REQ-F7-01, REQ-XD-07.</div>
+          </div>
+          <div style="margin-top: 16px; border: 1px solid #e0e0e0">
+            <div style="display: grid; grid-template-columns: 64px 1.5fr 1.3fr 60px 56px 1.5fr 1.2fr 130px; gap: 16px; padding: 0 16px; height: 40px; align-items: center; background: #e0e0e0; font: 600 12px/1.2 'IBM Plex Sans'; letter-spacing: 0.16px">
+              <div>Point</div><div>Devices</div><div>Line and fluid</div><div>HSC</div><div>EC</div><div>Required configuration</div><div>Proving</div><div>Provenance</div>
+            </div>
+            <sc-for list="{{ areas }}" as="a" hint-placeholder-count="2">
+              <div>
+                <div style="display: flex; align-items: center; gap: 14px; padding: 10px 16px; background: #f4f4f4; border-top: 1px solid #e0e0e0; border-bottom: 1px solid #e0e0e0">
+                  <span style="font: 600 14px/1.2 'IBM Plex Sans'">{{ a.name }}</span>
+                  <span style="font: 400 12px/1 'IBM Plex Mono'; color: #525252">{{ a.count }} points</span>
+                  <span style="margin-left: auto; font: 400 12px/1 'IBM Plex Mono'; color: #525252">{{ a.authority }}</span>
+                </div>
+                <sc-for list="{{ a.rows }}" as="r" hint-placeholder-count="6">
+                  <div onClick="{{ r.onPick }}" style="{{ r.rowStyle }}">
+                    <div style="font: 400 13px/1.2 'IBM Plex Mono'; color: #0f62fe">{{ r.id }}</div>
+                    <div style="font: 400 13px/1.35 'IBM Plex Mono'">{{ r.devices }}</div>
+                    <div style="font: 400 13px/1.35 'IBM Plex Sans'">{{ r.line }}</div>
+                    <div style="font: 600 13px/1.2 'IBM Plex Mono'; color: {{ r.hscFg }}">{{ r.hsc }}</div>
+                    <div style="font: 400 13px/1.2 'IBM Plex Mono'">{{ r.ec }}</div>
+                    <div style="font: 400 13px/1.35 'IBM Plex Sans'">{{ r.rbc }}</div>
+                    <div style="font: 400 12px/1.35 'IBM Plex Sans'; color: #525252">{{ r.proving }}</div>
+                    <div>
+                      <span style="display: inline-flex; align-items: center; height: 20px; padding: 0 8px; background: {{ r.pBg }}; color: {{ r.pFg }}; border-left: 3px {{ r.pEdge }} {{ r.pFg }}; font: 400 10px/1 'IBM Plex Mono'; letter-spacing: 0.32px">{{ r.pLabel }}</span>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="padding: 24px 32px 8px; display: grid; grid-template-columns: 1.15fr 1fr; gap: 32px; align-items: start">
+          <div>
+            <h2 style="margin: 0; font: 600 20px/1.3 'IBM Plex Sans'">Sequence</h2>
+            <div style="margin-top: 6px; font: 400 13px/1.3 'IBM Plex Sans'; color: #525252">Safe by construction. Hold points require sign-off — REQ-F6-02, REQ-F6-04. Showing 12 of 18 steps.</div>
+            <div style="margin-top: 16px; border: 1px solid #e0e0e0">
+              <sc-for list="{{ steps }}" as="s" hint-placeholder-count="12">
+                <div style="{{ s.rowStyle }}">
+                  <div style="font: 600 14px/1.2 'IBM Plex Mono'; color: {{ s.numFg }}">{{ s.n }}</div>
+                  <div>
+                    <div style="font: 400 14px/1.4 'IBM Plex Sans'">{{ s.action }}</div>
+                    <div style="margin-top: 4px; font: 400 11px/1.4 'IBM Plex Mono'; color: #6f6f6f">{{ s.meta }}</div>
+                  </div>
+                  <div style="font: 400 12px/1.3 'IBM Plex Sans'; color: #525252; text-align: right">{{ s.role }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          <div>
+            <h2 style="margin: 0; font: 600 20px/1.3 'IBM Plex Sans'">Ask the plan</h2>
+            <div style="margin-top: 6px; font: 400 13px/1.3 'IBM Plex Sans'; color: #525252">Questions map to deterministic queries over the plan model. Answers are logged — REQ-F8-02.</div>
+            <div style="margin-top: 16px; display: flex; align-items: stretch; border: 1px solid #8d8d8d">
+              <input type="text" placeholder="Why is V-2210 in the boundary?" style="flex: 1 1 auto; height: 48px; padding: 0 16px; border: 0; background: #f4f4f4; font: 400 14px 'IBM Plex Sans'; outline: none">
+              <button type="button" style="flex: none; height: 48px; padding: 0 20px; background: #0f62fe; color: #ffffff; border: 0; font: 400 14px 'IBM Plex Sans'; cursor: pointer">Ask</button>
+            </div>
+            <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 10px">
+              <sc-for list="{{ asked }}" as="q" hint-placeholder-count="3">
+                <div style="border: 1px solid #e0e0e0; padding: 14px 16px">
+                  <div style="font: 600 14px/1.4 'IBM Plex Sans'">{{ q.q }}</div>
+                  <div style="margin-top: 8px; font: 400 14px/1.5 'IBM Plex Sans'; color: #393939">{{ q.a }}</div>
+                  <div style="margin-top: 8px; display: flex; align-items: center; gap: 10px">
+                    <span style="display: inline-flex; align-items: center; height: 20px; padding: 0 8px; background: #e0e0e0; border-left: 3px solid #161616; font: 400 10px/1 'IBM Plex Mono'; letter-spacing: 0.32px">DETERMINISTIC QUERY</span>
+                    <span style="font: 400 11px/1 'IBM Plex Mono'; color: #6f6f6f">{{ q.intent }}</span>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+
+        <sc-if value="{{ showAnn }}" hint-placeholder-val="{{ true }}">
+        <div style="margin: 24px 32px 40px; padding: 16px 20px; background: #f4f4f4; border-top: 3px solid #161616">
+          <div style="font: 600 12px/1 'IBM Plex Sans'; letter-spacing: 0.32px; text-transform: uppercase">Requirements demonstrated on this screen</div>
+          <div style="margin-top: 10px; font: 400 13px/1.7 'IBM Plex Mono'; color: #393939">REQ-OM-03 lifecycle · REQ-OM-04 authoriser identity and pinned versions · REQ-SA-03 version pinning strip · REQ-IN-02 unknown fluid → HSC-4 · REQ-IN-04 declarer named against every assumption · REQ-IN-06 PSD validity · REQ-D-01 matrix override with justification · REQ-D-02 small-bore rule · REQ-D-09 derivation trace per point · REQ-EP-01 completeness discrepancy blocks authorisation · REQ-CI-01/04 tiers and rule provenance · REQ-F7-01 schedule · REQ-F7-05 assumption and gap register · REQ-F8-02 interrogation · REQ-XD-05 revision mismatch · REQ-XD-07 multi-area authorisation · REQ-XD-12 boundary schematic · P2 mandatory floor · P4 provenance on the surface · P5 individual acknowledgement · REQ-UX-N01/N02 no bulk accept, no green badge</div>
+        </div>
+        </sc-if>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isU2 }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="padding: 24px 32px 0">
+          <div style="font: 400 12px/1 'IBM Plex Mono'; letter-spacing: 0.32px; color: #525252">BOUNDARY EXPLORER · U2</div>
+          <h1 style="margin: 10px 0 0; font: 300 32px/1.2 'IBM Plex Sans'">Boundary on the drawings</h1>
+          <div style="margin-top: 10px; font: 400 14px/1.4 'IBM Plex Sans'; color: #525252">The traversal has no concept of a drawing — sheets are render metadata only. Continuation markers carry each path across sheet edges. REQ-XD-01, REQ-XD-11, REQ-XD-13.</div>
+        </div>
+
+        <div style="margin-top: 20px; padding: 0 32px; display: flex; align-items: flex-end; gap: 1px">
+          <sc-for list="{{ sheets }}" as="s" hint-placeholder-count="3">
+            <button type="button" onClick="{{ s.onPick }}" style="{{ s.style }}">
+              <span style="font: 400 13px/1.2 'IBM Plex Mono'">{{ s.id }}</span>
+              <span style="font: 400 11px/1.2 'IBM Plex Sans'; color: #525252">rev {{ s.rev }} · {{ s.pts }} points</span>
+            </button>
+          </sc-for>
+        </div>
+
+        <div style="padding: 0 32px 8px; display: grid; grid-template-columns: 1fr 360px; gap: 20px; align-items: start">
+          <div style="border: 1px solid #e0e0e0; background: #ffffff">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 14px; border-bottom: 1px solid #e0e0e0; background: #f4f4f4">
+              <div style="font: 400 13px/1.2 'IBM Plex Mono'">{{ sheet.id }} — {{ sheet.title }}</div>
+              <div style="display: flex; gap: 8px">
+                <button type="button" onClick="{{ toggleTrace }}" style="{{ traceBtn }}">Trace to live source</button>
+                <button type="button" style="height: 32px; padding: 0 12px; background: transparent; border: 1px solid #0f62fe; color: #0f62fe; font: 400 12px 'IBM Plex Sans'; cursor: pointer">Filters</button>
+              </div>
+            </div>
+
+            <svg viewBox="0 0 1000 620" width="100%" style="display: block; background: #ffffff">
+              <rect x="24" y="24" width="952" height="572" fill="none" stroke="#8d8d8d" stroke-width="1"></rect>
+              <text x="150" y="18" font-family="IBM Plex Mono" font-size="10" fill="#8d8d8d">B</text>
+              <text x="300" y="18" font-family="IBM Plex Mono" font-size="10" fill="#8d8d8d">C</text>
+              <text x="450" y="18" font-family="IBM Plex Mono" font-size="10" fill="#8d8d8d">D</text>
+              <text x="600" y="18" font-family="IBM Plex Mono" font-size="10" fill="#8d8d8d">E</text>
+              <text x="750" y="18" font-family="IBM Plex Mono" font-size="10" fill="#8d8d8d">F</text>
+              <text x="900" y="18" font-family="IBM Plex Mono" font-size="10" fill="#8d8d8d">G</text>
+              <text x="10" y="150" font-family="IBM Plex Mono" font-size="10" fill="#8d8d8d">3</text>
+              <text x="10" y="300" font-family="IBM Plex Mono" font-size="10" fill="#8d8d8d">5</text>
+              <text x="10" y="450" font-family="IBM Plex Mono" font-size="10" fill="#8d8d8d">7</text>
+
+              <path d="M120 120 L620 120 L620 428" stroke="#525252" stroke-width="2" fill="none"></path>
+              <text x="336" y="110" font-family="IBM Plex Mono" font-size="11" fill="#161616">1½"-SF-1108 SEAL FLUSH (PLAN 32)</text>
+              <path d="M100 250 L360 250" stroke="#525252" stroke-width="2" fill="none"></path>
+              <text x="196" y="242" font-family="IBM Plex Mono" font-size="11" fill="#161616">2"-CW-1106 SUPPLY</text>
+              <rect x="360" y="222" width="86" height="56" fill="none" stroke="#525252" stroke-width="2"></rect>
+              <text x="372" y="255" font-family="IBM Plex Mono" font-size="12" font-weight="600" fill="#161616">EX-1231</text>
+              <path d="M446 250 L520 250 L520 210 L100 210" stroke="#525252" stroke-width="2" fill="none"></path>
+              <text x="252" y="203" font-family="IBM Plex Mono" font-size="11" fill="#161616">2"-CW RETURN → PID-1101 D3</text>
+
+              <path d="M60 450 L560 450" stroke="#525252" stroke-width="2" fill="none"></path>
+              <text x="66" y="440" font-family="IBM Plex Mono" font-size="11" fill="#161616">6"-HC-1204 SUCTION · SOUR CRUDE</text>
+              <polygon points="320,438 320,462 350,450" fill="none" stroke="#525252" stroke-width="2"></polygon>
+              <polygon points="380,438 380,462 350,450" fill="none" stroke="#525252" stroke-width="2"></polygon>
+              <text x="336" y="490" font-family="IBM Plex Mono" font-size="11" fill="#161616">ST-1201A</text>
+
+              <circle cx="600" cy="450" r="30" fill="#ffffff" stroke="#161616" stroke-width="2"></circle>
+              <path d="M600 420 L600 400 L600 380" stroke="#161616" stroke-width="2" fill="none"></path>
+              <text x="576" y="502" font-family="IBM Plex Mono" font-size="13" font-weight="600" fill="#161616">P-1201A</text>
+              <path d="M600 380 L860 380 L860 180" stroke="#525252" stroke-width="2" fill="none"></path>
+              <text x="676" y="370" font-family="IBM Plex Mono" font-size="11" fill="#161616">4"-HC-1207 DISCHARGE</text>
+              <path d="M646 372 L662 380 L646 388 Z M666 368 L666 392" fill="none" stroke="#525252" stroke-width="2"></path>
+              <text x="636" y="412" font-family="IBM Plex Mono" font-size="10" fill="#6f6f6f">CV-1201</text>
+
+              <path d="M760 380 L760 520 L900 520" stroke="#525252" stroke-width="2" fill="none"></path>
+              <text x="776" y="398" font-family="IBM Plex Mono" font-size="11" fill="#161616">2"-HC-1219 MIN-FLOW → V-1205</text>
+              <path d="M600 480 L600 560 L900 560" stroke="#525252" stroke-width="2" fill="none"></path>
+              <text x="424" y="582" font-family="IBM Plex Mono" font-size="11" fill="#161616">1"-CD CASING DRAIN → CD-1101</text>
+              <path d="M560 450 L560 300 L100 300" stroke="#525252" stroke-width="2" fill="none"></path>
+              <text x="300" y="292" font-family="IBM Plex Mono" font-size="11" fill="#161616">1"-FG CASING VENT → FLARE FG-1102</text>
+              <polygon points="100,290 62,290 44,300 62,310 100,310" fill="#fcf4d6" stroke="#f1c21b" stroke-width="2"></polygon>
+              <text x="48" y="328" font-family="IBM Plex Mono" font-size="10" fill="#684e00">PID-2107 B3</text>
+
+              <path d="M250 500 L700 500 L700 470 L790 470 L790 410 L940 410 L940 240 L700 240 L700 90 L250 90 L250 150 L160 150 L160 320 L250 320 Z" fill="rgba(15,98,254,0.05)" stroke="#0f62fe" stroke-width="2.5" stroke-dasharray="10 6"></path>
+              <text x="268" y="368" font-family="IBM Plex Mono" font-size="11" font-weight="600" fill="#0f62fe">ISOLATION BOUNDARY · 11 PATHS</text>
+
+              <rect x="240" y="438" width="20" height="24" fill="#ffffff" stroke="#0f62fe" stroke-width="3"></rect>
+              <text x="176" y="424" font-family="IBM Plex Mono" font-size="11" font-weight="600" fill="#0f62fe">P-01 V-2210</text>
+              <polygon points="290,438 302,450 290,462 278,450" fill="#6929c4"></polygon>
+              <text x="272" y="424" font-family="IBM Plex Mono" font-size="11" font-weight="600" fill="#6929c4">SP-01</text>
+              <path d="M272 450 L272 488" stroke="#009d9a" stroke-width="2" fill="none"></path>
+              <circle cx="272" cy="494" r="7" fill="#ffffff" stroke="#009d9a" stroke-width="3"></circle>
+              <text x="222" y="518" font-family="IBM Plex Mono" font-size="11" font-weight="600" fill="#009d9a">V-2211</text>
+              <rect x="850" y="228" width="20" height="24" fill="#ffffff" stroke="#0f62fe" stroke-width="3"></rect>
+              <text x="880" y="244" font-family="IBM Plex Mono" font-size="11" font-weight="600" fill="#0f62fe">P-02 V-2213</text>
+              <rect x="750" y="458" width="20" height="24" fill="#ffffff" stroke="#0f62fe" stroke-width="3"></rect>
+              <text x="782" y="476" font-family="IBM Plex Mono" font-size="11" font-weight="600" fill="#0f62fe">P-04 V-2219</text>
+              <rect x="590" y="488" width="20" height="24" fill="#ffffff" stroke="#0f62fe" stroke-width="3"></rect>
+              <text x="468" y="506" font-family="IBM Plex Mono" font-size="11" font-weight="600" fill="#0f62fe">P-06 V-2221</text>
+              <rect x="180" y="108" width="20" height="24" fill="#ffffff" stroke="#0f62fe" stroke-width="3"></rect>
+              <rect x="240" y="108" width="20" height="24" fill="#ffffff" stroke="#0f62fe" stroke-width="3"></rect>
+              <text x="150" y="98" font-family="IBM Plex Mono" font-size="11" font-weight="600" fill="#0f62fe">P-07 DBB V-2231 / V-2232</text>
+              <rect x="150" y="238" width="20" height="24" fill="#ffffff" stroke="#0f62fe" stroke-width="3"></rect>
+              <text x="66" y="232" font-family="IBM Plex Mono" font-size="11" font-weight="600" fill="#0f62fe">P-09 V-2241</text>
+              <rect x="150" y="198" width="20" height="24" fill="#ffffff" stroke="#0f62fe" stroke-width="3"></rect>
+              <text x="66" y="192" font-family="IBM Plex Mono" font-size="11" font-weight="600" fill="#0f62fe">P-10 V-2243</text>
+              <rect x="150" y="288" width="20" height="24" fill="#ffffff" stroke="#0f62fe" stroke-width="3"></rect>
+              <polygon points="120,288 132,300 120,312 108,300" fill="#6929c4"></polygon>
+              <text x="106" y="282" font-family="IBM Plex Mono" font-size="11" font-weight="600" fill="#0f62fe">P-05 V-2222 · BL-03</text>
+
+              <polygon points="900,168 950,168 976,180 950,192 900,192" fill="#fcf4d6" stroke="#f1c21b" stroke-width="2"></polygon>
+              <text x="906" y="184" font-family="IBM Plex Mono" font-size="10" fill="#684e00">OPC-14</text>
+              <text x="970" y="152" text-anchor="end" font-family="IBM Plex Mono" font-size="11" fill="#161616">boundary continues on PID-2107 at F7</text>
+              <text x="970" y="138" text-anchor="end" font-family="IBM Plex Mono" font-size="11" fill="#161616">2 further isolation points on this path</text>
+
+              <rect x="712" y="502" width="262" height="92" fill="#ffffff" stroke="#8d8d8d" stroke-width="1"></rect>
+              <text x="722" y="520" font-family="IBM Plex Mono" font-size="11" fill="#161616">PID-2103 REV C</text>
+              <text x="722" y="538" font-family="IBM Plex Mono" font-size="11" fill="#525252">CRUDE CHARGE PUMPS P-1201A/B</text>
+              <text x="722" y="556" font-family="IBM Plex Mono" font-size="11" fill="#525252">AREA 12 · UNIT 12-CDU</text>
+              <text x="722" y="573" font-family="IBM Plex Mono" font-size="10" fill="#525252">8 OF 14 POINTS ON THIS SHEET</text>
+              <text x="722" y="588" font-family="IBM Plex Mono" font-size="10" fill="#8d8d8d">SCHEMATIC — SIMPLIFIED SYMBOLS</text>
+            </svg>
+
+            <div style="display: flex; align-items: center; gap: 16px; padding: 12px 14px; border-top: 1px solid #e0e0e0; background: #f4f4f4">
+              <span style="font: 400 12px/1.3 'IBM Plex Sans'; color: #525252">Cross-sheet paths</span>
+              <button type="button" style="height: 32px; padding: 0 12px; background: #ffffff; border: 1px solid #c6c6c6; font: 400 12px 'IBM Plex Mono'; cursor: pointer">P-02 → PID-2107 F7</button>
+              <button type="button" style="height: 32px; padding: 0 12px; background: #ffffff; border: 1px solid #c6c6c6; font: 400 12px 'IBM Plex Mono'; cursor: pointer">P-05 → PID-2107 B3</button>
+              <button type="button" style="height: 32px; padding: 0 12px; background: #ffffff; border: 1px solid #c6c6c6; font: 400 12px 'IBM Plex Mono'; cursor: pointer">P-09 → PID-1101 D2</button>
+              <span style="margin-left: auto; font: 400 12px/1.3 'IBM Plex Mono'; color: #a2191f">1 revision mismatch at OPC-14</span>
+            </div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 16px">
+            <div style="border: 1px solid #e0e0e0">
+              <div style="padding: 12px 16px; background: #161616; color: #ffffff; font: 600 14px/1.2 'IBM Plex Sans'">Derivation trace · {{ sel.id }}</div>
+              <div style="padding: 14px 16px">
+                <div style="font: 600 15px/1.3 'IBM Plex Mono'">{{ sel.devices }}</div>
+                <div style="margin-top: 6px; font: 400 13px/1.4 'IBM Plex Sans'; color: #525252">{{ sel.line }}</div>
+                <div style="margin-top: 14px; display: flex; flex-direction: column; gap: 12px">
+                  <sc-for list="{{ sel.trace }}" as="t" hint-placeholder-count="8">
+                    <div>
+                      <div style="font: 400 11px/1 'IBM Plex Mono'; letter-spacing: 0.32px; color: #6f6f6f; text-transform: uppercase">{{ t.k }}</div>
+                      <div style="margin-top: 4px; font: 400 13px/1.45 'IBM Plex Sans'">{{ t.v }}</div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </div>
+
+            <div style="border: 1px solid #e0e0e0">
+              <div style="padding: 12px 16px; border-bottom: 1px solid #e0e0e0; font: 600 14px/1.2 'IBM Plex Sans'">What if</div>
+              <div style="padding: 14px 16px; display: flex; flex-direction: column; gap: 12px">
+                <sc-for list="{{ whatIfs }}" as="w" hint-placeholder-count="3">
+                  <button type="button" onClick="{{ w.onPick }}" style="{{ w.style }}">{{ w.label }}</button>
+                </sc-for>
+                <div style="padding: 12px 14px; background: {{ whatIfResult.bg }}; border-left: 3px solid {{ whatIfResult.fg }}">
+                  <div style="font: 600 13px/1.3 'IBM Plex Sans'; color: {{ whatIfResult.fg }}">{{ whatIfResult.title }}</div>
+                  <div style="margin-top: 6px; font: 400 13px/1.5 'IBM Plex Sans'; color: #393939">{{ whatIfResult.body }}</div>
+                </div>
+                <div style="font: 400 11px/1.4 'IBM Plex Mono'; color: #6f6f6f">Recomputed by the deterministic core against the same pinned snapshot. Nothing is written to the plan.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="padding: 28px 32px 0">
+          <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 24px">
+            <h2 style="margin: 0; font: 600 20px/1.3 'IBM Plex Sans'">Is this boundary right?</h2>
+            <div style="font: 400 13px/1.3 'IBM Plex Sans'; color: #525252">The boundary comes from graph topology, so it is not editable here. It is verified branch by branch, and a wrong one is corrected at its cause.</div>
+          </div>
+
+          <div style="margin-top: 16px; display: grid; grid-template-columns: 1.15fr 1fr; gap: 28px; align-items: start">
+            <div style="border: 1px solid #e0e0e0">
+              <div style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid #e0e0e0; background: #f4f4f4">
+                <span style="font: 600 14px/1.2 'IBM Plex Sans'">Two independent mechanisms, compared</span>
+                <span style="margin-left: auto; font: 400 12px/1 'IBM Plex Mono'; color: #525252">traversal result vs centrifugal pump pattern · rev 12</span>
+              </div>
+              <div style="padding: 4px 0">
+                <sc-for list="{{ expected }}" as="e" hint-placeholder-count="12">
+                  <div style="display: grid; grid-template-columns: 1fr 160px 190px; gap: 12px; align-items: center; padding: 9px 16px; border-bottom: 1px solid #e0e0e0">
+                    <div style="font: 400 13px/1.3 'IBM Plex Sans'">{{ e.role }}</div>
+                    <div>
+                      <span style="display: inline-flex; align-items: center; height: 20px; padding: 0 8px; background: {{ e.bg }}; color: {{ e.fg }}; border-left: 3px {{ e.edge }} {{ e.fg }}; font: 400 10px/1 'IBM Plex Mono'; letter-spacing: 0.32px">{{ e.label }}</span>
+                    </div>
+                    <div>
+                      <sc-if value="{{ e.showWalk }}" hint-placeholder-val="{{ false }}">
+                        <button type="button" onClick="{{ e.onWalk }}" style="height: 32px; padding: 0 12px; background: transparent; border: 1px solid #0f62fe; color: #0f62fe; font: 400 12px 'IBM Plex Sans'; cursor: pointer">Confirm absent by walkdown</button>
+                      </sc-if>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="padding: 13px 16px; font: 400 13px/1.5 'IBM Plex Sans'; color: #393939">Where the two disagree the agent raises a discrepancy and never silently adds or drops a path. The reviewer resolves it one of two ways: the drawing is incomplete, or the connection genuinely does not exist and is recorded as confirmed absent, with a name against it.</div>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 16px">
+              <div style="border: 1px solid #e0e0e0">
+                <div style="padding: 12px 16px; border-bottom: 1px solid #e0e0e0; font: 600 14px/1.2 'IBM Plex Sans'">Report the boundary as wrong</div>
+                <div style="padding: 14px 16px; display: flex; flex-direction: column; gap: 8px">
+                  <sc-for list="{{ defects }}" as="d" hint-placeholder-count="3">
+                    <button type="button" onClick="{{ d.onPick }}" style="{{ d.style }}">{{ d.label }}</button>
+                  </sc-for>
+                  <div style="font: 400 12px/1.4 'IBM Plex Sans'; color: #525252">Each of these drops a pin at the drawing coordinates you clicked, so the correction lands on the sheet and grid reference rather than in a comment.</div>
+                </div>
+              </div>
+
+              <sc-if value="{{ defectPicked }}" hint-placeholder-val="{{ false }}">
+              <div style="border: 1px solid #0f62fe">
+                <div style="padding: 12px 16px; background: #0f62fe; color: #ffffff; font: 600 14px/1.2 'IBM Plex Sans'">Provisional re-derivation · nothing written</div>
+                <div style="padding: 14px 16px">
+                  <div style="font: 400 11px/1 'IBM Plex Mono'; color: #6f6f6f">{{ defect.pin }}</div>
+                  <div style="margin-top: 10px; font: 400 14px/1.5 'IBM Plex Sans'">{{ defect.impact }}</div>
+                  <div style="margin-top: 14px; padding: 12px 14px; background: #f4f4f4; border-left: 3px solid #161616; font: 400 13px/1.5 'IBM Plex Sans'; color: #393939">{{ defect.route }}</div>
+                  <div style="margin-top: 14px; display: flex; gap: 8px">
+                    <x-import component-from-global-scope="Plant360AIDesignSystem_796edf.Button" kind="primary" size="sm" hint-size="auto,32px">Submit graph defect</x-import>
+                    <x-import component-from-global-scope="Plant360AIDesignSystem_796edf.Button" kind="ghost" size="sm" hint-size="auto,32px">Attach walkdown photo</x-import>
+                  </div>
+                </div>
+              </div>
+              </sc-if>
+
+              <div style="border: 1px solid #e0e0e0">
+                <div style="padding: 12px 16px; border-bottom: 1px solid #e0e0e0; font: 600 14px/1.2 'IBM Plex Sans'">If the engine itself is at fault</div>
+                <div style="padding: 14px 16px; font: 400 13px/1.5 'IBM Plex Sans'; color: #393939">Where the graph is right, the pattern expected nothing, and the boundary is still wrong, the defect is in the traversal. That is an engineering defect, not a user correction: the plan is blocked, and the report carries the input hashes so the case is reproducible byte for byte and enters the regression suite before any release.</div>
+                <div style="margin-top: 0; padding: 0 16px 14px; font: 400 11px/1.5 'IBM Plex Mono'; color: #6f6f6f">graph g-2026.07.19-a3f · FHR 4.2 · SIC v1.7 · patterns r12 · PSD 06:15 · engine 3.4.1</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <sc-if value="{{ showAnn }}" hint-placeholder-val="{{ true }}">
+        <div style="margin: 24px 32px 40px; padding: 16px 20px; background: #f4f4f4; border-top: 3px solid #161616">
+          <div style="font: 600 12px/1 'IBM Plex Sans'; letter-spacing: 0.32px; text-transform: uppercase">Requirements demonstrated on this screen</div>
+          <div style="margin-top: 10px; font: 400 13px/1.7 'IBM Plex Mono'; color: #393939">REQ-SL-02 traversal and pattern as two independent mechanisms · REQ-EP-01/02 discrepancy raised, pattern never restricts the boundary · REQ-F8-04 reproducible from pinned versions · REQ-SA-05 failing case enters the regression suite · REQ-DEP-01 boundary drawn at original drawing coordinates · REQ-XD-01 drawing edges are not boundaries · REQ-XD-02/03 off-page connector integrity · REQ-XD-05 revision mismatch surfaced · REQ-XD-10 sheet index with point counts · REQ-XD-11 continuation markers · REQ-XD-13 single-action cross-sheet navigation · REQ-XD-14 trace path to a live source · REQ-F8-01/03 trace and confidence · A8.4 what-if recompute · P3 why is one click</div>
+        </div>
+        </sc-if>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isU3 }}" hint-placeholder-val="{{ false }}">
+      <div style="background: #e0e0e0; min-height: calc(100vh - 48px); padding: 24px 32px 48px">
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 32px">
+          <div>
+            <div style="font: 400 12px/1 'IBM Plex Mono'; letter-spacing: 0.32px; color: #525252">FIELD EXECUTION · U3</div>
+            <h1 style="margin: 10px 0 0; font: 300 30px/1.2 'IBM Plex Sans'">Field execution — 10" tablet, gloved, offline</h1>
+            <div style="margin-top: 8px; font: 400 14px/1.4 'IBM Plex Sans'; color: #393939">One step per screen. Reporting a problem is the same size as confirming — P6. Sequence is enforced; proving is never bundled with setting.</div>
+          </div>
+          <div style="display: flex; gap: 8px">
+            <button type="button" onClick="{{ prevStep }}" style="height: 40px; padding: 0 16px; background: #ffffff; border: 1px solid #8d8d8d; font: 400 14px 'IBM Plex Sans'; cursor: pointer">Previous state</button>
+            <button type="button" onClick="{{ nextStep }}" style="height: 40px; padding: 0 16px; background: #161616; color: #ffffff; border: 0; font: 400 14px 'IBM Plex Sans'; cursor: pointer">Next state</button>
+          </div>
+        </div>
+
+        <div style="margin-top: 24px; display: flex; justify-content: center">
+          <div style="width: 860px; max-width: 100%; background: {{ field.bg }}; color: {{ field.fg }}; border: 14px solid #161616; border-radius: 4px; overflow: hidden">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 20px; background: {{ field.chrome }}; color: {{ field.chromeFg }}">
+              <div style="display: flex; align-items: center; gap: 14px">
+                <span style="font: 600 15px/1 'IBM Plex Mono'">ISO-2026-0412</span>
+                <span style="font: 400 15px/1 'IBM Plex Sans'">{{ field.progress }}</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 12px">
+                <span style="display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; background: #f1c21b; color: #161616; font: 600 14px 'IBM Plex Sans'"><span style="width: 10px; height: 10px; background: #161616; border-radius: 50%"></span>OFFLINE · 3 QUEUED</span>
+              </div>
+            </div>
+
+            <div style="padding: 28px 28px 0">
+              <div style="display: inline-flex; align-items: center; height: 32px; padding: 0 12px; background: {{ field.kindBg }}; color: {{ field.kindFg }}; font: 600 14px/1 'IBM Plex Sans'; letter-spacing: 0.32px">{{ field.kind }}</div>
+              <div style="margin-top: 18px; font: 600 84px/0.95 'IBM Plex Mono'; letter-spacing: -1px">{{ field.tag }}</div>
+              <div style="margin-top: 14px; font: 400 30px/1.25 'IBM Plex Sans'">{{ field.action }}</div>
+            </div>
+
+            <div style="margin-top: 24px; padding: 0 28px; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: {{ field.hair }}">
+              <sc-for list="{{ field.facts }}" as="f" hint-placeholder-count="4">
+                <div style="background: {{ field.card }}; padding: 16px 18px">
+                  <div style="font: 400 13px/1 'IBM Plex Mono'; letter-spacing: 0.32px; color: {{ field.muted }}">{{ f.k }}</div>
+                  <div style="margin-top: 8px; font: 400 20px/1.3 'IBM Plex Sans'">{{ f.v }}</div>
+                </div>
+              </sc-for>
+            </div>
+
+            <sc-if value="{{ field.showTimer }}" hint-placeholder-val="{{ false }}">
+            <div style="margin: 24px 28px 0; padding: 20px; background: {{ field.card }}; border: 2px solid #0f62fe">
+              <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 20px">
+                <div style="font: 400 15px/1 'IBM Plex Mono'; color: {{ field.muted }}">PRESSURE DECAY HOLD · 30 MIN</div>
+                <div style="font: 300 56px/1 'IBM Plex Mono'">{{ field.timer }}</div>
+              </div>
+              <div style="margin-top: 14px; height: 8px; background: {{ field.hair }}">
+                <div style="width: {{ field.timerPct }}; height: 8px; background: #0f62fe"></div>
+              </div>
+              <div style="margin-top: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: end">
+                <div>
+                  <div style="font: 400 13px/1 'IBM Plex Mono'; color: {{ field.muted }}">ACCEPTANCE · SIC v1.7</div>
+                  <div style="margin-top: 6px; font: 400 18px/1.3 'IBM Plex Sans'">Rise ≤ 0.1 barg over the hold</div>
+                </div>
+                <div>
+                  <div style="font: 400 13px/1 'IBM Plex Mono'; color: {{ field.muted }}">FINAL READING · barg</div>
+                  <input type="text" placeholder="enter value" style="margin-top: 6px; width: 100%; height: 56px; padding: 0 16px; border: 0; border-bottom: 2px solid #8d8d8d; background: {{ field.input }}; color: {{ field.fg }}; font: 400 24px 'IBM Plex Mono'; outline: none">
+                </div>
+              </div>
+            </div>
+            </sc-if>
+
+            <sc-if value="{{ field.showBlind }}" hint-placeholder-val="{{ false }}">
+            <div style="margin: 24px 28px 0; padding: 20px; background: {{ field.card }}; border: 2px solid #6929c4">
+              <div style="font: 600 18px/1.3 'IBM Plex Sans'">Blind reconciliation — unique ID required in and out</div>
+              <div style="margin-top: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px">
+                <div>
+                  <div style="font: 400 13px/1 'IBM Plex Mono'; color: {{ field.muted }}">BLIND ID · SCAN OR TYPE</div>
+                  <input type="text" placeholder="SP-01-…" style="margin-top: 6px; width: 100%; height: 56px; padding: 0 16px; border: 0; border-bottom: 2px solid #8d8d8d; background: {{ field.input }}; color: {{ field.fg }}; font: 400 24px 'IBM Plex Mono'; outline: none">
+                </div>
+                <div>
+                  <div style="font: 400 13px/1 'IBM Plex Mono'; color: {{ field.muted }}">PHOTO · MANDATORY</div>
+                  <button type="button" style="margin-top: 6px; width: 100%; height: 56px; background: transparent; border: 2px dashed #8d8d8d; color: {{ field.fg }}; font: 400 16px 'IBM Plex Sans'; cursor: pointer">Take photo of installed spade</button>
+                </div>
+              </div>
+            </div>
+            </sc-if>
+
+            <sc-if value="{{ field.locked }}" hint-placeholder-val="{{ false }}">
+            <div style="margin: 24px 28px 0; padding: 20px; background: #fcf4d6; border-left: 4px solid #f1c21b; color: #161616">
+              <div style="font: 600 20px/1.3 'IBM Plex Sans'">Step locked — predecessor not confirmed</div>
+              <div style="margin-top: 8px; font: 400 17px/1.45 'IBM Plex Sans'">Step 8 (close V-2232, seal flush outboard block) has not been confirmed set. Overriding the sequence requires a supervisor action and is logged.</div>
+              <button type="button" style="margin-top: 16px; height: 48px; padding: 0 18px; background: transparent; border: 2px solid #161616; font: 400 16px 'IBM Plex Sans'; cursor: pointer">Request supervisor override</button>
+            </div>
+            </sc-if>
+
+            <div style="margin: 24px 28px 0; padding: 16px 18px; background: {{ field.card }}">
+              <div style="font: 400 13px/1 'IBM Plex Mono'; letter-spacing: 0.32px; color: {{ field.muted }}">WHY THIS STEP</div>
+              <div style="margin-top: 8px; font: 400 18px/1.4 'IBM Plex Sans'">{{ field.why }}</div>
+            </div>
+
+            <div style="margin: 24px 0 0; padding: 20px 28px 28px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px">
+              <button type="button" onClick="{{ nextStep }}" style="{{ field.primaryStyle }}">{{ field.primaryLabel }}</button>
+              <button type="button" onClick="{{ openReport }}" style="height: 72px; background: transparent; border: 2px solid #da1e28; color: #da1e28; font: 600 20px 'IBM Plex Sans'; cursor: pointer">Cannot complete — report</button>
+            </div>
+
+            <div style="padding: 0 28px 24px; display: flex; align-items: center; gap: 20px; font: 400 14px/1.4 'IBM Plex Sans'; color: {{ field.muted }}">
+              <span>Handover state: 6 set · 2 proved · 1 failed · 5 outstanding</span>
+              <button type="button" style="margin-left: auto; height: 48px; padding: 0 16px; background: transparent; border: 1px solid {{ field.muted }}; color: {{ field.fg }}; font: 400 15px 'IBM Plex Sans'; cursor: pointer">View all 18 steps</button>
+            </div>
+          </div>
+        </div>
+
+        <sc-if value="{{ report }}" hint-placeholder-val="{{ false }}">
+        <div style="margin: 24px auto 0; width: 860px; max-width: 100%; background: #ffffff; border: 1px solid #8d8d8d">
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; background: #da1e28; color: #ffffff">
+            <span style="font: 600 18px/1.2 'IBM Plex Sans'">Report a discrepancy — {{ field.tag }}</span>
+            <button type="button" onClick="{{ closeReport }}" style="height: 40px; padding: 0 14px; background: transparent; border: 1px solid #ffffff; color: #ffffff; font: 400 14px 'IBM Plex Sans'; cursor: pointer">Close</button>
+          </div>
+          <div style="padding: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px">
+            <sc-for list="{{ reportReasons }}" as="r" hint-placeholder-count="6">
+              <button type="button" style="min-height: 64px; padding: 0 18px; background: #f4f4f4; border: 1px solid #c6c6c6; font: 400 18px 'IBM Plex Sans'; text-align: left; cursor: pointer">{{ r }}</button>
+            </sc-for>
+          </div>
+          <div style="padding: 0 20px 20px">
+            <div style="font: 400 13px/1 'IBM Plex Mono'; color: #525252">NOTE AND PHOTO</div>
+            <textarea placeholder="What did you find?" style="margin-top: 8px; width: 100%; height: 88px; padding: 12px 16px; border: 0; border-bottom: 2px solid #8d8d8d; background: #f4f4f4; font: 400 17px 'IBM Plex Sans'; resize: none; outline: none"></textarea>
+            <div style="margin-top: 16px; padding: 14px 16px; background: #fff1f1; border-left: 3px solid #da1e28">
+              <div style="font: 600 15px/1.3 'IBM Plex Sans'">Reporting continued pressure on the bleed is a failed isolation</div>
+              <div style="margin-top: 6px; font: 400 15px/1.45 'IBM Plex Sans'; color: #393939">The plan will be re-derived with V-2210 marked as passing, the standard escalated or the boundary walked outward, and the current plan marked superseded and not executable. Re-authorisation is forced — REQ-D-08, S-30.</div>
+            </div>
+          </div>
+        </div>
+        </sc-if>
+
+        <sc-if value="{{ showAnn }}" hint-placeholder-val="{{ true }}">
+        <div style="margin: 24px auto 0; width: 860px; max-width: 100%; padding: 16px 20px; background: #f4f4f4; border-top: 3px solid #161616">
+          <div style="font: 600 12px/1 'IBM Plex Sans'; letter-spacing: 0.32px; text-transform: uppercase">Requirements demonstrated on this screen</div>
+          <div style="margin-top: 10px; font: 400 13px/1.7 'IBM Plex Mono'; color: #393939">REQ-OM-02 gloved, hazardous-area, offline · REQ-OM-06 handover state at a glance · REQ-NF-05 queued confirmations · REQ-D-06 proving method per point · REQ-D-08 failed proving triggers re-derivation · REQ-F6-04 hold points · A8.5 one step per screen, enforced sequence, blind IDs with photo · P6 equal weight for reporting · P7 procedural status language · REQ-UX-N04 no auto-advance · REQ-UX-A01 48 px targets, high contrast, one-handed</div>
+        </div>
+        </sc-if>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isU5 }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="padding: 24px 32px 0">
+          <div style="font: 400 12px/1 'IBM Plex Mono'; letter-spacing: 0.32px; color: #525252">CORRECTIONS · C1</div>
+          <h1 style="margin: 10px 0 0; font: 300 32px/1.2 'IBM Plex Sans'">When the derivation is wrong</h1>
+          <div style="margin-top: 10px; max-width: 1000px; font: 400 15px/1.5 'IBM Plex Sans'; color: #393939">The plan is not editable text — it is the output of deterministic rules over pinned inputs. So a correction never edits the answer; it changes what the answer was computed from, or it records a disagreement beside it. Both routes re-version the plan and force re-authorisation with a diff.</div>
+          <div style="margin-top: 14px; display: inline-flex; align-items: center; gap: 10px; padding: 10px 14px; background: #f4f4f4; border-left: 3px solid #161616; font: 400 13px/1.3 'IBM Plex Mono'">{{ versionLine }}</div>
+        </div>
+
+        <div style="padding: 24px 32px 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px">
+          <sc-for list="{{ routes }}" as="r" hint-placeholder-count="3">
+            <div style="padding: 18px 20px; border: 1px solid #e0e0e0; border-top: 3px solid {{ r.fg }}">
+              <div style="display: flex; align-items: baseline; gap: 10px">
+                <span style="font: 600 22px/1 'IBM Plex Mono'; color: {{ r.fg }}">{{ r.n }}</span>
+                <span style="font: 600 16px/1.3 'IBM Plex Sans'">{{ r.title }}</span>
+              </div>
+              <div style="margin-top: 10px; font: 400 14px/1.5 'IBM Plex Sans'; color: #393939">{{ r.body }}</div>
+              <div style="margin-top: 12px; font: 400 11px/1.3 'IBM Plex Mono'; color: #6f6f6f">RESOLVED BY · {{ r.who }}</div>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="padding: 28px 32px 0; display: grid; grid-template-columns: 1fr 420px; gap: 28px; align-items: start">
+          <div>
+            <h2 style="margin: 0; font: 600 20px/1.3 'IBM Plex Sans'">Route 1 — correct the input</h2>
+            <div style="margin-top: 6px; font: 400 13px/1.4 'IBM Plex Sans'; color: #525252">Worked example: the blocking gap on path P-08. The fluid is unmapped, so HSC-4 was applied as the conservative default. Mapping the service code is the correction — not overriding the barrier count.</div>
+
+            <div style="margin-top: 16px; border: 1px solid #e0e0e0">
+              <div style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: #f4f4f4; border-bottom: 1px solid #e0e0e0">
+                <span style="display: inline-flex; align-items: center; height: 20px; padding: 0 8px; background: #ffd7d9; color: #a2191f; border-left: 3px double #a2191f; font: 400 10px/1 'IBM Plex Mono'; letter-spacing: 0.32px">GAP</span>
+                <span style="font: 600 14px/1.2 'IBM Plex Sans'">COR-118 · FHR rev 4.2 · service_code_map</span>
+                <span style="margin-left: auto; font: 400 12px/1 'IBM Plex Mono'; color: #525252">controlled document — change requires an approver</span>
+              </div>
+              <div style="padding: 18px 16px; display: grid; grid-template-columns: 160px 1fr; gap: 16px; align-items: end">
+                <div>
+                  <div style="font: 400 11px/1 'IBM Plex Mono'; color: #525252">PID_SERVICE_CODE</div>
+                  <div style="margin-top: 8px; height: 40px; display: flex; align-items: center; padding: 0 12px; background: #f4f4f4; border-bottom: 1px solid #8d8d8d; font: 400 15px 'IBM Plex Mono'">BF</div>
+                </div>
+                <x-import component-from-global-scope="Plant360AIDesignSystem_796edf.Select" label-text="fluid_code — from FHR rev 4.2" items="{{ fluidItems }}" on-change="{{ onFluid }}" hint-size="100%,66px"></x-import>
+              </div>
+              <div style="padding: 0 16px 18px; display: flex; align-items: center; gap: 12px">
+                <x-import component-from-global-scope="Plant360AIDesignSystem_796edf.Button" kind="primary" size="md" on-click="{{ applyFix }}" disabled="{{ submitDisabled }}" hint-size="auto,40px">Submit correction and re-derive</x-import>
+                <x-import component-from-global-scope="Plant360AIDesignSystem_796edf.Button" kind="ghost" size="md" on-click="{{ revertFix }}" hint-size="auto,40px">Reset example</x-import>
+                <span style="font: 400 12px/1.4 'IBM Plex Sans'; color: #525252">Approver M. Whitfield is notified. The FHR revision increments; every plan built on rev 4.2 is flagged.</span>
+              </div>
+            </div>
+
+            <sc-if value="{{ applied }}" hint-placeholder-val="{{ false }}">
+            <div style="margin-top: 20px; border: 1px solid #0f62fe">
+              <div style="padding: 12px 16px; background: #0f62fe; color: #ffffff; font: 600 14px/1.2 'IBM Plex Sans'">Re-derived · v3 → v4 · what changed</div>
+              <div style="padding: 0 0 4px">
+                <sc-for list="{{ diff }}" as="d" hint-placeholder-count="6">
+                  <div style="display: grid; grid-template-columns: 1.1fr 1fr 1fr 190px; gap: 16px; align-items: start; padding: 13px 16px; border-bottom: 1px solid #e0e0e0">
+                    <div style="font: 600 13px/1.4 'IBM Plex Sans'">{{ d.what }}</div>
+                    <div style="font: 400 13px/1.4 'IBM Plex Sans'; color: #6f6f6f">{{ d.from }}</div>
+                    <div style="font: 400 13px/1.4 'IBM Plex Sans'; color: #161616">{{ d.to }}</div>
+                    <div>
+                      <span style="display: inline-flex; align-items: center; height: 20px; padding: 0 8px; background: {{ d.sigBg }}; color: {{ d.sigFg }}; border-left: 3px {{ d.sigEdge }} {{ d.sigFg }}; font: 400 10px/1 'IBM Plex Mono'; letter-spacing: 0.32px">{{ d.sigLabel }}</span>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="padding: 14px 16px; background: #fff1f1; font: 400 14px/1.5 'IBM Plex Sans'">Authorisation from v3 is invalidated. The diff is the default view on re-authorisation, not the whole plan — REQ-OM-05. Acknowledgements survive only for items this change did not touch.</div>
+            </div>
+            </sc-if>
+
+            <h2 style="margin: 28px 0 0; font: 600 20px/1.3 'IBM Plex Sans'">Route 2 — challenge a derived point</h2>
+            <div style="margin-top: 6px; font: 400 13px/1.4 'IBM Plex Sans'; color: #525252">Selected: P-01 · V-2210. Challenging does not delete anything. It opens a deviation for approval and stays visible on the certificate.</div>
+            <div style="margin-top: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px">
+              <sc-for list="{{ challenges }}" as="c" hint-placeholder-count="6">
+                <button type="button" onClick="{{ c.onPick }}" style="{{ c.style }}">{{ c.label }}</button>
+              </sc-for>
+            </div>
+            <sc-if value="{{ challengePicked }}" hint-placeholder-val="{{ false }}">
+            <div style="margin-top: 16px; border: 1px solid #f1c21b; border-left-width: 4px">
+              <div style="padding: 14px 16px">
+                <div style="font: 600 15px/1.3 'IBM Plex Sans'">Deviation request DEV-2026-044 · draft</div>
+                <div style="margin-top: 8px; font: 400 14px/1.5 'IBM Plex Sans'; color: #393939">Reason: {{ challengeText }}</div>
+                <div style="margin-top: 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px">
+                  <div>
+                    <div style="font: 400 11px/1 'IBM Plex Mono'; color: #525252">JUSTIFICATION · MANDATORY</div>
+                    <textarea placeholder="State why the derived requirement should not apply, and what compensates for it." style="margin-top: 8px; width: 100%; height: 76px; padding: 12px 14px; border: 0; border-bottom: 1px solid #8d8d8d; background: #f4f4f4; font: 400 14px 'IBM Plex Sans'; resize: none; outline: none"></textarea>
+                  </div>
+                  <div>
+                    <div style="font: 400 11px/1 'IBM Plex Mono'; color: #525252">APPROVER · MANDATORY</div>
+                    <div style="margin-top: 8px; height: 40px; display: flex; align-items: center; padding: 0 12px; background: #f4f4f4; border-bottom: 1px solid #8d8d8d; font: 400 14px 'IBM Plex Sans'">M. Whitfield — process safety</div>
+                    <div style="margin-top: 10px; font: 400 12px/1.4 'IBM Plex Sans'; color: #525252">The requirement stays in the plan until the deviation is approved. The point is never removed by the person raising it.</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            </sc-if>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 20px">
+            <div style="border: 1px solid #e0e0e0">
+              <div style="padding: 12px 16px; background: #161616; color: #ffffff; font: 600 14px/1.2 'IBM Plex Sans'">What the interface will not let you do</div>
+              <div style="padding: 4px 0">
+                <sc-for list="{{ limits }}" as="l" hint-placeholder-count="5">
+                  <div style="display: flex; gap: 10px; padding: 12px 16px; border-bottom: 1px solid #e0e0e0">
+                    <span style="flex: none; width: 10px; height: 10px; margin-top: 5px; border: 2px solid #da1e28"></span>
+                    <span style="font: 400 13px/1.5 'IBM Plex Sans'">{{ l }}</span>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="padding: 12px 16px; font: 400 12px/1.5 'IBM Plex Mono'; color: #6f6f6f">These are the anti-affordances that keep the safety claim intact — REQ-ARCH-01, REQ-D-01, REQ-OM-05, REQ-P-08.</div>
+            </div>
+
+            <div style="border: 1px solid #e0e0e0">
+              <div style="padding: 12px 16px; border-bottom: 1px solid #e0e0e0; font: 600 14px/1.2 'IBM Plex Sans'">Route 3 — add what was missed</div>
+              <div style="padding: 14px 16px">
+                <div style="font: 400 14px/1.5 'IBM Plex Sans'; color: #393939">Temporary hoses, unmarked connections and devices absent from the drawing are prompted as a mandatory checklist item on every plan. Anything added this way carries MANUAL provenance and raises a drawing defect.</div>
+                <div style="margin-top: 14px; display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #f4f4f4">
+                  <span style="display: inline-flex; align-items: center; height: 20px; padding: 0 8px; background: #e8daff; color: #6929c4; border-left: 3px solid #6929c4; font: 400 10px/1 'IBM Plex Mono'; letter-spacing: 0.32px">MANUAL</span>
+                  <span style="font: 400 13px/1.3 'IBM Plex Mono'">US-12 hose · added by D. Silva · in boundary</span>
+                </div>
+                <div style="margin-top: 12px; display: flex; gap: 8px">
+                  <x-import component-from-global-scope="Plant360AIDesignSystem_796edf.Button" kind="tertiary" size="sm" hint-size="auto,32px">Add a point</x-import>
+                  <x-import component-from-global-scope="Plant360AIDesignSystem_796edf.Button" kind="tertiary" size="sm" hint-size="auto,32px">Report a drawing defect</x-import>
+                </div>
+              </div>
+            </div>
+
+            <div style="border: 1px solid #e0e0e0">
+              <div style="padding: 12px 16px; border-bottom: 1px solid #e0e0e0; font: 600 14px/1.2 'IBM Plex Sans'">Free text is editable, derived content is not</div>
+              <div style="padding: 14px 16px; font: 400 14px/1.5 'IBM Plex Sans'; color: #393939">Narrative, explanations and permit prose are drafted by the language layer, stored as generated text and shown in a distinct treatment. Those you edit freely — they carry no logic. Everything with a derivation trace behind it is read-only by design.</div>
+              <div style="padding: 0 16px 16px">
+                <div style="padding: 12px 14px; background: #f4f4f4; border-left: 3px dashed #0f62fe; font: 400 13px/1.5 'IBM Plex Sans'; color: #393939">"Isolate the pump at suction and discharge, prove at the bleeds, then spade both flanges before the seal is disturbed." <span style="font: 400 11px 'IBM Plex Mono'; color: #6f6f6f">— generated narrative · editable</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="padding: 28px 32px 0">
+          <h2 style="margin: 0; font: 600 20px/1.3 'IBM Plex Sans'">Correction ledger</h2>
+          <div style="margin-top: 6px; font: 400 13px/1.4 'IBM Plex Sans'; color: #525252">Every correction is an audit event with an owner. Nothing is fixed anonymously and nothing is fixed in place — REQ-NF-03, AD-03.</div>
+          <div style="margin-top: 16px; border: 1px solid #e0e0e0">
+            <div style="display: grid; grid-template-columns: 90px 130px 1.6fr 150px 1.3fr 200px; gap: 16px; padding: 0 16px; height: 40px; align-items: center; background: #e0e0e0; font: 600 12px/1.2 'IBM Plex Sans'">
+              <div>Ref</div><div>Route</div><div>Target</div><div>Raised</div><div>Effect on the plan</div><div>State</div>
+            </div>
+            <sc-for list="{{ ledger }}" as="r" hint-placeholder-count="5">
+              <div style="{{ r.rowStyle }}">
+                <div style="font: 400 13px/1.2 'IBM Plex Mono'; color: #0f62fe">{{ r.id }}</div>
+                <div style="font: 400 13px/1.35 'IBM Plex Sans'">{{ r.kind }}</div>
+                <div style="font: 400 13px/1.35 'IBM Plex Sans'">{{ r.target }}</div>
+                <div style="font: 400 12px/1.35 'IBM Plex Mono'; color: #525252">{{ r.raised }}</div>
+                <div style="font: 400 13px/1.35 'IBM Plex Sans'; color: #393939">{{ r.effect }}</div>
+                <div style="font: 400 12px/1.35 'IBM Plex Mono'; color: {{ r.fg }}">{{ r.state }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <sc-if value="{{ showAnn }}" hint-placeholder-val="{{ true }}">
+        <div style="margin: 24px 32px 40px; padding: 16px 20px; background: #f4f4f4; border-top: 3px solid #161616">
+          <div style="font: 600 12px/1 'IBM Plex Sans'; letter-spacing: 0.32px; text-transform: uppercase">Requirements demonstrated on this screen</div>
+          <div style="margin-top: 10px; font: 400 13px/1.7 'IBM Plex Mono'; color: #393939">REQ-ARCH-01 derived content is not user-editable · REQ-ARCH-03 generated text visually distinguished and editable · REQ-IN-02 gap resolved by mapping, not by override · REQ-IN-03 FHR is a controlled document · REQ-D-01 overrides need justification and a named approver · REQ-OM-05 change invalidates authorisation and presents a classified diff · REQ-EP-01 discrepancy resolved by drawing correction or confirmation · REQ-SA-04 change control under MoC · REQ-NF-03 immutable audit trail · S-13 temporary connections prompted · S-27 gap register · S-31 stale declarations named individually · P4 MANUAL provenance never merged into derived content</div>
+        </div>
+        </sc-if>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ isU4 }}" hint-placeholder-val="{{ false }}">
+      <div>
+        <div style="padding: 24px 32px 0">
+          <div style="font: 400 12px/1 'IBM Plex Mono'; letter-spacing: 0.32px; color: #525252">ISOLATION REGISTER · U4</div>
+          <h1 style="margin: 10px 0 0; font: 300 32px/1.2 'IBM Plex Sans'">Area 11–14 · 6 live isolations</h1>
+          <div style="margin-top: 10px; font: 400 14px/1.4 'IBM Plex Sans'; color: #525252">One line per isolation, readable aloud at handover. Status language is procedural — there is no completeness badge. REQ-OM-06, P7, REQ-UX-N02.</div>
+        </div>
+
+        <div style="padding: 20px 32px 0">
+          <x-import component-from-global-scope="Plant360AIDesignSystem_796edf.InlineNotification" kind="error" title="Conflict — authorisation blocked" subtitle="ISO-2026-0415 (PSV-1207 recertification) requests closure of car-sealed-open V-2247, protected by ISO-2026-0412 as a T4 item. CI-3 and CI-9 both apply. Resolve with both isolation authorities." hide-close-button="{{ true }}" hint-size="100%,72px"></x-import>
+        </div>
+
+        <div style="padding: 20px 32px 0">
+          <div style="border: 1px solid #e0e0e0">
+            <div style="display: grid; grid-template-columns: 150px 90px 1.6fr 130px 110px 130px 1fr; gap: 16px; padding: 0 16px; height: 40px; align-items: center; background: #e0e0e0; font: 600 12px/1.2 'IBM Plex Sans'">
+              <div>Isolation</div><div>Area</div><div>Scope</div><div>State</div><div>Age</div><div>Re-prove due</div><div>Outstanding</div>
+            </div>
+            <sc-for list="{{ register }}" as="r" hint-placeholder-count="6">
+              <div style="{{ r.rowStyle }}">
+                <div style="font: 400 13px/1.2 'IBM Plex Mono'; color: #0f62fe">{{ r.id }}</div>
+                <div style="font: 400 13px/1.2 'IBM Plex Sans'">{{ r.area }}</div>
+                <div style="font: 400 13px/1.35 'IBM Plex Sans'">{{ r.scope }}</div>
+                <div>
+                  <span style="display: inline-flex; align-items: center; height: 22px; padding: 0 10px; background: {{ r.stBg }}; color: {{ r.stFg }}; border-left: 3px {{ r.stEdge }} {{ r.stFg }}; font: 400 11px/1 'IBM Plex Mono'; letter-spacing: 0.32px">{{ r.state }}</span>
+                </div>
+                <div style="font: 400 13px/1.2 'IBM Plex Mono'">{{ r.age }}</div>
+                <div style="font: 400 13px/1.2 'IBM Plex Mono'; color: {{ r.dueFg }}">{{ r.due }}</div>
+                <div style="font: 400 13px/1.35 'IBM Plex Sans'; color: #393939">{{ r.outstanding }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="padding: 24px 32px 8px; display: grid; grid-template-columns: 1.2fr 1fr; gap: 32px; align-items: start">
+          <div>
+            <h2 style="margin: 0; font: 600 20px/1.3 'IBM Plex Sans'">T4 protected — must not be isolated or disturbed</h2>
+            <div style="margin-top: 6px; font: 400 13px/1.3 'IBM Plex Sans'; color: #525252">Checked against every new plan while these isolations are active — REQ-CI-05.</div>
+            <div style="margin-top: 16px; display: flex; flex-direction: column; gap: 8px">
+              <sc-for list="{{ protected }}" as="p" hint-placeholder-count="4">
+                <div style="display: grid; grid-template-columns: 150px 1fr 150px; gap: 16px; align-items: center; padding: 14px 16px; border: 1px solid #e0e0e0; border-left: 4px solid #6929c4">
+                  <div style="font: 600 15px/1.2 'IBM Plex Mono'">{{ p.tag }}</div>
+                  <div style="font: 400 13px/1.4 'IBM Plex Sans'">{{ p.why }}</div>
+                  <div style="font: 400 12px/1.3 'IBM Plex Mono'; color: #525252">{{ p.by }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+          <div>
+            <h2 style="margin: 0; font: 600 20px/1.3 'IBM Plex Sans'">Handover script</h2>
+            <div style="margin-top: 6px; font: 400 13px/1.3 'IBM Plex Sans'; color: #525252">Generated from the register, one line per isolation.</div>
+            <div style="margin-top: 16px; padding: 18px 20px; background: #f4f4f4; border: 1px solid #e0e0e0; font: 400 15px/1.75 'IBM Plex Mono'; color: #161616">0388 crude, E-1204 channel head, set and proved, re-prove due 05:00.<br>0401 utilities, CW-1106 valve, active, no action.<br>0412 crude, P-1201A seal, draft, 3 items blocking.<br>0377 area 14, V-1402 entry, being removed, blind count 22 in, 20 out.<br>0369 utilities, steam trap, long-term review overdue 3 days.<br>0415 crude, PSV-1207, authorised, conflict with 0412.</div>
+          </div>
+        </div>
+
+        <sc-if value="{{ showAnn }}" hint-placeholder-val="{{ true }}">
+        <div style="margin: 24px 32px 40px; padding: 16px 20px; background: #f4f4f4; border-top: 3px solid #161616">
+          <div style="font: 600 12px/1 'IBM Plex Sans'; letter-spacing: 0.32px; text-transform: uppercase">Requirements demonstrated on this screen</div>
+          <div style="margin-top: 10px; font: 400 13px/1.7 'IBM Plex Mono'; color: #393939">REQ-OM-03 lifecycle states · REQ-OM-06 shift handover · REQ-F1-05 shared points flagged protected · REQ-CI-05 T4 set persisted and checked · REQ-P-05 cross-permit and cross-plan conflict detection · A8.6 area-level overview, ages, re-prove and review dates · P7 procedural status only</div>
+        </div>
+        </sc-if>
+      </div>
+      </sc-if>
+
+    </div>
+  </div>
+</div>
+</sc-if>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1600,&quot;height&quot;:1100},&quot;showAnnotations&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Handoff&quot;},&quot;denseTables&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Density&quot;},&quot;fieldHighContrast&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Field view&quot;},&quot;psdExpired&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Scenario state&quot;}}">
+class Component extends DCLogic {
+  state = { surface: 'u1', ack: {}, sel: 'P-01', sheet: 0, step: 0, report: false, emg: 4, whatif: 0, tick: 0, fluid: 0, applied: false, challenge: -1, defect: -1, absentConfirmed: false };
+
+  PROV = {
+    graph: { label: 'GRAPH', bg: '#e0e0e0', fg: '#161616', edge: 'solid' },
+    declared: { label: 'DECLARED', bg: '#d0e2ff', fg: '#0043ce', edge: 'dashed' },
+    fallback: { label: 'DEFAULT', bg: '#fcf4d6', fg: '#684e00', edge: 'dotted' },
+    gap: { label: 'GAP', bg: '#ffd7d9', fg: '#a2191f', edge: 'double' }
+  };
+
+  POINTS = [
+    { id: 'P-01', area: 0, devices: 'V-2210 gate LC · spade SP-01 at J-1204-07 · bleed V-2211', line: '6"-HC-1204 suction · sour crude, H₂S 1,850 ppm', hsc: '4', ec: 'B', rbc: '2 barriers, ≥1 positive, + bleed', proving: 'Monitored bleed, then decay 30 min', prov: 'graph', sheet: 'PID-2103 · C6',
+      trace: [
+        ['Path', 'P-01 · pump suction nozzle → 6"-HC-1204 → suction header at V-2210'],
+        ['Live-side fluid', 'CRUDE-SOUR, from FHR rev 4.2 row 14 via service_code_map "HC" (unit scope 12-CDU)'],
+        ['HSC', '4 — Extreme. Fired on h2s_content_ppm 1,850 ≥ 100. Also qualifies on nfpa_health 3 with flashing phase.'],
+        ['EC', 'B — containment break, single shift, continuously attended, work party outside the boundary volume (from the intake form)'],
+        ['Matrix cell', 'HSC-4 × EC-B → 2 barriers, ≥1 positive, + bleed. No SIC override applied to this cell.'],
+        ['Barriers selected', 'V-2210 gate valve, lockable (admissible, §6.4 row 1). Spade SP-01 at flanged joint J-1204-07, 6" 300# RF from piping class 1CS2 — positive (§6.4 row 8).'],
+        ['Series check', 'V-2210 and SP-01 verified in series on one flow path; bleed V-2211 lies topologically between them — REQ-D-03, REQ-D-04.'],
+        ['Bleed destination', 'V-2211 to closed drain CD-1101, declared depressurised by J. Okafor at 06:15 — safe destination.'],
+        ['Proving', 'Monitored bleed then pressure decay, hold 30 min, acceptance rise ≤ 0.1 barg (SIC v1.7 pressure_decay_hold_minutes = 30).'],
+        ['Escalations', 'None. Duration 1 shift < duration_escalate_days 7.'],
+        ['Confidence', 'Topologically certain. No declared or missing data in this path except the bleed destination status.']
+      ] },
+    { id: 'P-02', area: 0, devices: 'V-2213 gate LC · spade SP-02 · bleed V-2214', line: '4"-HC-1207 discharge · sour crude', hsc: '4', ec: 'B', rbc: '2 barriers, ≥1 positive, + bleed', proving: 'Monitored bleed, then decay 30 min', prov: 'graph', sheet: 'PID-2103 · F4',
+      trace: [
+        ['Path', 'P-02 · pump discharge nozzle → CV-1201 → 4"-HC-1207 → discharge header'],
+        ['Live-side fluid', 'CRUDE-SOUR, FHR rev 4.2 row 14'],
+        ['HSC', '4 — h2s_content_ppm 1,850 ≥ 100'],
+        ['Rejected device', 'CV-1201 check valve — barrier value 0. SIC check_valve_role = none. A check valve is never the primary barrier and never counts at HSC ≥ 3.'],
+        ['Live path found', 'P-1201B (running duty) shares the discharge header. The cross-connection to the work zone is closed only by CV-1201B, so the boundary must be established at V-2213 with a positive barrier outboard of the tee.'],
+        ['Barriers selected', 'V-2213 gate valve, lockable. Spade SP-02 at J-1207-03, 4" 300# RF. Bleed V-2214 between them.'],
+        ['Cascade', 'CI-2 shared header — P-1201B classified T4 protected. CI-9 redundancy — P-1201B is the last available train.'],
+        ['Proving', 'Monitored bleed then decay 30 min; SP-02 visually confirmed installed with witness.'],
+        ['Confidence', 'Topologically certain.']
+      ] },
+    { id: 'P-03', area: 0, devices: 'SDV-1203 locked closed · motive air isolated and locked', line: '4"-HC-1207 discharge, second barrier', hsc: '4', ec: 'B', rbc: 'Second barrier on the discharge path', proving: 'Position verification with lock check', prov: 'graph', sheet: 'PID-2103 · G4',
+      trace: [
+        ['Path', 'P-03 · second barrier on the discharge path, outboard of SP-02'],
+        ['Admissibility', 'Actuated on/off valve. Admissible only because SIC actuated_valve_as_barrier = allowed_if_lockable, AND it can be mechanically locked closed, AND its motive air is isolated and locked (§6.4 row 4).'],
+        ['Deviation', 'D-1 recorded. Requires individual acknowledgement by the authoriser before authorisation — no bulk accept.'],
+        ['C&E consequence', 'SDV-1203 unavailable while locked. ESD matrix row 22 loses one final element; compensating measure is the manual isolation already in the boundary.'],
+        ['Proving', 'Position verification with lock check; air supply bleed proved at zero.'],
+        ['Confidence', 'Rule-derived, dependent on an SIC parameter.']
+      ] },
+    { id: 'P-04', area: 0, devices: 'V-2219 gate LC · plug PL-01', line: '2"-HC-1219 min-flow to KO drum V-1205', hsc: '4', ec: 'B', rbc: 'Valve plus plug — small-bore rule', proving: 'Visual confirmation of plug with witness', prov: 'graph', sheet: 'PID-2103 · F6',
+      trace: [
+        ['Path', 'P-04 · min-flow / kickback line, traversed against nominal flow direction — REQ-F1-02'],
+        ['HSC', '4 — same live-side fluid as the discharge header'],
+        ['Escalation', 'Line DN50 ≤ small_bore_threshold_dn 50 → REQ-D-02 forces valve plus plug regardless of the matrix output.'],
+        ['Barriers selected', 'V-2219 gate LC; threaded plug PL-01 at the bleed connection.'],
+        ['Confidence', 'Topologically certain.']
+      ] },
+    { id: 'P-05', area: 0, devices: 'V-2222 gate LC · blind BL-03', line: '1"-FG casing vent → flare header FG-1102', hsc: '3', ec: 'B', rbc: '2 barriers, ≥1 positive', proving: 'Visual confirmation of blind with witness', prov: 'declared', sheet: 'PID-2107 · B3',
+      trace: [
+        ['Path', 'P-05 · casing vent → 1"-FG → 12" flare header FG-1102, continues on PID-2107 at B3'],
+        ['Live-side state', 'Flare header declared LIVE and pressurised at 0.3 barg by J. Okafor, shift supervisor, 06:15 today. This declaration must be confirmed in the field — REQ-IN-04.'],
+        ['HSC', '3 — flammable gas phase. Not reduced, because the header is declared live (the depressurised modifier of §6.1 does not apply).'],
+        ['Bleed rejected', 'Bleeding to the live flare header would not prove the isolation, so positive isolation is required on this path — REQ-D-04, CI-7.'],
+        ['Cascade', 'CI-7 disposal route — FG-1102 is classified T4 for the life of this isolation.'],
+        ['Confidence', 'Depends on a declaration. If the header were declared out of service, this path would recompute to a single valve plus bleed.']
+      ] },
+    { id: 'P-06', area: 0, devices: 'V-2221 gate LC · cap CP-01', line: '1"-CD casing drain → closed drain CD-1101', hsc: '2', ec: 'B', rbc: 'Valve plus cap — small-bore rule', proving: 'Visual confirmation of cap', prov: 'declared', sheet: 'PID-2103 · E7',
+      trace: [
+        ['Path', 'P-06 · casing drain → closed drain header CD-1101'],
+        ['Live-side state', 'CD-1101 declared depressurised and available by J. Okafor at 06:15. HSC reduced from 3 to 2 by the depressurised modifier, §6.1 — the plan records the dependency on that declaration.'],
+        ['Escalation', 'Small-bore rule applies: valve plus cap.'],
+        ['Drain volume', 'Casing and line volume 0.34 m³ estimated from isometric line volumes.'],
+        ['Confidence', 'Depends on a declaration.']
+      ] },
+    { id: 'P-07', area: 0, devices: 'V-2231 · V-2232 · bleed V-2233', line: '1½"-SF-1108 seal flush, API 682 Plan 32', hsc: '3', ec: 'B', rbc: '2 barriers + bleed (DBB)', proving: 'Monitored bleed, decay 15 min', prov: 'graph', sheet: 'PID-2103 · B2',
+      trace: [
+        ['Path', 'P-07 · external seal flush supply entering the pump from system SF-1108 — a live path in from a different system'],
+        ['Live-side fluid', 'Clean light distillate, FHR rev 4.2 row 31'],
+        ['HSC', '3 — flammable liquid above flash point at 68 °C operating'],
+        ['Matrix cell', 'HSC-3 × EC-B → 2 barriers + bleed (conventional double block and bleed)'],
+        ['Cascade', 'CI-4 utility supply — P-1108 supplies the flush and must be stopped before the supply is isolated. This is a sequencing dependency, not merely an impact.'],
+        ['Confidence', 'Topologically certain.']
+      ] },
+    { id: 'P-08', area: 0, devices: 'V-2236 · V-2237', line: '¾"-BF-1109 barrier fluid supply', hsc: '4', ec: 'B', rbc: 'Conservative default pending FHR mapping', proving: 'Not yet determinable', prov: 'gap', sheet: 'PID-2103 · A3',
+      trace: [
+        ['Path', 'P-08 · barrier fluid supply to the outboard seal'],
+        ['Live-side fluid', 'UNRESOLVED. Service code "BF" has no mapping in FHR rev 4.2 service_code_map.'],
+        ['HSC', '4 applied as the conservative default for an unknown fluid — REQ-IN-02.'],
+        ['Consequence', 'This path is a data gap. The plan is not authorisable until the FHR mapping is added and approved. The barrier configuration shown may change once the fluid is known.'],
+        ['Action required', 'Add BF → fluid_code in the FHR, or confirm the seal plan is 52 with a sealed reservoir and no external supply.'],
+        ['Confidence', 'Unverified gap — blocking.']
+      ] },
+    { id: 'P-09', area: 1, devices: 'V-2241 butterfly · bleed V-2242', line: '2"-CW-1106 seal cooler supply', hsc: '1', ec: 'B', rbc: '1 valve + bleed', proving: 'Monitored bleed', prov: 'graph', sheet: 'PID-1101 · D2',
+      trace: [
+        ['Path', 'P-09 · cooling water supply to seal cooler EX-1231'],
+        ['Live-side fluid', 'COOLING-WATER, FHR rev 4.2 row 3. Non-hazardous below 10 barg and 60 °C.'],
+        ['HSC', '1 — Low. Same item, different path: the process paths on this pump are HSC-4 and this one is HSC-1, so the barrier counts differ on one job.'],
+        ['Matrix cell', 'HSC-1 × EC-B → 1 valve. Bleed added because the exchanger is liquid-full and blocked in.'],
+        ['Admissibility', 'V-2241 is soft-seated butterfly. Admissible: not the sole barrier at HSC ≥ 3, and no hot work on this scope.'],
+        ['Cross-contamination', 'Tube-side hydrocarbon against shell-side water: gas test the water side before any joint break even at HSC-1 — L2 exchanger pattern.'],
+        ['Confidence', 'Topologically certain.']
+      ] },
+    { id: 'P-10', area: 1, devices: 'V-2243 butterfly LC', line: '2"-CW-1106 cooler return', hsc: '1', ec: 'B', rbc: '1 valve', proving: 'Position verification with lock check', prov: 'graph', sheet: 'PID-1101 · D3',
+      trace: [
+        ['Path', 'P-10 · cooling water return to the CW-1106 sub-header'],
+        ['HSC', '1 — Low'],
+        ['Impact', 'Sub-header loses 12% of design flow. Three live consumers remain within their design margin — reported as impact only, T3.'],
+        ['Confidence', 'Topologically certain.']
+      ] },
+    { id: 'P-11', area: 0, devices: 'V-2251 + plug · V-2252 + plug', line: '½" PI-1204 and PG-1207 instrument tappings', hsc: '4', ec: 'B', rbc: 'Valve plus plug — small-bore rule', proving: 'Visual confirmation of plugs', prov: 'graph', sheet: 'PID-2103 · E5',
+      trace: [
+        ['Path', 'P-11 · two ½" instrument tappings penetrating the boundary'],
+        ['Escalation', 'REQ-D-02 small-bore rule: valve plus plug regardless of matrix output, because small-bore valve failures are a dominant cause of loss of containment.'],
+        ['Control consequence', 'PI-1204 local indication lost on the live header. No loop, no interlock — T3 impact only.'],
+        ['Confidence', 'Topologically certain.']
+      ] }
+  ];
+
+  GROUPS = [
+    { group: 'Data gaps blocking authorisation', req: 'REQ-IN-02 · REQ-XD-03', dot: '#da1e28', radius: '0',
+      items: [
+        { prov: 'gap', title: 'Service code "BF" has no FHR mapping', detail: 'Path P-08, ¾"-BF-1109 barrier fluid supply. HSC-4 applied as the conservative default. The plan is not authorisable until the mapping is added to FHR rev 4.2 and approved.', meta: 'P-08 · PID-2103 A3 · owner: process safety', block: true },
+        { prov: 'gap', title: 'Isometric data absent for the suction spool', detail: 'Spool-removal options were not assessed on path P-01. Positive isolation has been planned using P&ID flanged joints only. Removable spools require the isometric extraction (REQ-IN-11), which is not available for area 12.', meta: 'P-01 · REQ-DEP-06 blocking dependency', block: true }
+      ] },
+    { group: 'Completeness discrepancies from the equipment pattern', req: 'REQ-EP-01 · A3.3', dot: '#da1e28', radius: '50%',
+      items: [
+        { id: 'comp', prov: 'gap', title: 'Centrifugal pump pattern expects a suction strainer drain — traversal found none', detail: 'The pattern marks strainer_drain mandatory for this class. Either PID-2103 is incomplete, or the connection genuinely does not exist and must be confirmed as such by a walkdown. Two independent mechanisms disagree; authorisation is blocked until resolved.', meta: 'ST-1201A · pattern lib rev 12 · blocking', block: true }
+      ] },
+    { group: 'Deviations from the derived standard', req: 'REQ-D-01 · §6.4', dot: '#f1c21b', radius: '0',
+      items: [
+        { prov: 'graph', title: 'D-1 · SDV-1203 counted as a barrier on path P-03', detail: 'Permitted by SIC v1.7 actuated_valve_as_barrier = allowed_if_lockable. Conditions: mechanically locked closed AND motive air isolated and locked. Approved by M. Whitfield, process safety, 2026-02-11.', meta: 'P-03 · SIC v1.7 · justification recorded' }
+      ] },
+    { group: 'Assumptions from the plant state declaration', req: 'REQ-IN-04 · REQ-IN-05', dot: '#0043ce', radius: '0',
+      items: [
+        { prov: 'declared', title: 'Flare header FG-1102 is live and pressurised at 0.3 barg', detail: 'Declared by J. Okafor, shift supervisor, 06:15 today. Drives positive isolation on path P-05 and rejects the vent as a bleed destination. Confirm in the field before setting.', meta: 'P-05 · PSD 2026-08-03 06:15' },
+        { prov: 'declared', title: 'Closed drain header CD-1101 is depressurised and available', detail: 'Declared by J. Okafor, 06:15. Reduces HSC on path P-06 from 3 to 2 and permits the casing drain route. If found live, the plan must be re-derived.', meta: 'P-06 · PSD 2026-08-03 06:15' },
+        { prov: 'declared', title: 'P-1201B is running as duty and is the last available train', detail: 'Declared by J. Okafor, 06:15. The boundary removes the standby; there is no further spare. Reported as an impact, not a proposal to transfer duty.', meta: 'CI-9 · T4 protected' },
+        { prov: 'fallback', title: 'V-2247 found closed against a P&ID normal position of open', detail: 'Valve position exception declared by the field operator, 06:40. Car-sealed open in the relief path of E-1204. The boundary does not require it to move; any request to close it needs a recorded deviation.', meta: 'REQ-F5-02 · position exception' }
+      ] },
+    { group: 'Safety-critical impairments', req: 'REQ-F3-06', dot: '#8a3ffc', radius: '50%',
+      items: [
+        { prov: 'graph', title: 'F&G detector GD-1142 obstructed by scaffold for the duration', detail: 'Coverage zone 12-N loses one of three detectors; 2oo3 degrades to 1oo2, which remains acceptable. Compensating measure: portable gas monitor with the work party, continuous. Impairment record IMP-2026-118 generated.', meta: 'GD-1142 · zone 12-N · 1 of 3' }
+      ] },
+    { group: 'Override requests', req: 'REQ-F3-03 · D-11', dot: '#0f62fe', radius: '0',
+      items: [
+        { prov: 'graph', title: 'Inhibit PSLL-1204 low suction pressure trip on P-1201A', detail: 'The loop is dead with the pump isolated. Requested duration 14 h, expected removal at reinstatement. The agent produces the request only; it does not write to the override register. Every requested override must be confirmed removed before the plan can close.', meta: 'PSLL-1204 · max inhibit 24 h per SIC' }
+      ] },
+    { group: 'Cross-drawing issues', req: 'REQ-XD-05 · REQ-XD-06', dot: '#f1c21b', radius: '50%',
+      items: [
+        { prov: 'fallback', title: 'Revision mismatch at off-page connector OPC-14', detail: 'PID-2103 is rev C; the referenced PID-2107 is rev B, and the connector metadata indicates the interface was reissued with rev C. Confirm the discharge routing on PID-2107 before authorising.', meta: 'OPC-14 · PID-2103 F7 → PID-2107 F7' }
+      ] }
+  ];
+
+  TIERS = [
+    { id: 'T0', fg: '#161616', meaning: 'The work scope', obligation: 'Isolate',
+      items: [{ tag: 'P-1201A', note: 'Crude charge pump A — mechanical seal replacement', rule: 'Work scope' }, { tag: 'M-1201A', note: 'Driver. Mechanically inseparable from the pump for this scope; rotation prevention required on both.', rule: 'CI-10 mechanical coupling' }] },
+    { id: 'T1', fg: '#0f62fe', meaning: 'Inside the boundary as a consequence', obligation: 'Isolate; include in the schedule',
+      items: [{ tag: 'ST-1201A', note: 'Suction strainer. No admissible barrier exists between the pump and the strainer, so the boundary expanded outward to V-2210.', rule: 'CI-1 barrier unavailable' }, { tag: 'EX-1231', note: 'Seal cooler. No compliant barrier on the cooler inlet within the pump skid; swallowed by the boundary.', rule: 'CI-1 barrier unavailable' }] },
+    { id: 'T2', fg: '#a2191f', meaning: 'Outside, requires action', obligation: 'Specify the required action — expanded by default',
+      items: [{ tag: 'P-1108', note: 'Seal flush supply pump. Must be stopped before its supply is isolated at step 8 — a hard sequencing dependency, not an impact.', rule: 'CI-4 utility supply' }, { tag: 'GD-1142', note: 'F&G detector obstructed by scaffold. Compensating measure required and recorded before the boundary is set.', rule: 'CI-6 control and safety' }, { tag: 'E-1204', note: 'Thermal relief on the blocked-in cooler side must remain in service, or the side must be vented, before the isolation is set.', rule: 'CI-3 protective device' }] },
+    { id: 'T3', fg: '#6f6f6f', meaning: 'Degraded, no action', obligation: 'Report as impact',
+      items: [{ tag: 'CW-1106', note: 'Sub-header loses 12% of design flow; three live consumers remain within margin.', rule: 'CI-4 utility supply' }, { tag: 'PI-1204', note: 'Local pressure indication lost on the live suction header for the duration.', rule: 'CI-6 control and safety' }] },
+    { id: 'T4', fg: '#6929c4', meaning: 'Protected — do not disturb', obligation: 'Flag as locked; block conflicting plans',
+      items: [{ tag: 'P-1201B', note: 'Running duty and the last available train. Any plan attempting to isolate it while this isolation is active is blocked.', rule: 'CI-9 redundancy' }, { tag: 'CD-1101', note: 'Drain route required by this plan. Protected for the duration.', rule: 'CI-7 disposal route' }, { tag: 'FG-1102', note: 'Flare header — vent destination and the relief route of live plant.', rule: 'CI-7 disposal route' }, { tag: 'SP-02 point', note: 'Shared with active isolation ISO-2026-0388. Must not be removed while another party depends on it.', rule: 'CI-12 nested isolation' }] }
+  ];
+
+  STEPS = [
+    { n: '1', action: 'Confirm P-1201A stopped and duty transferred to P-1201B', meta: 'DCS status and local confirmation · electrical isolation planned separately by the authorised electrical person', role: 'Panel operator' },
+    { n: '2', action: 'Prevent rotation: engage coupling lock and fit rotation-prevention device', meta: 'Mechanical stored energy remains in scope with electrical out of scope — REQ-F2-04', role: 'Fitter' },
+    { n: '3', action: 'Stop P-1108 seal flush supply pump', meta: 'CI-4 — the consumer is stopped before the supply is isolated; never the reverse', role: 'Field operator' },
+    { n: '4', action: 'Close and lock V-2210 suction block, red lock L-4412', meta: 'Path P-01 barrier 1 of 2 · Area 12, grade, north side of the pump bay', role: 'Field operator' },
+    { n: '5', action: 'Close and lock V-2213 discharge block, red lock L-4413', meta: 'Path P-02 barrier 1 of 2 · outboard of the tee to P-1201B', role: 'Field operator' },
+    { n: '6', action: 'Lock SDV-1203 closed and isolate and lock its motive air', meta: 'Deviation D-1 conditions · prove the air supply bleed at zero', role: 'Field operator' },
+    { n: '7', action: 'Close V-2219 min-flow block and V-2231 / V-2232 seal flush blocks', meta: 'Paths P-04, P-07 · open bleed V-2233 and leave it open', role: 'Field operator' },
+    { n: '8', action: 'Depressurise the casing to the flare via V-2222, monitored', meta: 'FG-1102 declared live at 0.3 barg — controlled vent, no personnel at the vent tail', role: 'Field operator' },
+    { n: '9', action: 'HOLD POINT — prove zero pressure at bleed V-2211', meta: 'Pressure decay 30 min, acceptance rise ≤ 0.1 barg (SIC v1.7). Sign-off required before any joint is broken.', role: 'Isolation authority', hold: true },
+    { n: '10', action: 'Drain the casing via V-2221 to CD-1101, estimated 0.34 m³', meta: 'Depressurise before draining; drain destination declared available', role: 'Field operator' },
+    { n: '11', action: 'Break J-1204-07 far from the live side first and install spade SP-01', meta: 'Blind ID scanned in, photograph mandatory, witness required — feeds reconciliation at reinstatement', role: 'Fitter + witness' },
+    { n: '12', action: 'HOLD POINT — H₂S test at the joint before work commences', meta: '< 5 ppm and LEL < 5% per SIC gas testing criteria; retest every 2 h and after any break', role: 'Isolation authority', hold: true }
+  ];
+
+  ASKED = [
+    { q: 'Why is V-2210 in the boundary?', a: 'It is the first device outward on path P-01 that can form part of a compliant configuration. The live-side fluid is sour crude at HSC-4; exposure class B requires two barriers with at least one positive plus a bleed. V-2210 is a lockable gate valve in the flow path, and spade SP-01 at J-1204-07 provides the positive barrier with V-2211 bleeding between them.', intent: 'intent: why_in_boundary(node) · 11 facts returned' },
+    { q: 'What changes if this becomes a three-week job?', a: 'Duration 21 days exceeds duration_escalate_days 7, so exposure class advances from B to C on every path. Paths P-01 and P-02 keep their configuration; P-06 and P-09 gain a bleed; P-04 escalates from valve plus plug to a blinded joint. Duration is below positive_isolation_mandatory_days 30, so blanket positive isolation is not triggered.', intent: 'intent: what_if_duration(days) · re-derived, not written to the plan' },
+    { q: 'Show every path from the work zone to a live hydrocarbon source.', a: 'Four: P-01 to the suction header (2 devices to a live source), P-02 to the discharge header via the P-1201B tee, P-04 to KO drum V-1205, and P-05 to flare header FG-1102. P-08 is unresolved because the barrier fluid is unmapped and may be a fifth.', intent: 'intent: trace_to_live_source(zone) · crosses PID-2103 → PID-2107' }
+  ];
+
+  REGISTER = [
+    { id: 'ISO-2026-0388', area: 'Area 12', scope: 'E-1204 channel head gasket replacement', state: 'SET & PROVED', age: '4 d 6 h', due: '05:00 · in 6 h', outstanding: '2 assumptions awaiting field confirmation' },
+    { id: 'ISO-2026-0401', area: 'Area 11', scope: 'CW-1106 sub-header valve replacement', state: 'ACTIVE', age: '1 d 2 h', due: '—', outstanding: 'None' },
+    { id: 'ISO-2026-0412', area: 'Area 12', scope: 'P-1201A mechanical seal replacement', state: 'DRAFT', age: '—', due: '—', outstanding: '3 blocking · 8 to acknowledge' },
+    { id: 'ISO-2026-0377', area: 'Area 14', scope: 'V-1402 man-entry, internal inspection', state: 'BEING REMOVED', age: '9 d 1 h', due: 'review overdue', outstanding: 'Blind reconciliation 22 in, 20 out' },
+    { id: 'ISO-2026-0369', area: 'Area 11', scope: 'Steam trap ST-114 replacement', state: 'SET & PROVED', age: '11 d 4 h', due: 'long-term review overdue 3 d', outstanding: 'Re-prove interval exceeded' },
+    { id: 'ISO-2026-0415', area: 'Area 12', scope: 'PSV-1207 removal for recertification', state: 'AUTHORISED', age: '—', due: '—', outstanding: 'Conflict with ISO-2026-0412' }
+  ];
+
+  PROTECTED = [
+    { tag: 'P-1201B', why: 'Running duty and the last available charge train. CI-9 — a plan isolating it is blocked.', by: 'ISO-2026-0412' },
+    { tag: 'CD-1101', why: 'Closed drain route required for the casing drain-down. CI-7.', by: 'ISO-2026-0412' },
+    { tag: 'FG-1102', why: 'Flare header — vent destination here and the relief route of live plant elsewhere. CI-7.', by: 'ISO-2026-0412 · 0388' },
+    { tag: 'V-2247', why: 'Car-sealed open in the relief path of E-1204. Closing it requires a recorded deviation. REQ-F5-02.', by: 'ISO-2026-0388' }
+  ];
+
+  FIELD = [
+    { kind: 'SET AND LOCK', kindBg: '#0f62fe', kindFg: '#ffffff', tag: 'V-2213', action: 'Close fully, then apply red lock L-4413', progress: 'Step 5 of 18', primary: 'Set and confirm',
+      facts: [['LOCATION', 'Area 12 · grade · north side of pump bay, 1.2 m'], ['ACCESS', 'Grade, no scaffold. Zone 2.'], ['REQUIRED END POSITION', 'Closed, locked, tagged 0412-05'], ['LOCK AND TAG', 'Red padlock L-4413 · hasp on the plan box']],
+      why: 'Discharge block, barrier 1 of 2 on path P-02. Sour crude at HSC-4. The check valve CV-1201 is not a barrier.' },
+    { kind: 'LOCKED', kindBg: '#f1c21b', kindFg: '#161616', tag: 'V-2233', action: 'Open the seal flush bleed and leave it open', progress: 'Step 9 of 18', primary: 'Set and confirm', locked: true,
+      facts: [['LOCATION', 'Area 12 · platform 2 · east of the seal pot'], ['ACCESS', 'Ladder to platform 2. Two-handed valve.'], ['REQUIRED END POSITION', 'Open, tagged 0412-09'], ['PREDECESSOR', 'Step 8 — V-2232 not confirmed set']],
+      why: 'Bleed between the two seal flush barriers. The double block and bleed on path P-07 cannot be proved until this is open.' },
+    { kind: 'PROVE', kindBg: '#009d9a', kindFg: '#ffffff', tag: 'V-2211', action: 'Prove path P-01 by pressure decay at the bleed', progress: 'Step 10 of 18', primary: 'Record result and confirm', timer: true,
+      facts: [['LOCATION', 'Area 12 · grade · between V-2210 and SP-01'], ['METHOD', 'Monitored bleed, then decay hold'], ['DESTINATION', 'CD-1101 · declared depressurised'], ['WITNESS', 'Required — isolation authority']],
+      why: 'Proving is a separate step from setting, and the result is entered as a value, not a checkbox. Continued pressure or flow is a failed isolation.' },
+    { kind: 'POSITIVE ISOLATION', kindBg: '#6929c4', kindFg: '#ffffff', tag: 'SP-01', action: 'Install the spade at joint J-1204-07', progress: 'Step 12 of 18', primary: 'Confirm installed', blind: true,
+      facts: [['LOCATION', 'Area 12 · grade · suction flange at the strainer'], ['SPECIFICATION', '6" 300# RF, 6 mm carbon steel, class 1CS2'], ['SEQUENCE', 'Break the far joint from the live side first'], ['WITNESS', 'Required — photograph mandatory']],
+      why: 'Positive barrier on path P-01. Blinds are installed only after the upstream isolation has been proved, and every blind ID is reconciled at reinstatement.' }
+  ];
+
+  REASONS = ['Valve seized', 'Valve missing or not found', 'Tag does not match', 'Access blocked', 'Position differs from plan', 'Pressure or flow at the bleed'];
+
+  ROUTES = [
+    { n: '1', title: 'Correct the input, then re-derive', body: 'The FHR mapping, a PSD declaration, an SIC parameter, the SAR entry, or the graph itself. The output is never edited directly — you change what the derivation reads and the plan is recomputed and re-versioned.', who: 'Owner of that controlled document', fg: '#0f62fe' },
+    { n: '2', title: 'Record a deviation against a derived requirement', body: 'You disagree with what the rules produced. The requirement stays visible, the deviation sits beside it with a reason, a named approver and a justification, and both travel to the certificate. Nothing is silently overwritten.', who: 'Isolation authority + process safety', fg: '#684e00' },
+    { n: '3', title: 'Add what the agent missed, marked as human-added', body: 'A point, a temporary hose, a connection not on the P&ID. It enters the plan with MANUAL provenance, never merged into the derived set, and raises a graph defect so the drawing gets fixed too.', who: 'Planner or field operator', fg: '#6929c4' }
+  ];
+
+  LEDGER = [
+    { id: 'COR-118', kind: 'FHR mapping', target: 'Service code "BF" → fluid_code', raised: 'A. Rahman · 09:31', owner: 'Process safety · M. Whitfield', effect: 'Blocks authorisation · path P-08', state: 'OPEN — awaiting approval', fg: '#a2191f' },
+    { id: 'COR-119', kind: 'Graph defect', target: 'ST-1201A strainer drain missing on PID-2103', raised: 'A. Rahman · 09:34', owner: 'Convert P&ID · drawing owner', effect: 'Blocks authorisation · completeness discrepancy', state: 'OPEN — walkdown requested', fg: '#a2191f' },
+    { id: 'COR-115', kind: 'PSD re-declaration', target: 'CD-1101 status changed live → depressurised', raised: 'J. Okafor · 06:15', owner: 'Operations', effect: 'HSC on P-06 reduced 3 → 2 · re-authorisation forced', state: 'APPLIED — plan v3', fg: '#0e6027' },
+    { id: 'COR-112', kind: 'Deviation', target: 'SDV-1203 accepted as a barrier on P-03', raised: 'A. Rahman · 09:02', owner: 'Process safety · M. Whitfield', effect: 'Requirement unchanged, deviation attached', state: 'APPROVED — on certificate', fg: '#0e6027' },
+    { id: 'COR-109', kind: 'Manual addition', target: 'Temporary hose, utility station US-12 to the work zone', raised: 'D. Silva · 08:47', owner: 'Planner', effect: '1 point added with MANUAL provenance · in the boundary', state: 'APPLIED — plan v2', fg: '#0e6027' }
+  ];
+
+  DIFF = [
+    { what: 'Path P-08 hazard severity class', from: 'HSC-4 (unknown fluid, conservative default)', to: 'HSC-1 (LUBE-OIL-32, non-hazardous below 10 barg)', sig: true },
+    { what: 'Path P-08 required configuration', from: '2 barriers, ≥1 positive, + bleed', to: '1 valve + bleed', sig: true },
+    { what: 'Data gaps blocking authorisation', from: '2 gaps', to: '1 gap (graph defect COR-119 remains)', sig: true },
+    { what: 'Acknowledgements', from: '8 items, 8 acknowledged', to: '7 items, 6 carried forward, 1 reset by this change', sig: true },
+    { what: 'Bill of materials', from: '3 blinds, 2 spades, 2 plugs', to: '3 blinds, 2 spades, 1 plug', sig: false },
+    { what: 'Sequence', from: '18 steps, 4 hold points', to: '17 steps, 4 hold points', sig: false }
+  ];
+
+  CHALLENGE = [
+    'This point is not needed — the path is already isolated elsewhere',
+    'The valve type on the drawing is wrong',
+    'This device is not lockable in the field',
+    'The bleed does not exist / is not accessible',
+    'The requirement is disproportionate for this work',
+    'The fluid or line service is wrong'
+  ];
+
+  DEFECTS = [
+    { id: 'missing', label: 'A connection exists in the plant but not on the drawing', pin: 'PID-2103 · pin at D6',
+      impact: 'Provisional: the traversal re-runs with the new edge. One further path leaves the work zone, and because no admissible barrier exists on it before E-1204, the boundary would expand to swallow E-1204 as T1 — CI-1. Point count 14 → 17.',
+      route: 'Raises a graph defect against Convert P&ID with the drawing coordinates. The plan stays pinned to graph g-2026.07.19-a3f and is marked "correction pending" until the sheet is reconverted.' },
+    { id: 'phantom', label: 'The drawing shows a connection that is not there', pin: 'PID-2103 · pin at B2',
+      impact: 'Provisional: path P-07 disappears and the seal flush double block and bleed with it. Point count 14 → 12. Because this removes barriers, it is treated as safety-significant and needs the drawing correction — not a field opinion — before it takes effect.',
+      route: 'Graph defect plus a mandatory walkdown record. The agent will not shrink a boundary on an unverified report.' },
+    { id: 'attribute', label: 'A device attribute is wrong (type, lockability, fail position)', pin: 'PID-2103 · pin at C6',
+      impact: 'Provisional: V-2210 reclassified gate → globe. Still admissible as one barrier, but directional seating is flagged and the proving method changes. If it were reclassified as a control valve, its barrier value would fall to 0 and the boundary would walk outward.',
+      route: 'Attribute correction against UniGraph, sourced to the field tag plate. Requires a photograph of the nameplate.' }
+  ];
+
+  EXPECTED = [
+    { role: 'Suction', found: true }, { role: 'Discharge', found: true },
+    { role: 'Minimum-flow / kickback', found: true }, { role: 'Casing vent', found: true },
+    { role: 'Casing drain', found: true }, { role: 'Seal flush (API 682 plan)', found: true },
+    { role: 'Seal quench / drain', found: true }, { role: 'Barrier / buffer fluid', found: true },
+    { role: 'Seal cooler CW in and out', found: true }, { role: 'Bearing cooling', found: false, absent: true },
+    { role: 'PI / PG tappings', found: true }, { role: 'Suction strainer drain', found: false, walk: true }
+  ];
+
+  LIMITS = [
+    'You cannot edit a barrier requirement, an HSC, an exposure class or a matrix cell on the plan. Those come from the rules; change the SIC or record a deviation.',
+    'You cannot delete a derived isolation point. You can challenge it, which produces a deviation for approval.',
+    'You cannot acknowledge your way past a data gap or a completeness discrepancy. Blocking items are resolved, not accepted.',
+    'You cannot silently keep an authorisation across a change. Any input change re-versions the plan and forces re-authorisation with a diff.',
+    'You cannot mark a permit issued, or write to the plant override register. The agent drafts and requests; the site authorises.'
+  ];
+
+  componentDidMount() {
+    this.t = setInterval(() => this.setState(s => ({ tick: s.tick + 1 })), 1000);
+  }
+  componentWillUnmount() { clearInterval(this.t); if (this.e) this.e.forEach(clearTimeout); }
+
+  go(surface) { return () => this.setState({ surface }); }
+
+  runEmg = () => {
+    if (this.e) this.e.forEach(clearTimeout);
+    this.setState({ emg: 0 });
+    this.e = [1, 2, 3, 4].map((n, i) => setTimeout(() => this.setState({ emg: n }), 400 + i * 900));
+  };
+
+  navStyle(on, danger) {
+    return {
+      display: 'flex', alignItems: 'center', gap: '10px', height: '48px', padding: '0 16px 0 13px',
+      background: on ? '#ffffff' : 'transparent', border: 0,
+      borderLeft: on ? '3px solid ' + (danger ? '#da1e28' : '#0f62fe') : '3px solid transparent',
+      font: (on ? 600 : 400) + " 14px 'IBM Plex Sans'", color: danger ? '#a2191f' : '#161616',
+      textAlign: 'left', cursor: 'pointer', letterSpacing: '0.16px'
+    };
+  }
+
+  rowStyle(cols, on, dense) {
+    return {
+      display: 'grid', gridTemplateColumns: cols, gap: '16px', alignItems: 'center',
+      padding: dense ? '8px 16px' : '12px 16px', borderTop: '1px solid #e0e0e0',
+      background: on ? '#e5f0ff' : '#ffffff', cursor: 'pointer'
+    };
+  }
+
+  renderVals() {
+    const s = this.state;
+    const dense = this.props.denseTables ?? false;
+    const expired = this.props.psdExpired ?? false;
+    const hc = this.props.fieldHighContrast ?? false;
+    const P = this.PROV;
+
+    let ackable = 0, acked = 0, blocking = 0;
+    const mustRead = this.GROUPS.map((g, gi) => ({
+      group: g.group, req: g.req, dot: g.dot, radius: g.radius, count: g.items.length + (g.items.length === 1 ? ' item' : ' items'),
+      items: g.items.map((it, ii) => {
+        const key = gi + '-' + ii;
+        const fixed = it.id === 'comp' && s.absentConfirmed;
+        const blk = !!it.block && !fixed;
+        const p = P[fixed ? 'declared' : it.prov];
+        const isAcked = !!s.ack[key];
+        if (blk) blocking++; else { ackable++; if (isAcked) acked++; }
+        return {
+          title: it.title,
+          detail: fixed ? 'Resolved by walkdown: the strainer has no drain connection. Confirmed absent by D. Silva at 10:12 and recorded against ST-1201A, so the two mechanisms now agree. A graph defect was raised so the pattern and the drawing stop disagreeing on the next plan.' : it.detail,
+          meta: fixed ? 'ST-1201A · confirmed absent · GD-2026-071 raised' : it.meta,
+          pBg: p.bg, pFg: p.fg, pEdge: p.edge, pLabel: p.label,
+          bg: blk ? '#fff1f1' : (isAcked ? '#f4f4f4' : '#ffffff'),
+          canFix: blk,
+        onFix: () => this.setState({ surface: 'u5' }),
+          onAck: blk ? undefined : () => this.setState(st => ({ ack: Object.assign({}, st.ack, { [key]: !st.ack[key] }) })),
+          btnLabel: blk ? 'Cannot be acknowledged' : (isAcked ? 'Acknowledged' : 'Acknowledge'),
+          btnNote: blk ? 'Must be resolved before authorisation' : (isAcked ? 'A. Rahman · 09:24' : 'Individual acknowledgement'),
+          btn: {
+            height: '40px', padding: '0 16px', cursor: blk ? 'not-allowed' : 'pointer',
+            background: blk ? '#f4f4f4' : (isAcked ? '#ffffff' : '#0f62fe'),
+            color: blk ? '#8d8d8d' : (isAcked ? '#161616' : '#ffffff'),
+            border: blk ? '1px solid #c6c6c6' : (isAcked ? '1px solid #24a148' : 0),
+            font: "400 14px 'IBM Plex Sans'"
+          }
+        };
+      })
+    }));
+    const open = ackable - acked;
+
+    const areas = [
+      { name: 'Area 12 — Crude unit', authority: 'Isolation authority: A. Rahman', ai: 0 },
+      { name: 'Area 11 — Utilities', authority: 'Isolation authority: L. Fernandes', ai: 1 }
+    ].map(a => {
+      const rows = this.POINTS.filter(p => p.area === a.ai).map(p => {
+        const pr = P[p.prov];
+        return {
+          id: p.id, devices: p.devices, line: p.line, hsc: 'HSC-' + p.hsc, ec: p.ec, rbc: p.rbc, proving: p.proving,
+          hscFg: p.hsc === '4' ? '#a2191f' : (p.hsc === '3' ? '#8e6a00' : '#161616'),
+          pBg: pr.bg, pFg: pr.fg, pEdge: pr.edge, pLabel: pr.label,
+          rowStyle: this.rowStyle('64px 1.5fr 1.3fr 60px 56px 1.5fr 1.2fr 130px', s.sel === p.id, dense),
+          onPick: () => this.setState({ sel: p.id })
+        };
+      });
+      return { name: a.name, authority: a.authority, count: rows.length, rows };
+    });
+
+    const sel = this.POINTS.find(p => p.id === s.sel) || this.POINTS[0];
+    const pick = {};
+    this.POINTS.forEach(p => { pick[p.id.replace('-', '')] = () => this.setState({ sel: p.id, surface: 'u2' }); });
+
+    const sheetDefs = [
+      { id: 'PID-2103', rev: 'C', pts: 8, title: 'Crude charge pumps P-1201A/B' },
+      { id: 'PID-2107', rev: 'B', pts: 4, title: 'Crude unit discharge and flare headers' },
+      { id: 'PID-1101', rev: 'D', pts: 2, title: 'Cooling water distribution, area 11' }
+    ];
+    const sheets = sheetDefs.map((d, i) => ({
+      id: d.id, rev: d.rev, pts: d.pts, onPick: () => this.setState({ sheet: i }),
+      style: {
+        display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '3px',
+        height: '56px', padding: '0 18px', justifyContent: 'center', cursor: 'pointer',
+        background: s.sheet === i ? '#ffffff' : '#f4f4f4',
+        border: '1px solid #e0e0e0', borderBottom: s.sheet === i ? '1px solid #ffffff' : '1px solid #e0e0e0',
+        borderTop: s.sheet === i ? '3px solid #0f62fe' : '1px solid #e0e0e0'
+      }
+    }));
+
+    const wifDefs = [
+      { label: 'Duration becomes 3 weeks', title: 'Exposure class advances B → C on every path', body: '21 days exceeds duration_escalate_days 7. P-04 escalates from valve plus plug to a blinded joint; P-06 and P-09 gain a bleed. 3 schedule changes, 1 extra blind on the BOM.' },
+      { label: 'Flare header FG-1102 out of service', title: 'Path P-05 relaxes; one blind removed', body: 'With the header declared depressurised and out of service, HSC on P-05 falls from 3 to 2 and blind BL-03 is no longer required — valve plus bleed suffices. The vent becomes a usable bleed destination.' },
+      { label: 'Hot work added to the scope', title: 'Exposure class D — plan not producible as drawn', body: 'EC-D forces positive isolation on every path, and the hot work permit cannot be generated: the spatial register has no entry for the pump bay. Adjacency assessment becomes a mandatory manual step — REQ-IN-09, REQ-P-06.' }
+    ];
+    const whatIfs = wifDefs.map((w, i) => ({
+      label: w.label, onPick: () => this.setState({ whatif: i }),
+      style: {
+        minHeight: '44px', padding: '10px 14px', textAlign: 'left', cursor: 'pointer',
+        background: s.whatif === i ? '#161616' : '#ffffff', color: s.whatif === i ? '#ffffff' : '#161616',
+        border: '1px solid ' + (s.whatif === i ? '#161616' : '#c6c6c6'), font: "400 14px 'IBM Plex Sans'"
+      }
+    }));
+    const w = wifDefs[s.whatif];
+
+    const f = this.FIELD[s.step];
+    const secs = 1812 - (s.tick % 1800);
+    const mm = Math.floor(secs / 60), ss = secs % 60;
+
+    const stState = { 'SET & PROVED': ['#d0e2ff', '#0043ce', 'solid'], 'ACTIVE': ['#a7f0ba', '#0e6027', 'dashed'], 'DRAFT': ['#e8daff', '#6929c4', 'dotted'], 'BEING REMOVED': ['#fcf4d6', '#684e00', 'double'], 'AUTHORISED': ['#e0e0e0', '#161616', 'solid'] };
+
+    return {
+      isApp: s.surface !== 'emg', isEmergency: s.surface === 'emg',
+      isU1: s.surface === 'u1', isU2: s.surface === 'u2', isU3: s.surface === 'u3', isU4: s.surface === 'u4', isU5: s.surface === 'u5',
+      goU1: this.go('u1'), goU2: this.go('u2'), goU3: this.go('u3'), goU4: this.go('u4'), goU5: this.go('u5'),
+      goEmg: () => { this.setState({ surface: 'emg' }); this.runEmg(); },
+      runEmg: this.runEmg,
+      headerLinks: ['Isolation planning', 'Permits', 'UniGraph', 'Drawings'],
+      showAnn: this.props.showAnnotations ?? true,
+      nav: {
+        u1: this.navStyle(s.surface === 'u1'), u2: this.navStyle(s.surface === 'u2'),
+        u3: this.navStyle(s.surface === 'u3'), u4: this.navStyle(s.surface === 'u4'),
+        u5: this.navStyle(s.surface === 'u5'),
+        emg: this.navStyle(s.surface === 'emg', true)
+      },
+      defects: this.DEFECTS.map((d, i) => ({
+        label: d.label, onPick: () => this.setState({ defect: i }),
+        style: {
+          minHeight: '52px', padding: '12px 14px', textAlign: 'left', cursor: 'pointer',
+          background: s.defect === i ? '#161616' : '#ffffff', color: s.defect === i ? '#ffffff' : '#161616',
+          border: '1px solid ' + (s.defect === i ? '#161616' : '#c6c6c6'), font: "400 14px 'IBM Plex Sans'"
+        }
+      })),
+      defectPicked: s.defect >= 0,
+      defect: s.defect >= 0 ? this.DEFECTS[s.defect] : { pin: '', impact: '', route: '' },
+      expected: this.EXPECTED.map(e => {
+        const done = e.walk ? s.absentConfirmed : false;
+        const st = e.found ? ['FOUND', '#d0e2ff', '#0043ce', 'solid'] : (done ? ['CONFIRMED ABSENT', '#e0e0e0', '#161616', 'dashed'] : (e.absent ? ['CONFIRMED ABSENT', '#e0e0e0', '#161616', 'dashed'] : ['DISCREPANCY', '#ffd7d9', '#a2191f', 'double']));
+        return {
+          role: e.role, label: st[0], bg: st[1], fg: st[2], edge: st[3],
+          showWalk: !!e.walk && !s.absentConfirmed,
+          onWalk: () => this.setState({ absentConfirmed: true })
+        };
+      }),
+      absentConfirmed: s.absentConfirmed,
+      routes: this.ROUTES,
+      ledger: this.LEDGER.map(r => Object.assign({}, r, {
+        rowStyle: {
+          display: 'grid', gridTemplateColumns: '90px 130px 1.6fr 150px 1.3fr 200px', gap: '16px', alignItems: 'start',
+          padding: dense ? '9px 16px' : '13px 16px', borderTop: '1px solid #e0e0e0', background: '#ffffff'
+        }
+      })),
+      fluidItems: ['— select a fluid_code —', 'LUBE-OIL-32 — barrier fluid, ISO VG 32, non-hazardous', 'DIESEL-LT — light distillate, flammable liquid', 'SEAL-OIL-HC — hydrocarbon seal oil, sour service'],
+      fluidPicked: s.fluid > 0,
+      submitDisabled: s.applied || !s.fluid,
+      applied: s.applied,
+      planVersion: s.applied ? 'ISO-2026-0412 · v4' : 'ISO-2026-0412 · v3',
+      planState: s.applied ? 'DRAFT · RE-AUTHORISE' : 'DRAFT',
+      onFluid: e => this.setState({ fluid: e.target.selectedIndex }),
+      applyFix: () => this.setState({ applied: true }),
+      revertFix: () => this.setState({ applied: false, fluid: 0 }),
+      diff: this.DIFF.map(d => Object.assign({}, d, {
+        sigLabel: d.sig ? 'SAFETY-SIGNIFICANT' : 'not safety-significant',
+        sigBg: d.sig ? '#ffd7d9' : '#e0e0e0', sigFg: d.sig ? '#a2191f' : '#525252', sigEdge: d.sig ? 'double' : 'solid'
+      })),
+      versionLine: s.applied ? 'Plan v4 · DRAFT · authorisation from v3 invalidated by 4 safety-significant changes' : 'Plan v3 · DRAFT · 3 items block authorisation',
+      challenges: this.CHALLENGE.map((c, i) => ({
+        label: c, onPick: () => this.setState({ challenge: i }),
+        style: {
+          minHeight: '48px', padding: '12px 16px', textAlign: 'left', cursor: 'pointer',
+          background: s.challenge === i ? '#161616' : '#ffffff', color: s.challenge === i ? '#ffffff' : '#161616',
+          border: '1px solid ' + (s.challenge === i ? '#161616' : '#c6c6c6'), font: "400 14px 'IBM Plex Sans'"
+        }
+      })),
+      challengePicked: s.challenge >= 0,
+      challengeText: s.challenge >= 0 ? this.CHALLENGE[s.challenge] : '',
+      limits: this.LIMITS,
+      openCount: open + blocking,
+      blockLine: blocking + ' items block authorisation · ' + open + ' require acknowledgement',
+      provStrip: [
+        { label: 'UNIGRAPH', value: 'g-2026.07.19-a3f', bg: '#ffffff', fg: '#161616' },
+        { label: 'FHR REVISION', value: 'rev 4.2 · approved', bg: '#ffffff', fg: '#161616' },
+        { label: 'SIC VERSION', value: 'v1.7 · OSHA base + 6 deltas', bg: '#ffffff', fg: '#161616' },
+        { label: 'PATTERN LIBRARY', value: 'rev 12 · L1–L4', bg: '#ffffff', fg: '#161616' },
+        { label: 'SPATIAL REGISTER', value: 'rev 2.0 · 15 m radius', bg: '#ffffff', fg: '#161616' },
+        expired
+          ? { label: 'PLANT STATE', value: 'EXPIRED 27 h — 4 declarations stale', bg: '#ffd7d9', fg: '#a2191f' }
+          : { label: 'PLANT STATE', value: 'declared 06:15 · age 3 h 12 m of 24 h', bg: '#d0e2ff', fg: '#0043ce' }
+      ],
+      mustRead, areas, tiers: this.TIERS, asked: this.ASKED, pick,
+      steps: this.STEPS.map(st => ({
+        n: st.n, action: st.action, meta: st.meta, role: st.role,
+        numFg: st.hold ? '#a2191f' : '#0f62fe',
+        rowStyle: {
+          display: 'grid', gridTemplateColumns: '36px 1fr 110px', gap: '14px', alignItems: 'start',
+          padding: dense ? '9px 16px' : '13px 16px', borderTop: '1px solid #e0e0e0',
+          background: st.hold ? '#fff1f1' : '#ffffff'
+        }
+      })),
+      sel: { id: sel.id, devices: sel.devices, line: sel.line, trace: sel.trace.map(t => ({ k: t[0], v: t[1] })) },
+      sheets, sheet: sheetDefs[s.sheet],
+      toggleTrace: () => this.setState({ sel: 'P-02' }),
+      traceBtn: { height: '32px', padding: '0 12px', background: '#0f62fe', color: '#ffffff', border: 0, font: "400 12px 'IBM Plex Sans'", cursor: 'pointer' },
+      whatIfs,
+      whatIfResult: { title: w.title, body: w.body, bg: s.whatif === 2 ? '#fff1f1' : '#edf5ff', fg: s.whatif === 2 ? '#a2191f' : '#0043ce' },
+      register: this.REGISTER.map(r => {
+        const c = stState[r.state] || stState.AUTHORISED;
+        return Object.assign({}, r, {
+          stBg: c[0], stFg: c[1], stEdge: c[2],
+          dueFg: (r.due.indexOf('overdue') >= 0 || r.due.indexOf('in 6') >= 0) ? '#a2191f' : '#161616',
+          rowStyle: this.rowStyle('150px 90px 1.6fr 130px 110px 130px 1fr', false, dense)
+        });
+      }),
+      protected: this.PROTECTED,
+      report: s.report,
+      openReport: () => this.setState({ report: true }),
+      closeReport: () => this.setState({ report: false }),
+      reportReasons: this.REASONS,
+      nextStep: () => this.setState(st => ({ step: (st.step + 1) % this.FIELD.length, report: false })),
+      prevStep: () => this.setState(st => ({ step: (st.step + this.FIELD.length - 1) % this.FIELD.length, report: false })),
+      field: {
+        bg: hc ? '#000000' : '#ffffff', fg: hc ? '#ffffff' : '#161616',
+        card: hc ? '#161616' : '#f4f4f4', hair: hc ? '#525252' : '#e0e0e0',
+        muted: hc ? '#c6c6c6' : '#525252', input: hc ? '#262626' : '#ffffff',
+        chrome: hc ? '#000000' : '#161616', chromeFg: '#ffffff',
+        kind: f.kind, kindBg: f.kindBg, kindFg: f.kindFg,
+        tag: f.tag, action: f.action, progress: f.progress, why: f.why,
+        facts: f.facts.map(x => ({ k: x[0], v: x[1] })),
+        showTimer: !!f.timer, showBlind: !!f.blind, locked: !!f.locked,
+        timer: (mm < 10 ? '0' : '') + mm + ':' + (ss < 10 ? '0' : '') + ss,
+        timerPct: Math.round((1 - secs / 1800) * 100) + '%',
+        primaryLabel: f.locked ? 'Locked until step 8 is confirmed' : f.primary,
+        primaryStyle: {
+          height: '72px', background: f.locked ? '#c6c6c6' : '#0f62fe', color: f.locked ? '#6f6f6f' : '#ffffff',
+          border: 0, font: "600 20px 'IBM Plex Sans'", cursor: f.locked ? 'not-allowed' : 'pointer'
+        }
+      },
+      emg1: s.emg >= 1, emg2: s.emg >= 2, emg3: s.emg >= 3, emg4: s.emg >= 4,
+      emgRemote: [
+        { tag: 'SDV-1102', action: 'Close — isolates the unit 21 feed to the leaking section', how: 'From the panel at FIC-1102, or ESD matrix row 14', tte: '8 s', conf: 'High · graph-certain' },
+        { tag: 'SDV-1108', action: 'Close — isolates the pump discharge into the section', how: 'From the panel at HS-1108', tte: '12 s', conf: 'High · graph-certain' },
+        { tag: 'BDV-1103', action: 'Open — blows the section down to the flare', how: 'From the panel at HS-1103, after both SDVs are confirmed shut', tte: '20 s to start', conf: 'Medium · flare status not declared' }
+      ],
+      emgManual: [
+        { tag: 'V-1141', access: 'Likely inaccessible', fg: '#ff8389', fill: '#ff8389', why: '12 m from the release point, congested module, approach is downwind of the spray' },
+        { tag: 'V-1156', access: 'Accessible', fg: '#42be65', fill: 'transparent', why: 'Grade, 34 m, north route away from the release. Two-handed gate valve, approx. 40 turns.' },
+        { tag: 'V-1163', access: 'Likely inaccessible', fg: '#ff8389', fill: '#ff8389', why: 'Platform at 8 m, ladder access only, directly above the leak' }
+      ],
+      emgTargets: [
+        { tag: 'V-1104', dist: '8 m', detail: 'Flare KO drum, 18 m³ of C3/C4 at 14 barg. Highest consequence target; relief path to the flare tip, blowdown route available.' },
+        { tag: 'E-1102', dist: '6 m', detail: 'Crude preheat exchanger, 2.4 m³ liquid hydrocarbon, no remote isolation on the shell side.' },
+        { tag: 'Pipe rack 12-N', dist: '4 m above', detail: 'Six live lines including 12"-FG-1102 flare and 4"-FG fuel gas.' },
+        { tag: 'MCC-11', dist: '22 m', detail: 'Occupied building, ventilation intake on the south face facing the release.' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

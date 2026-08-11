@@ -48,6 +48,9 @@ def run_agent_pipeline(
         if session.relief_analysis:
             payload_data.update(session.relief_analysis)
         final_payload.setdefault("debug", {})["unigraph_metadata"] = metadata_debug
+        if agent_result.get("orchestration_error"):
+            final_payload["debug"]["agent_orchestration_error"] = agent_result["orchestration_error"]
+            final_payload["debug"]["agent_completion_mode"] = "deterministic_guardrail"
 
     return AgentRunResult(
         config=session.config,

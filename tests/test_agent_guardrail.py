@@ -7,7 +7,9 @@ must converge on the same order even when the model skips a tool.
 
 These run offline with a stub session -- no graph, no API key.
 """
+import os
 import unittest
+from unittest import mock
 
 import agent.loop as loop
 
@@ -29,6 +31,19 @@ class _StubSession:
         self.loto_procedure = {}
         self.config = type("C", (), {"equipment_tag": "N7"})()
         self.trace = []
+
+
+class _Models:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def generate_content(self, **kwargs):
+        self.calls.append(kwargs["model"])
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
 
 
 class GuardrailOrderingTests(unittest.TestCase):
@@ -65,6 +80,43 @@ class GuardrailOrderingTests(unittest.TestCase):
         session.instrument_context = {"status": "completed"}
         session.evidence_data = {"x": 1}
         self.assertEqual(self._forced_calls(session), [])
+
+    def test_transient_model_errors_retry_then_fallback(self):
+        unavailable = loop.errors.ServerError(503, {"error": {"code": 503, "status": "UNAVAILABLE", "message": "down"}})
+        success = object()
+        models = _Models([unavailable, unavailable, unavailable, success])
+        client = type("Client", (), {"models": models})()
+        events = []
+
+        with mock.patch.dict(os.environ, {"GEMINI_FALLBACK_MODEL": "fallback-model"}), mock.patch.object(loop.time, "sleep"):
+            response, used_model = loop._generate_with_resilience(
+                client,
+                model="primary-model",
+                contents=[],
+                config=object(),
+                on_event=lambda kind, payload: events.append((kind, payload)),
+            )
+
+        self.assertIs(response, success)
+        self.assertEqual(used_model, "fallback-model")
+        self.assertEqual(models.calls, ["primary-model", "primary-model", "primary-model", "fallback-model"])
+        self.assertEqual([kind for kind, _ in events].count("model_retry"), 2)
+        self.assertIn("model_fallback", [kind for kind, _ in events])
+
+    def test_model_failure_is_recorded_and_deterministic_guardrail_runs(self):
+        unavailable = loop.errors.ServerError(503, {"error": {"code": 503, "status": "UNAVAILABLE", "message": "down"}})
+        session = _StubSession()
+        session.validation_data = {"assurance_status": "not_isolated", "isolation_validation": {"terminal": True}}
+
+        with mock.patch.object(loop.genai, "Client", return_value=object()), \
+             mock.patch.object(loop, "_generate_with_resilience", side_effect=unavailable), \
+             mock.patch.object(loop, "_ensure_pipeline", return_value=["validate", "finalize_plan"]) as guardrail:
+            result = loop.run_agent(session, model="primary-model", api_key="key")
+
+        guardrail.assert_called_once()
+        self.assertEqual(result["assurance_status"], "not_isolated")
+        self.assertEqual(result["orchestration_error"]["code"], 503)
+        self.assertEqual(result["forced"], ["validate", "finalize_plan"])
 
 
 if __name__ == "__main__":

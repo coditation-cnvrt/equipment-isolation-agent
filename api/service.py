@@ -159,6 +159,18 @@ def get_cnvrt_drawing_image(cnvrt_project_id: int, collection_id: int, job_id: i
     return Plant360Client(ApiConfig(auth_token=auth_token)).get_bytes(path)
 
 
+def get_cnvrt_hilt_graph(job_id: int, auth_token: str):
+    """Return the exported L2 HILT graph without transforming its domain payload."""
+    return Plant360Client(ApiConfig(auth_token=auth_token)).hilt_graph(job_id)
+
+
+def get_hilt_ui_symbols(symbol_project_id: int, auth_token: str):
+    """Return the HILT job's SVG symbol library without assuming its ID matches the planning project."""
+    return Plant360Client(ApiConfig(auth_token=auth_token)).get_json(
+        f"/ui_symbol/get_ui_symbol_format?project_id={symbol_project_id}"
+    )
+
+
 def get_equipment_bbox(job_id: int, node_id: str, auth_token: str) -> list[int]:
     token_key = hashlib.sha256(auth_token.encode("utf-8")).hexdigest()
     cache_key = (token_key, job_id)
@@ -294,6 +306,8 @@ def execute_agent_request(
             "forced": result.agent_result.get("forced") or [],
             "assurance_status": result.agent_result.get("assurance_status"),
             "validate_terminal": result.agent_result.get("validate_terminal"),
+            "models_used": result.agent_result.get("models_used") or [model],
+            "orchestration_error": result.agent_result.get("orchestration_error"),
         },
         "artifacts": artifacts,
     }

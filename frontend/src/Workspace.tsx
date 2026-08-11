@@ -1,70 +1,134 @@
-import { useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  HiltViewer,
+  type HiltGraphInput,
+  type HiltPointerContext,
+  type HiltSelection,
+  type HiltSymbol,
+  type HiltViewerHandle,
+} from '@coditation-cnvrt/p360-hitl-viewer'
+import '@coditation-cnvrt/p360-hitl-viewer/styles.css'
+
+import type { IsolationPoint } from './api'
+import Skeleton from './Skeleton'
 
 type WorkspaceProps = {
   drawingName: string
   graphName: string
-  imageUrl: string
-  bbox: number[]
+  graph: HiltGraphInput | null
+  symbols: HiltSymbol[]
+  selectedEntityId: string | null
+  drawingLoading: boolean
+  drawingError: string
+  drawingSelection: HiltSelection | null
+  isolationPoints: IsolationPoint[]
+  selectedIsolationPointId: string | null
+  onDrawingSelectionChange: (selection: HiltSelection | null) => void
 }
 
-const MIN_ZOOM = 0.75
-const MAX_ZOOM = 4
-const DEFAULT_ZOOM = 1.3
+type ContextMenuState = {
+  selection: HiltSelection
+  pointer: HiltPointerContext
+}
 
-function Workspace({ drawingName, graphName, imageUrl, bbox }: WorkspaceProps) {
-  const [zoom, setZoom] = useState(DEFAULT_ZOOM)
-  const [offset, setOffset] = useState({ x: 0, y: 0 })
-  const [imageSize, setImageSize] = useState({ width: 0, height: 0 })
-  const dragStart = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null)
+function Workspace({
+  drawingName,
+  graphName,
+  graph,
+  symbols,
+  selectedEntityId,
+  drawingLoading,
+  drawingError,
+  drawingSelection,
+  isolationPoints,
+  selectedIsolationPointId,
+  onDrawingSelectionChange,
+}: WorkspaceProps) {
+  const viewerRef = useRef<HiltViewerHandle>(null)
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+  const [missingSymbols, setMissingSymbols] = useState<string[]>([])
+  const activeId = drawingSelection?.id ?? selectedEntityId
+  const highlights = useMemo(
+    () => selectedEntityId ? [{ entityId: selectedEntityId, color: '#2563eb', label: 'TARGET' }] : [],
+    [selectedEntityId],
+  )
+  const bboxHighlights = useMemo(() => {
+    const selectedIndex = isolationPoints.findIndex((point) => point.visual_id === selectedIsolationPointId)
+    const point = selectedIndex >= 0 ? isolationPoints[selectedIndex] : null
+    if (!point?.bbox || point.bbox.length !== 4) return []
+    return [{
+      id: point.visual_id || `candidate-${selectedIndex}`,
+      bbox: point.bbox as [number, number, number, number],
+      color: point.validation_state === 'rejected' || point.validation_state === 'manual' || point.requires_manual_review ? '#b45309' : '#6d28d9',
+      label: `${point.validation_state === 'rejected' ? 'C' : 'P'}-${String(selectedIndex + 1).padStart(2, '0')}`,
+    }]
+  }, [isolationPoints, selectedIsolationPointId])
 
-  function resetView() {
-    setZoom(DEFAULT_ZOOM)
-    setOffset({ x: 0, y: 0 })
-  }
+  useEffect(() => {
+    setContextMenu(null)
+  }, [graph])
+
+  useEffect(() => {
+    if (!selectedIsolationPointId) return
+    const point = isolationPoints.find((item) => item.visual_id === selectedIsolationPointId)
+    if (!point?.bbox || point.bbox.length !== 4) return
+    viewerRef.current?.panToBBox(point.bbox as [number, number, number, number])
+  }, [isolationPoints, selectedIsolationPointId])
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-white">
-      <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
-        <div>
-          <p className="font-mono text-[10px] tracking-[0.12em] text-slate-500">SELECTED DRAWING</p>
-          <h2 className="mt-2 text-lg font-medium">{drawingName}</h2>
+      <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-3">
+        <div className="min-w-0">
+          <p className="font-mono text-[10px] tracking-[0.12em] text-slate-500">SELECTED HILT DRAWING</p>
+          <h2 className="mt-1 truncate text-base font-medium">{drawingName}</h2>
         </div>
-        <span className="font-mono text-xs text-slate-500">UNIGRAPH {graphName}</span>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="hidden font-mono text-[10px] text-slate-500 2xl:inline">UNIGRAPH {graphName}</span>
+          <button className="border border-slate-300 px-2.5 py-1.5 font-mono text-[10px] hover:bg-slate-100 disabled:opacity-40" disabled={!graph} onClick={() => viewerRef.current?.fitToContent()} type="button">FIT CONTENT</button>
+          <button className="border border-slate-300 px-2.5 py-1.5 font-mono text-[10px] hover:bg-slate-100 disabled:opacity-40" disabled={!graph} onClick={() => viewerRef.current?.fitToDrawing()} type="button">FULL DRAWING</button>
+        </div>
       </div>
-      <div
-        className="relative flex flex-1 cursor-grab items-center justify-center overflow-hidden bg-slate-100 active:cursor-grabbing"
-        onPointerDown={(event) => {
-          event.currentTarget.setPointerCapture(event.pointerId)
-          dragStart.current = { x: event.clientX, y: event.clientY, offsetX: offset.x, offsetY: offset.y }
-        }}
-        onPointerMove={(event) => {
-          if (!dragStart.current) return
-          setOffset({
-            x: dragStart.current.offsetX + event.clientX - dragStart.current.x,
-            y: dragStart.current.offsetY + event.clientY - dragStart.current.y,
-          })
-        }}
-        onPointerUp={() => { dragStart.current = null }}
-        onWheel={(event) => {
-          event.preventDefault()
-          setZoom((current) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, current - event.deltaY * 0.0015)))
-        }}
-      >
-        <div className="relative max-h-full max-w-full" style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})` }}>
-          <img
-            alt={drawingName}
-            className="max-h-full max-w-full select-none object-contain"
-            draggable={false}
-            onLoad={(event) => setImageSize({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
-            src={imageUrl}
-          />
-          {bbox.length === 4 && imageSize.width > 0 && <div className="pointer-events-none absolute border-[3px] border-blue-600 bg-blue-500/15 shadow-[0_0_0_2px_rgba(255,255,255,0.85)]" style={{ left: `${bbox[0] / imageSize.width * 100}%`, top: `${bbox[1] / imageSize.height * 100}%`, width: `${bbox[2] / imageSize.width * 100}%`, height: `${bbox[3] / imageSize.height * 100}%` }} />}
-        </div>
-        <div className="absolute bottom-3 right-3 flex items-center gap-1 rounded-md border border-slate-300 bg-white/95 p-1 shadow-sm">
-          <button aria-label="Zoom out" className="h-8 w-8 text-lg hover:bg-slate-100" onClick={() => setZoom((current) => Math.max(MIN_ZOOM, current - 0.2))} type="button">−</button>
-          <button className="min-w-14 px-2 font-mono text-[11px] hover:bg-slate-100" onClick={resetView} type="button">{Math.round(zoom * 100)}%</button>
-          <button aria-label="Zoom in" className="h-8 w-8 text-lg hover:bg-slate-100" onClick={() => setZoom((current) => Math.min(MAX_ZOOM, current + 0.2))} type="button">+</button>
-        </div>
+
+      <div className="relative min-h-0 flex-1 overflow-hidden bg-slate-100" onClick={() => setContextMenu(null)}>
+        {drawingLoading && <div className="h-full bg-white p-6"><Skeleton className="h-full w-full" /></div>}
+        {!drawingLoading && drawingError && <div className="flex h-full items-center justify-center p-8 text-center"><div><h3 className="font-medium text-red-900">HILT drawing unavailable</h3><p className="mt-2 max-w-md text-sm text-red-700">{drawingError}</p></div></div>}
+        {!drawingLoading && !drawingError && graph && <HiltViewer
+          ref={viewerRef}
+          ariaLabel={`${drawingName} HILT drawing`}
+          className="border-0"
+          graph={graph}
+          bboxHighlights={bboxHighlights}
+          highlights={highlights}
+          selectedId={activeId}
+          symbols={symbols}
+          onEntityContextMenu={(nextSelection, pointer) => {
+            onDrawingSelectionChange(nextSelection)
+            setContextMenu({ selection: nextSelection, pointer })
+          }}
+          onMissingSymbols={setMissingSymbols}
+          onSelectionChange={(nextSelection) => {
+            onDrawingSelectionChange(nextSelection)
+            setContextMenu(null)
+          }}
+        />}
+        {!drawingLoading && !drawingError && !graph && <div className="flex h-full items-center justify-center text-sm text-slate-600">No exported HILT graph is available.</div>}
+
+        {missingSymbols.length > 0 && graph && <div className="pointer-events-none absolute bottom-3 left-3 border border-amber-300 bg-amber-50/95 px-3 py-2 font-mono text-[10px] text-amber-900 shadow-sm">{missingSymbols.length} symbol {missingSymbols.length === 1 ? 'fallback' : 'fallbacks'}</div>}
+
+        {contextMenu && <div
+          className="fixed z-50 min-w-56 border border-slate-300 bg-white p-3 text-xs shadow-xl"
+          onClick={(event) => event.stopPropagation()}
+          style={{ left: contextMenu.pointer.clientX, top: contextMenu.pointer.clientY }}
+        >
+          <p className="font-mono text-[10px] tracking-wide text-slate-500">{contextMenu.selection.kind.toUpperCase()}</p>
+          <p className="mt-1 max-w-72 break-all font-mono text-slate-900">{contextMenu.selection.id}</p>
+          <p className="mt-2 capitalize text-slate-600">{String(contextMenu.selection.payload.entity_class ?? 'unclassified').replaceAll('_', ' ')}</p>
+          <button className="mt-3 w-full border border-slate-300 px-2 py-1 text-left hover:bg-slate-100" onClick={() => setContextMenu(null)} type="button">Dismiss</button>
+        </div>}
+      </div>
+      <div className="flex items-center justify-between border-t border-slate-200 px-4 py-2 font-mono text-[10px] text-slate-500">
+        <span>WHEEL ZOOM · MIDDLE-DRAG PAN · CLICK SELECT · RIGHT-CLICK DETAILS</span>
+        <span>{symbols.length} PROJECT SYMBOLS</span>
       </div>
     </div>
   )

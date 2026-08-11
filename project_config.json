@@ -5,10 +5,13 @@
       "gate_valve",
       "ball_valve",
       "globe_valve",
+      "butterfly_valve",
+      "angle_valve",
       "valve",
       "generic_inline_valve",
       "blind",
       "spade",
+      "spectacle_blind_open",
       "flange",
       "blank_flange",
       "line_break_point",
@@ -18,6 +21,7 @@
     "conditional_classes": [
       "check_valve",
       "control_valve",
+      "three_way_valve",
       "undefined_valve"
     ],
     "excluded_classes": [
@@ -39,6 +43,7 @@
       "blind",
       "spade",
       "spectacle",
+      "spectacle_blind_open",
       "blank_flange",
       "blind_flange"
     ],

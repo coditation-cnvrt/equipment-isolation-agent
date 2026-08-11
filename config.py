@@ -54,7 +54,10 @@ class IsolationPolicy:
         "gate_valve",
         "ball_valve",
         "globe_valve",
+        "butterfly_valve",
+        "angle_valve",
         "blind",
+        "spectacle_blind_open",
         "spade",
         "flange",
         "blank_flange",
@@ -76,12 +79,13 @@ class IsolationPolicy:
         "dcs_function_in_control_room",
         "alarm",
     )
-    conditional_classes: tuple[str, ...] = ("check_valve", "control_valve", "undefined_valve")
+    conditional_classes: tuple[str, ...] = ("check_valve", "control_valve", "three_way_valve", "undefined_valve")
     include_conditional_candidates: bool = False
     positive_isolation_classes: tuple[str, ...] = (
         "blind",
         "spade",
         "spectacle",
+        "spectacle_blind_open",
         "blank_flange",
         "blind_flange",
     )

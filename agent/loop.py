@@ -14,16 +14,19 @@ Guardrails:
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, Callable
 
 from google import genai
-from google.genai import types
+from google.genai import errors, types
 
 from agent.prompts import SYSTEM_PROMPT, user_message
 from agent.session import AgentSession
 from agent.tools import TOOL_SPECS, call_tool
 
 DEFAULT_MODEL = "gemini-2.5-flash"
+TRANSIENT_MODEL_STATUS_CODES = {408, 429, 500, 502, 503, 504}
+MODEL_RETRY_DELAYS_SECONDS = (1.0, 2.0)
 
 
 def function_declarations() -> list[types.FunctionDeclaration]:
@@ -68,20 +71,41 @@ def run_agent(
     assurance_status: str | None = None
     validate_terminal = False
     steps_used = 0
+    active_model = model
+    models_used = [model]
+    orchestration_error: dict | None = None
 
     _emit(on_event, "start", {"equipment": equipment_tag, "model": model, "max_steps": max_steps})
 
     for step in range(1, max_steps + 1):
         steps_used = step
-        response = client.models.generate_content(
-            model=model,
-            contents=contents,
-            config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
-                tools=[types.Tool(function_declarations=declarations)],
-                temperature=0,
-            ),
+        generate_config = types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            tools=[types.Tool(function_declarations=declarations)],
+            temperature=0,
         )
+        try:
+            response, used_model = _generate_with_resilience(
+                client,
+                model=active_model,
+                contents=contents,
+                config=generate_config,
+                on_event=on_event,
+            )
+        except errors.APIError as exc:
+            orchestration_error = {
+                "kind": "model_unavailable",
+                "code": getattr(exc, "code", None),
+                "status": getattr(exc, "status", None),
+                "message": getattr(exc, "message", None) or str(exc),
+            }
+            transcript.append({"step": step, "role": "system", "kind": "model_error", "error": orchestration_error})
+            _emit(on_event, "model_error", orchestration_error)
+            break
+        if used_model != active_model:
+            active_model = used_model
+            if used_model not in models_used:
+                models_used.append(used_model)
 
         parts = (response.candidates[0].content.parts or []) if response.candidates else []
         text_chunks = [p.text for p in parts if getattr(p, "text", None)]
@@ -135,7 +159,36 @@ def run_agent(
         "assurance_status": assurance_status,
         "validate_terminal": validate_terminal,
         "forced": forced,
+        "models_used": models_used,
+        "orchestration_error": orchestration_error,
     }
+
+
+def _generate_with_resilience(client, *, model: str, contents, config, on_event):
+    fallback = str(os.environ.get("GEMINI_FALLBACK_MODEL") or DEFAULT_MODEL).strip()
+    models = [model] + ([fallback] if fallback and fallback != model else [])
+    last_error: errors.APIError | None = None
+    for model_index, candidate_model in enumerate(models):
+        if model_index:
+            _emit(on_event, "model_fallback", {"from": model, "to": candidate_model})
+        for attempt in range(1, len(MODEL_RETRY_DELAYS_SECONDS) + 2):
+            try:
+                response = client.models.generate_content(
+                    model=candidate_model,
+                    contents=contents,
+                    config=config,
+                )
+                return response, candidate_model
+            except errors.APIError as exc:
+                last_error = exc
+                code = int(getattr(exc, "code", 0) or 0)
+                if code not in TRANSIENT_MODEL_STATUS_CODES or attempt > len(MODEL_RETRY_DELAYS_SECONDS):
+                    break
+                delay = MODEL_RETRY_DELAYS_SECONDS[attempt - 1]
+                _emit(on_event, "model_retry", {"model": candidate_model, "attempt": attempt, "code": code, "delay_seconds": delay})
+                time.sleep(delay)
+    assert last_error is not None
+    raise last_error
 
 
 def _ensure_pipeline(session: AgentSession, validate_terminal: bool, on_event) -> list[str]:

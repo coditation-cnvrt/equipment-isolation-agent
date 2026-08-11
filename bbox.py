@@ -130,6 +130,26 @@ def resolve_bboxes(candidate_data, config):
     candidate_pool = _attach_hilt_source_context(candidate_pool, hilt_source_context)
     flow_roles = classify_nozzle_flow(hilt_payload) if hilt_payload else {}
     candidate_pool = _attach_flow_roles(candidate_pool, flow_roles)
+    # Resolve concrete HILT branches before marking companion lines as context.
+    # Certain equipment symbols use a companion edge only to attach a nozzle to
+    # the first flange; hilt_topology admits that edge solely when the flange has
+    # an onward process-line connection. Those sources are process obligations,
+    # not companion context.
+    hilt_branch_obligations = (
+        resolve_source_branch_isolation(
+            hilt_payload,
+            _hilt_source_entries(candidate_pool),
+            y_flip=y_flip_h,
+            policy=config.policy,
+        )
+        if hilt_payload and y_flip_h is not None
+        else []
+    )
+    hilt_process_attachment_sources = {
+        (str(source.get("equipment_tag") or ""), str(source.get("source_component") or source.get("source_component_tag") or ""))
+        for source in hilt_branch_obligations
+        if source.get("branches")
+    }
     hilt_context_sources, hilt_context_items = _hilt_context_sources(candidate_pool, symbols)
     visual_context_sources, visual_context_items = _instrument_context_sources(candidate_pool, symbols, hilt_context_sources)
     context_sources = hilt_context_sources | visual_context_sources
@@ -149,11 +169,13 @@ def resolve_bboxes(candidate_data, config):
     }
     mislabeled_sources = isolation_valve_sources & signal_line_context_sources
     context_overridden = sorted(str(source) for source in context_sources & mislabeled_sources)
-    context_sources = context_sources - mislabeled_sources
+    attachment_context_overridden = sorted(str(source) for source in context_sources & hilt_process_attachment_sources)
+    excluded_context_sources = mislabeled_sources | hilt_process_attachment_sources
+    context_sources = context_sources - excluded_context_sources
     context_instruments = [
         item
         for item in (hilt_context_items + visual_context_items)
-        if (str(item.get("equipment_tag") or ""), str(item.get("source_component") or "")) not in mislabeled_sources
+        if (str(item.get("equipment_tag") or ""), str(item.get("source_component") or "")) not in excluded_context_sources
     ]
     candidate_pool = _mark_source_context(candidate_pool, context_sources)
     selectable_candidate_pool = _selectable_candidate_pool(candidate_pool, config.policy)
@@ -171,16 +193,6 @@ def resolve_bboxes(candidate_data, config):
         resolve_nozzle_isolation(hilt_payload, config.equipment_tag, y_flip=y_flip_h, policy=config.policy)
         if hilt_payload and y_flip_h is not None
         else {}
-    )
-    hilt_branch_obligations = (
-        resolve_source_branch_isolation(
-            hilt_payload,
-            _hilt_source_entries(candidate_pool),
-            y_flip=y_flip_h,
-            policy=config.policy,
-        )
-        if hilt_payload and y_flip_h is not None
-        else []
     )
     candidates = (
         _merge_hilt_source_branches(candidates, hilt_branch_obligations, flow_roles, config.equipment_tag, config.policy)
@@ -208,6 +220,7 @@ def resolve_bboxes(candidate_data, config):
             "context_instrument_source_component_count": len(context_sources),
             "context_instruments": context_instruments,
             "context_overridden_by_isolation_valve": context_overridden,
+            "context_overridden_by_hilt_process_attachment": attachment_context_overridden,
             "flow_nozzle_classified_count": len(flow_roles),
             "flow_candidate_role_counts": {
                 role: sum(1 for c in candidates if (c.get("source_flow_role") or FlowRole.UNKNOWN.value) == role)

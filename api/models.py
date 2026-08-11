@@ -124,6 +124,7 @@ class RunStatus(BaseModel):
     started_at: float | None = None
     finished_at: float | None = None
     agent: dict[str, Any] | None = None
+    request: dict[str, Any] = Field(default_factory=dict)
     artifacts: dict[str, str] = Field(default_factory=dict)
     error: dict[str, Any] | None = None
 

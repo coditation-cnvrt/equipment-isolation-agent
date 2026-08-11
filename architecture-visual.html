@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Equipment Isolation Agent - Logical Architecture</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --ink: #17202a;
+      --muted: #5d6875;
+      --line: #c9d1dc;
+      --blue: #1768ac;
+      --blue-soft: #e7f1fb;
+      --green: #1d7f54;
+      --green-soft: #e7f5ee;
+      --amber: #b36b00;
+      --amber-soft: #fff3df;
+      --red: #a83232;
+      --red-soft: #fdecec;
+      --violet: #6647a8;
+      --violet-soft: #f0ebfb;
+      --teal: #18707a;
+      --teal-soft: #e3f4f6;
+      --shadow: 0 8px 24px rgba(20, 30, 45, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.45;
+    }
+
+    main {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 32px 24px 56px;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+
+    h1 {
+      font-size: clamp(30px, 4vw, 48px);
+      line-height: 1.05;
+      letter-spacing: 0;
+      max-width: 920px;
+    }
+
+    h2 {
+      font-size: 22px;
+      margin-bottom: 16px;
+    }
+
+    h3 {
+      font-size: 15px;
+      margin-bottom: 6px;
+    }
+
+    .subtitle {
+      margin-top: 14px;
+      max-width: 840px;
+      color: var(--muted);
+      font-size: 17px;
+    }
+
+    .section {
+      margin-top: 34px;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 32px;
+      padding: 6px 10px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 6px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .dot-blue { background: var(--blue); }
+    .dot-green { background: var(--green); }
+    .dot-amber { background: var(--amber); }
+    .dot-red { background: var(--red); }
+    .dot-violet { background: var(--violet); }
+    .dot-teal { background: var(--teal); }
+
+    .architecture {
+      display: grid;
+      grid-template-columns: minmax(190px, 0.75fr) minmax(250px, 1fr) minmax(340px, 1.35fr) minmax(230px, 0.9fr);
+      gap: 18px;
+      align-items: stretch;
+      margin-top: 20px;
+    }
+
+    .lane {
+      position: relative;
+      min-height: 560px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.58);
+      border-radius: 8px;
+    }
+
+    .lane-title {
+      color: var(--muted);
+      font-weight: 700;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 14px;
+    }
+
+    .stack {
+      display: grid;
+      gap: 12px;
+    }
+
+    .node {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 8px;
+      padding: 13px;
+      box-shadow: var(--shadow);
+      position: relative;
+    }
+
+    .node p,
+    .small {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .node-blue { border-color: #9bc4e7; background: var(--blue-soft); }
+    .node-green { border-color: #9bd3b8; background: var(--green-soft); }
+    .node-amber { border-color: #efc782; background: var(--amber-soft); }
+    .node-red { border-color: #e4aaaa; background: var(--red-soft); }
+    .node-violet { border-color: #c3b4ec; background: var(--violet-soft); }
+    .node-teal { border-color: #9fd4db; background: var(--teal-soft); }
+
+    .arrow-right::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      right: -31px;
+      width: 28px;
+      border-top: 2px solid var(--line);
+    }
+
+    .arrow-right::before {
+      content: "";
+      position: absolute;
+      top: calc(50% - 4px);
+      right: -33px;
+      width: 8px;
+      height: 8px;
+      border-top: 2px solid var(--line);
+      border-right: 2px solid var(--line);
+      transform: rotate(45deg);
+      background: transparent;
+      z-index: 1;
+    }
+
+    .agent-box {
+      border: 2px solid var(--violet);
+      background: var(--violet-soft);
+    }
+
+    .authority {
+      border: 2px solid var(--red);
+      background: var(--red-soft);
+    }
+
+    .tool-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .tool {
+      min-height: 42px;
+      padding: 8px;
+      border-radius: 6px;
+      border: 1px solid #d5dbe5;
+      background: #fff;
+      font-size: 12px;
+      color: #334052;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(130px, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .step {
+      position: relative;
+      min-height: 118px;
+      padding: 14px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .step::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      right: -15px;
+      width: 16px;
+      border-top: 2px solid var(--line);
+    }
+
+    .step:last-child::after {
+      display: none;
+    }
+
+    .step-num {
+      width: 26px;
+      height: 26px;
+      display: inline-grid;
+      place-items: center;
+      margin-bottom: 8px;
+      border-radius: 50%;
+      background: var(--ink);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .authority-strip {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+
+    .rule {
+      padding: 16px;
+      border-radius: 8px;
+      border: 1px solid #e0b2b2;
+      background: var(--red-soft);
+      min-height: 120px;
+    }
+
+    .io-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      margin-top: 18px;
+    }
+
+    .list {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+      padding: 0;
+      list-style: none;
+    }
+
+    .list li {
+      padding: 8px 10px;
+      background: rgba(255, 255, 255, 0.75);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: #334052;
+      font-size: 13px;
+    }
+
+    code {
+      padding: 2px 5px;
+      background: rgba(0, 0, 0, 0.06);
+      border-radius: 4px;
+      font-size: 0.92em;
+    }
+
+    @media (max-width: 980px) {
+      .architecture,
+      .flow,
+      .authority-strip,
+      .io-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .lane {
+        min-height: auto;
+      }
+
+      .arrow-right::before,
+      .arrow-right::after,
+      .step::after {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Equipment Isolation Agent Logical Architecture</h1>
+      <p class="subtitle">
+        The agent is a Gemini-based orchestrator around deterministic plant-safety modules. Graph, HILT, and Plant360 data feed the pipeline; deterministic validation remains the authority for isolation assurance.
+      </p>
+      <div class="legend" aria-label="Legend">
+        <span><i class="dot dot-blue"></i>Entrypoints</span>
+        <span><i class="dot dot-violet"></i>AI orchestration</span>
+        <span><i class="dot dot-green"></i>Deterministic tools</span>
+        <span><i class="dot dot-red"></i>Authoritative safety logic</span>
+        <span><i class="dot dot-teal"></i>Data sources</span>
+        <span><i class="dot dot-amber"></i>Outputs</span>
+      </div>
+    </header>
+
+    <section class="section">
+      <h2>System View</h2>
+      <div class="architecture">
+        <div class="lane">
+          <div class="lane-title">Entry</div>
+          <div class="stack">
+            <div class="node node-blue arrow-right">
+              <h3>CLI</h3>
+              <p><code>run.py</code> deterministic baseline</p>
+            </div>
+            <div class="node node-blue arrow-right">
+              <h3>Agent CLI</h3>
+              <p><code>python -m agent</code> Gemini-orchestrated run</p>
+            </div>
+            <div class="node node-blue arrow-right">
+              <h3>HTTP API</h3>
+              <p><code>api/</code> CNVRT integration and run persistence</p>
+            </div>
+            <div class="node">
+              <h3>Run Config</h3>
+              <p>equipment tag, project context, job id/name, auth token, isolation policy</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="lane">
+          <div class="lane-title">Agent Session</div>
+          <div class="stack">
+            <div class="node agent-box arrow-right">
+              <h3>Gemini Orchestrator</h3>
+              <p>Chooses which deterministic tool to call next using a ReAct-style loop.</p>
+            </div>
+            <div class="node node-violet">
+              <h3>Server-Side State</h3>
+              <p><code>AgentSession</code> stores boundary, candidates, bboxes, evidence, validation, procedure, payload, and trace.</p>
+            </div>
+            <div class="node node-violet">
+              <h3>Compact Tool Results</h3>
+              <p>Tools return counts, tags, gaps, and summaries so heavy graph data stays out of the LLM context.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="lane">
+          <div class="lane-title">Deterministic Pipeline Tools</div>
+          <div class="node node-green arrow-right">
+            <h3>Shared Safety Pipeline</h3>
+            <p>Same deterministic modules are used by both the baseline runner and the agentic runner.</p>
+            <div class="tool-grid">
+              <div class="tool">fetch_boundary</div>
+              <div class="tool">find_candidates</div>
+              <div class="tool">resolve_bboxes</div>
+              <div class="tool">analyze_obligations</div>
+              <div class="tool">schemes_and_relief</div>
+              <div class="tool">instrument_context</div>
+              <div class="tool">build_evidence</div>
+              <div class="tool">validate</div>
+              <div class="tool">downstream_impact</div>
+              <div class="tool">build_loto</div>
+              <div class="tool">osha_guidance</div>
+              <div class="tool">finalize_plan</div>
+            </div>
+          </div>
+          <div class="node authority" style="margin-top: 12px;">
+            <h3>Guardrail Completion</h3>
+            <p>If the LLM stops early, the loop forces missing required stages through validation and finalization.</p>
+          </div>
+        </div>
+
+        <div class="lane">
+          <div class="lane-title">Final Products</div>
+          <div class="stack">
+            <div class="node authority">
+              <h3>Assurance Status</h3>
+              <p><code>validator.py</code> is authoritative. The LLM cannot override it.</p>
+            </div>
+            <div class="node authority">
+              <h3>LOTO Procedure</h3>
+              <p><code>loto.py</code> owns the fixed OSHA phase order.</p>
+            </div>
+            <div class="node node-amber">
+              <h3>UI Payload</h3>
+              <p><code>&lt;TAG&gt;.json</code> with plan, evidence, validation, impact, and procedure.</p>
+            </div>
+            <div class="node node-amber">
+              <h3>Viewer + Audit</h3>
+              <p><code>&lt;TAG&gt;.html</code> P&amp;ID overlay and <code>&lt;TAG&gt;_trace.json</code> tool audit.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Data Flow</h2>
+      <div class="flow">
+        <div class="step node-teal">
+          <div class="step-num">1</div>
+          <h3>Resolve Context</h3>
+          <p>Load project, collection, UniGraph project id, job ids, graph traversal source.</p>
+        </div>
+        <div class="step node-teal">
+          <div class="step-num">2</div>
+          <h3>Read Plant Data</h3>
+          <p>Fetch JanusGraph boundary, HILT/STLM topology, bboxes, and P&amp;ID image.</p>
+        </div>
+        <div class="step node-green">
+          <div class="step-num">3</div>
+          <h3>Select Isolation</h3>
+          <p>Find candidate valves/blinds/flanges, obligations, schemes, relief, and evidence.</p>
+        </div>
+        <div class="step node-red">
+          <div class="step-num">4</div>
+          <h3>Validate</h3>
+          <p>Compute assurance status and unresolved gaps deterministically.</p>
+        </div>
+        <div class="step node-amber">
+          <div class="step-num">5</div>
+          <h3>Render Result</h3>
+          <p>Create checklist, LOTO procedure, downstream impact, JSON, viewer, and trace.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Authority Boundaries</h2>
+      <div class="authority-strip">
+        <div class="rule">
+          <h3>LLM Can Orchestrate</h3>
+          <p class="small">The model decides which tools to call, can investigate gaps, ask for OSHA guidance, and summarize results.</p>
+        </div>
+        <div class="rule">
+          <h3>LLM Cannot Certify</h3>
+          <p class="small"><code>validator.py</code> decides the authoritative assurance status. Agent reasoning cannot mark an incomplete plan safe.</p>
+        </div>
+        <div class="rule">
+          <h3>LOTO Order Is Fixed</h3>
+          <p class="small"><code>loto.py</code> owns the OSHA phase sequence. RAG guidance may support wording and within-phase ordering only.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Inputs And Outputs</h2>
+      <div class="io-grid">
+        <div class="node node-teal">
+          <h3>Inputs</h3>
+          <ul class="list">
+            <li>Equipment tag selected by user or API request</li>
+            <li>UniGraph / JanusGraph equipment and piping topology</li>
+            <li>Plant360 STLM/HILT geometry and P&amp;ID image</li>
+            <li>Isolation policy and work scope</li>
+            <li>Bundled OSHA 1910.147 reference for guidance</li>
+          </ul>
+        </div>
+        <div class="node node-amber">
+          <h3>Outputs</h3>
+          <ul class="list">
+            <li>Isolation boundary and selected energy isolation devices</li>
+            <li>Evidence checks and deterministic assurance status</li>
+            <li>Detected relief points and downstream impact warnings</li>
+            <li>OSHA-style LOTO procedure</li>
+            <li>JSON payload, P&amp;ID overlay viewer, and agent audit trace</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

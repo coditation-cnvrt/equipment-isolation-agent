@@ -33,6 +33,18 @@ class IsolationPolicyTests(unittest.TestCase):
         self.assertEqual(result["candidates"][0]["policy_decision"], "conditional_manual_review")
         self.assertTrue(result["candidates"][0]["requires_manual_review"])
 
+    def test_common_hilt_isolation_devices_are_classified_by_default_policy(self):
+        policy = IsolationPolicy()
+        butterfly = find_candidates(_boundary_with_candidate("butterfly_valve"), policy)["candidates"][0]
+        spectacle = find_candidates(_boundary_with_candidate("spectacle_blind_open"), policy)["candidates"][0]
+        three_way = find_candidates(_boundary_with_candidate("three_way_valve"), policy)["candidates"][0]
+
+        self.assertEqual(butterfly["policy_decision"], "automatic")
+        self.assertEqual(spectacle["policy_decision"], "automatic")
+        self.assertTrue(spectacle["classification"]["is_positive_isolation"])
+        self.assertEqual(three_way["policy_decision"], "conditional_manual_review")
+        self.assertTrue(three_way["requires_manual_review"])
+
     def test_conditional_valve_can_be_enabled_explicitly(self):
         policy = IsolationPolicy(include_conditional_candidates=True)
         result = find_candidates(_boundary_with_candidate("undefined_valve"), policy)
@@ -118,6 +130,57 @@ class IsolationPolicyTests(unittest.TestCase):
         branches = result[0]["branches"]
         self.assertEqual([branch["status"] for branch in branches], ["isolated", "isolated"])
         self.assertEqual({branch["valve"]["valve_id"] for branch in branches}, {"V1", "V2"})
+
+    def test_hilt_topology_crosses_companion_nozzle_attachment_into_process_network(self):
+        payload = {
+            "hilt_graph": {
+                "nodes": [
+                    _hilt_node("N1", "equipment_nozzle", "N1_T-1"),
+                    _hilt_node("F1T", "flange", ""),
+                    _hilt_node("F1B", "flange", ""),
+                    _hilt_node("V1", "gate_valve", "GV-1"),
+                ],
+                "links": [
+                    _hilt_link("N1", "F1T", "companion_line"),
+                    _hilt_link("F1T", "F1B"),
+                    _hilt_link("F1B", "V1"),
+                ],
+            }
+        }
+
+        result = resolve_source_branch_isolation(
+            payload,
+            [{"equipment_tag": "T-1", "source_component_id": "SRC1", "source_visual_id": "N1"}],
+            policy=IsolationPolicy(),
+        )
+
+        branch = result[0]["branches"][0]
+        self.assertEqual(branch["status"], "isolated")
+        self.assertEqual(branch["valve"]["valve_id"], "V1")
+        self.assertEqual(branch["path_node_ids"], ["N1", "F1T", "F1B", "V1"])
+
+    def test_hilt_topology_does_not_traverse_companion_line_without_onward_process_network(self):
+        payload = {
+            "hilt_graph": {
+                "nodes": [
+                    _hilt_node("N1", "equipment_nozzle", "N1_T-1"),
+                    _hilt_node("F1", "flange", ""),
+                    _hilt_node("V1", "gate_valve", "GV-1"),
+                ],
+                "links": [
+                    _hilt_link("N1", "F1", "companion_line"),
+                    _hilt_link("F1", "V1", "companion_line"),
+                ],
+            }
+        }
+
+        result = resolve_source_branch_isolation(
+            payload,
+            [{"equipment_tag": "T-1", "source_component_id": "SRC1", "source_visual_id": "N1"}],
+            policy=IsolationPolicy(),
+        )
+
+        self.assertEqual(result, [])
 
     def test_hilt_source_uuid_branch_topology_continues_past_check_valve(self):
         payload = {
@@ -423,11 +486,11 @@ def _hilt_node(node_id, entity_class, tag):
     }
 
 
-def _hilt_link(source, target):
+def _hilt_link(source, target, entity_class="primary_process_line"):
     return {
         "source": source,
         "target": target,
-        "payload": {"entity_class": "primary_process_line", "from": source, "to": target},
+        "payload": {"entity_class": entity_class, "from": source, "to": target},
     }
 
 

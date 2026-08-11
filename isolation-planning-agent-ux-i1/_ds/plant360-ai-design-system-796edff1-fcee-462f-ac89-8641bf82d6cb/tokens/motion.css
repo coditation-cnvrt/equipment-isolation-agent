@@ -1,0 +1,16 @@
+/* Carbon motion — exact durations/easings from @carbon/motion */
+:root {
+  --duration-fast-01: 70ms; /* @kind other */
+  --duration-fast-02: 110ms; /* @kind other */
+  --duration-moderate-01: 150ms; /* @kind other */
+  --duration-moderate-02: 240ms; /* @kind other */
+  --duration-slow-01: 400ms; /* @kind other */
+  --duration-slow-02: 700ms; /* @kind other */
+
+  --easing-standard-productive: cubic-bezier(0.2, 0, 0.38, 0.9); /* @kind other */
+  --easing-standard-expressive: cubic-bezier(0.4, 0.14, 0.3, 1); /* @kind other */
+  --easing-entrance-productive: cubic-bezier(0, 0, 0.38, 0.9); /* @kind other */
+  --easing-entrance-expressive: cubic-bezier(0, 0, 0.3, 1); /* @kind other */
+  --easing-exit-productive: cubic-bezier(0.2, 0, 1, 0.9); /* @kind other */
+  --easing-exit-expressive: cubic-bezier(0.4, 0.14, 1, 1); /* @kind other */
+}

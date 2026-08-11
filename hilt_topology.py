@@ -19,6 +19,10 @@ from domain.enums import IsolationDecision
 from domain.topology import PROCESS_LINE_CLASSES, normalize_tag, nozzle_belongs_to_equipment
 
 BRANCH_CONTEXT_VALVE_CLASSES = {"check_valve", "control_valve"}
+# Plain flanges are connection hardware, not deterministic barriers. They remain
+# fallback field-confirmation candidates elsewhere, but authoritative topology
+# must continue through them to find an actual valve/blind/disconnection.
+TRAVERSABLE_CONNECTION_CLASSES = {"flange", "flanged_joint"}
 
 
 def resolve_nozzle_isolation(hilt_payload: dict, equipment_tag: str, y_flip: float | None = None, policy=None) -> dict:
@@ -49,7 +53,7 @@ def resolve_nozzle_isolation(hilt_payload: dict, equipment_tag: str, y_flip: flo
 
     result: dict[str, list] = {}
     for tag, nozzle_id in nozzles.items():
-        result[tag] = _nearest_valves(nozzle_id, adj, node_by_id, max_hops=10, y_flip=y_flip, policy=policy)
+        result[tag] = _nearest_valves(nozzle_id, adj, node_by_id, max_hops=24, y_flip=y_flip, policy=policy)
     return result
 
 
@@ -58,7 +62,7 @@ def resolve_source_branch_isolation(
     source_entries: list[dict],
     y_flip: float | None = None,
     policy=None,
-    max_hops: int = 10,
+    max_hops: int = 24,
 ) -> list[dict]:
     """Resolve required isolation per process branch from concrete HILT source UUIDs.
 
@@ -119,15 +123,34 @@ def _hilt_index(graph):
         if nid:
             node_by_id[str(nid)] = node
 
-    # Adjacency over PROCESS lines only (instrument/electrical/companion lines excluded).
+    # Build the process network first. A HILT ``companion_line`` is normally
+    # non-process context and must not be generally traversable. Some equipment
+    # symbols, however, use one companion edge purely as the graphical attachment
+    # from an equipment nozzle to a split flange whose other side starts the real
+    # process line. Admit only that narrow nozzle->process-network bridge.
     adj: dict[str, set] = {}
+    companion_links = []
     for link in links:
         payload = link.get("payload") or {}
-        if payload.get("entity_class") not in PROCESS_LINE_CLASSES:
-            continue
         source = str(link.get("source") or payload.get("from") or "")
         target = str(link.get("target") or payload.get("to") or "")
-        if source and target:
+        if not source or not target:
+            continue
+        entity_class = normalize_class(payload.get("entity_class"))
+        if entity_class in PROCESS_LINE_CLASSES:
+            adj.setdefault(source, set()).add(target)
+            adj.setdefault(target, set()).add(source)
+        elif entity_class == "companion_line":
+            companion_links.append((source, target))
+
+    process_nodes = set(adj)
+    for source, target in companion_links:
+        source_class = normalize_class(_node_class(source, node_by_id))
+        target_class = normalize_class(_node_class(target, node_by_id))
+        if source_class == "equipment_nozzle" and target in process_nodes:
+            adj.setdefault(source, set()).add(target)
+            adj.setdefault(target, set()).add(source)
+        elif target_class == "equipment_nozzle" and source in process_nodes:
             adj.setdefault(source, set()).add(target)
             adj.setdefault(target, set()).add(source)
     return node_by_id, adj
@@ -224,6 +247,8 @@ def _branch_device_role(node_id, node_by_id, policy):
     node = node_by_id.get(str(node_id)) or {}
     payload = node.get("payload") or {}
     entity_class = payload.get("entity_class")
+    if normalize_class(entity_class) in TRAVERSABLE_CONNECTION_CLASSES:
+        return "traversable"
     if _is_branch_context_device(entity_class):
         return "backflow_or_control_context"
     if policy is None:

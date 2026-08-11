@@ -24,6 +24,8 @@ from api.service import (
     list_cnvrt_collections,
     list_cnvrt_drawings,
     get_cnvrt_drawing_image,
+    get_cnvrt_hilt_graph,
+    get_hilt_ui_symbols,
     get_equipment_bbox,
     list_cnvrt_projects,
     list_project_equipment,
@@ -139,6 +141,34 @@ def planning_context_drawing_image(cnvrt_project_id: int, collection_id: int, jo
         ) from None
 
 
+@router.get("/planning-context/drawings/{job_id}/hilt-graph")
+def planning_context_hilt_graph(job_id: int, authorization: str = Header(default="")):
+    token = _plant360_token(authorization)
+    if not token:
+        raise HTTPException(status_code=400, detail={"kind": "missing_auth_token", "message": "Plant360 auth token is required."})
+    try:
+        return get_cnvrt_hilt_graph(job_id, token)
+    except Exception:
+        raise HTTPException(
+            status_code=502,
+            detail={"kind": "hilt_graph_failed", "message": "Unable to load the exported HILT graph."},
+        ) from None
+
+
+@router.get("/planning-context/symbol-projects/{symbol_project_id}/symbols")
+def planning_context_symbols(symbol_project_id: int, authorization: str = Header(default="")):
+    token = _plant360_token(authorization)
+    if not token:
+        raise HTTPException(status_code=400, detail={"kind": "missing_auth_token", "message": "Plant360 auth token is required."})
+    try:
+        return get_hilt_ui_symbols(symbol_project_id, token)
+    except Exception:
+        raise HTTPException(
+            status_code=502,
+            detail={"kind": "symbol_library_failed", "message": "Unable to load the project symbol library."},
+        ) from None
+
+
 @router.get("/planning-context/drawings/{job_id}/equipment/{node_id}/bbox")
 def planning_context_equipment_bbox(job_id: int, node_id: str, authorization: str = Header(default="")):
     token = _plant360_token(authorization)
@@ -193,10 +223,27 @@ def list_runs(
     request: Request,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
+    equipment_tag: str = "",
+    status: str = "",
+    job_id: str = "",
+    cnvrt_project_id: str = "",
+    collection_id: str = "",
+    unigraph_project_id: str = "",
     authorization: str = Header(default=""),
 ):
     _require_run_read_auth(authorization)
-    return {"items": _store(request).list(limit=limit, offset=offset)}
+    return {
+        "items": _store(request).list(
+            limit=limit,
+            offset=offset,
+            equipment_tag=equipment_tag,
+            status=status,
+            job_id=job_id,
+            cnvrt_project_id=cnvrt_project_id,
+            collection_id=collection_id,
+            unigraph_project_id=unigraph_project_id,
+        )
+    }
 
 
 @router.get("/isolation-runs/{run_id}", response_model=RunStatus)

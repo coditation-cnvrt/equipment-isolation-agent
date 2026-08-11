@@ -1,0 +1,31 @@
+/* Carbon spacing — 8px mini-unit, exact values from @carbon/layout */
+:root {
+  --spacing-01: 0.125rem; /* 2px */
+  --spacing-02: 0.25rem;  /* 4px */
+  --spacing-03: 0.5rem;   /* 8px */
+  --spacing-04: 0.75rem;  /* 12px */
+  --spacing-05: 1rem;     /* 16px */
+  --spacing-06: 1.5rem;   /* 24px */
+  --spacing-07: 2rem;     /* 32px */
+  --spacing-08: 2.5rem;   /* 40px */
+  --spacing-09: 3rem;     /* 48px */
+  --spacing-10: 4rem;     /* 64px */
+  --spacing-11: 5rem;     /* 80px */
+  --spacing-12: 6rem;     /* 96px */
+  --spacing-13: 10rem;    /* 160px */
+
+  /* Fixed control heights */
+  --size-xs: 1.5rem;   /* 24px */
+  --size-sm: 2rem;     /* 32px */
+  --size-md: 2.5rem;   /* 40px */
+  --size-lg: 3rem;     /* 48px */
+  --size-xl: 4rem;     /* 64px */
+  --size-2xl: 5rem;    /* 80px */
+
+  /* Grid breakpoints */
+  --breakpoint-sm: 20rem;   /* 320 */
+  --breakpoint-md: 42rem;   /* 672 */
+  --breakpoint-lg: 66rem;   /* 1056 */
+  --breakpoint-xlg: 82rem;  /* 1312 */
+  --breakpoint-max: 99rem;  /* 1584 */
+}

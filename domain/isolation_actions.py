@@ -13,7 +13,7 @@ OPERABLE_VALVE_CLASSES = (
 BACKFLOW_CONTEXT_CLASSES = ("check_valve", "non_return_valve")
 CONTROL_CONTEXT_CLASSES = ("control_valve",)
 ELECTRICAL_ACTION_CLASSES = ("breaker", "disconnect")
-INSTALLED_POSITIVE_CLASSES = ("blind", "spade", "spectacle", "blank_flange", "blind_flange")
+INSTALLED_POSITIVE_CLASSES = ("blind", "spade", "spectacle", "spectacle_blind_open", "blank_flange", "blind_flange")
 FIELD_CONFIRMED_POSITIVE_CLASSES = ("flange", "line_break_point")
 
 

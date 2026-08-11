@@ -89,6 +89,7 @@ class RunRecord:
     started_at: float | None = None
     finished_at: float | None = None
     agent: dict[str, Any] | None = None
+    request: dict[str, Any] = field(default_factory=dict)
     result: dict[str, Any] | None = None
     trace: dict[str, Any] | None = None
     artifacts: dict[str, str] = field(default_factory=dict)
@@ -117,11 +118,12 @@ class RunStore:
             equipment_tag=request.equipment_tag,
             runner=request.runner,
             run_dir=run_dir,
+            request=_request_payload(request),
         )
         with self._lock:
             self._records[run_id] = record
         if self.repository:
-            self._safe_repository_call("insert_run", self.repository.insert_run, record, _request_payload(request))
+            self._safe_repository_call("insert_run", self.repository.insert_run, record, record.request)
         self._persist(record)
         self._executor.submit(self._run, record, request, auth_token)
         return record
@@ -143,21 +145,28 @@ class RunStore:
                     return _record_from_row(row)
         return self._load_file_record(run_id)
 
-    def list(self, limit: int = 100, offset: int = 0) -> list[dict]:
+    def list(self, limit: int = 100, offset: int = 0, **filters) -> list[dict]:
         summaries: dict[str, dict] = {}
+        active_filters = {key: str(value) for key, value in filters.items() if value not in {None, ""}}
         if self.repository and hasattr(self.repository, "list_runs"):
             try:
-                for row in self.repository.list_runs(limit=limit + offset, offset=0):
+                repository_kwargs = {"limit": limit + offset, "offset": 0}
+                if active_filters:
+                    repository_kwargs.update(active_filters)
+                for row in self.repository.list_runs(**repository_kwargs):
                     record = _record_from_row(row)
-                    summaries[record.run_id] = self.snapshot(record, include_result=False)
+                    if _record_matches(record, active_filters):
+                        summaries[record.run_id] = self.snapshot(record, include_result=False)
             except Exception as exc:
                 LOGGER.warning("Run repository list_runs failed; falling back to local run state: %s", exc)
         with self._lock:
             records = list(self._records.values())
         for record in records:
-            summaries[record.run_id] = self.snapshot(record, include_result=False)
+            if _record_matches(record, active_filters):
+                summaries[record.run_id] = self.snapshot(record, include_result=False)
         for record in self._load_file_records():
-            summaries.setdefault(record.run_id, self.snapshot(record, include_result=False))
+            if _record_matches(record, active_filters):
+                summaries.setdefault(record.run_id, self.snapshot(record, include_result=False))
         items = sorted(summaries.values(), key=lambda item: item.get("created_at") or 0, reverse=True)
         return items[offset : offset + limit]
 
@@ -180,6 +189,7 @@ class RunStore:
             "started_at": record.started_at,
             "finished_at": record.finished_at,
             "agent": record.agent,
+            "request": dict(record.request),
             "artifacts": dict(record.artifacts),
             "error": record.error,
         }
@@ -192,6 +202,8 @@ class RunStore:
 
         def on_event(kind, payload):
             event = compact_event(kind, jsonable(payload))
+            if kind in {"tool_call", "tool_result"} and isinstance(payload, dict):
+                self._set_progress(record, kind=kind, tool=str(payload.get("name") or ""))
             self._emit_event(record, event)
 
         try:
@@ -248,6 +260,19 @@ class RunStore:
             if timer:
                 timer.cancel()
             record.events.put(None)
+
+    def _set_progress(self, record: RunRecord, *, kind: str, tool: str) -> None:
+        with self._lock:
+            if record.status != "running":
+                return
+            record.agent = {
+                "progress": {
+                    "kind": kind,
+                    "tool": tool,
+                    "updated_at": time.time(),
+                }
+            }
+        self._persist(record)
 
     def _mark(self, record: RunRecord, **updates) -> bool:
         with self._lock:
@@ -396,6 +421,19 @@ def event_stream(record: RunRecord, repository=None):
             yield ": heartbeat\n\n"
 
 
+def _record_matches(record: RunRecord, filters: dict[str, str]) -> bool:
+    for key, expected in filters.items():
+        if key == "status":
+            actual = record.status
+        elif key == "equipment_tag":
+            actual = record.equipment_tag
+        else:
+            actual = record.request.get(key)
+        if str(actual or "") != expected:
+            return False
+    return True
+
+
 def _error_detail(exc: Exception) -> dict:
     message = str(exc)
     if "Configured project metadata failed" in message:
@@ -422,6 +460,7 @@ def _record_from_row(row: dict) -> RunRecord:
         started_at=row.get("started_at"),
         finished_at=row.get("finished_at"),
         agent=row.get("agent"),
+        request=row.get("request") or {},
         result=row.get("result"),
         trace=row.get("trace"),
         artifacts=row.get("artifacts") or {},
@@ -447,6 +486,7 @@ def _record_from_status_payload(run_dir: Path, payload: dict) -> RunRecord:
         started_at=payload.get("started_at"),
         finished_at=payload.get("finished_at"),
         agent=payload.get("agent"),
+        request=payload.get("request") or {},
         result=result,
         trace=payload.get("trace"),
         artifacts=payload.get("artifacts") or {},

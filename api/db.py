@@ -176,7 +176,7 @@ class PostgresRunRepository:
                 cur.execute(
                     """
                     SELECT run_id, equipment_tag, runner, status, created_at, started_at,
-                           finished_at, agent, result, trace, artifacts, error, run_dir
+                           finished_at, agent, request, result, trace, artifacts, error, run_dir
                     FROM isolation_runs
                     WHERE run_id = %s
                     """,
@@ -187,19 +187,39 @@ class PostgresRunRepository:
             return None
         return _row_to_dict(row)
 
-    def list_runs(self, limit: int = 100, offset: int = 0) -> list[dict]:
+    def list_runs(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        equipment_tag: str | None = None,
+        status: str | None = None,
+        job_id: str | None = None,
+        cnvrt_project_id: str | None = None,
+        collection_id: str | None = None,
+        unigraph_project_id: str | None = None,
+    ) -> list[dict]:
         with self._connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
                     SELECT run_id, equipment_tag, runner, status, created_at, started_at,
-                           finished_at, agent, NULL::jsonb AS result, NULL::jsonb AS trace,
-                           artifacts, error, run_dir
+                           finished_at, agent, request, NULL::jsonb AS result,
+                           NULL::jsonb AS trace, artifacts, error, run_dir
                     FROM isolation_runs
+                    WHERE (%s::text IS NULL OR equipment_tag = %s)
+                      AND (%s::text IS NULL OR status = %s)
+                      AND (%s::text IS NULL OR request->>'job_id' = %s)
+                      AND (%s::text IS NULL OR request->>'cnvrt_project_id' = %s)
+                      AND (%s::text IS NULL OR request->>'collection_id' = %s)
+                      AND (%s::text IS NULL OR request->>'unigraph_project_id' = %s)
                     ORDER BY created_at DESC
                     LIMIT %s OFFSET %s
                     """,
-                    (limit, offset),
+                    (
+                        equipment_tag, equipment_tag, status, status, job_id, job_id,
+                        cnvrt_project_id, cnvrt_project_id, collection_id, collection_id,
+                        unigraph_project_id, unigraph_project_id, limit, offset,
+                    ),
                 )
                 rows = cur.fetchall()
         return [_row_to_dict(row) for row in rows]
@@ -265,11 +285,12 @@ def _row_to_dict(row) -> dict:
         "started_at": _ts(row[5]),
         "finished_at": _ts(row[6]),
         "agent": row[7],
-        "result": row[8],
-        "trace": row[9],
-        "artifacts": row[10] or {},
-        "error": row[11],
-        "run_dir": row[12],
+        "request": row[8] or {},
+        "result": row[9],
+        "trace": row[10],
+        "artifacts": row[11] or {},
+        "error": row[12],
+        "run_dir": row[13],
     }
 
 
