@@ -1,12 +1,15 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
+  createIsolationPlanFromRun,
   createIsolationRun,
   getCollections,
   getDrawings,
   getEquipmentBBox,
   getHiltGraph,
   getHiltSymbols,
+  getIsolationPlan,
+  getIsolationPlans,
   getIsolationResult,
   getIsolationRun,
   getIsolationRuns,
@@ -20,6 +23,7 @@ import {
   type IsolationResult,
   type IsolationRunStatus,
   type Project,
+  type SavedIsolationPlan,
   type UniGraphProject,
 } from './api'
 import { getHiltEntityId, normalizeHiltGraph, type HiltGraphInput, type HiltSelection, type HiltSymbol } from '@coditation-cnvrt/p360-hitl-viewer'
@@ -101,6 +105,12 @@ function App() {
   const [pastRuns, setPastRuns] = useState<IsolationRunStatus[]>([])
   const [pastRunsLoading, setPastRunsLoading] = useState(false)
   const [pastRunsError, setPastRunsError] = useState('')
+  const [savedPlans, setSavedPlans] = useState<SavedIsolationPlan[]>([])
+  const [savedPlansLoading, setSavedPlansLoading] = useState(false)
+  const [savedPlansError, setSavedPlansError] = useState('')
+  const [selectedSavedPlan, setSelectedSavedPlan] = useState<SavedIsolationPlan | null>(null)
+  const [planSaving, setPlanSaving] = useState(false)
+  const [planSaveError, setPlanSaveError] = useState('')
   const [pendingHistoricalEquipmentTag, setPendingHistoricalEquipmentTag] = useState('')
   const [loading, setLoading] = useState('projects')
   const [error, setError] = useState('')
@@ -200,6 +210,31 @@ function App() {
     })()
     return () => { active = false }
   }, [drawingId, projectId])
+
+  useEffect(() => {
+    let active = true
+    setSavedPlansLoading(true)
+    setSavedPlansError('')
+    const filters = selectedEquipment && projectId && collectionId && drawingId && unigraphProjectId ? {
+      equipmentTag: selectedEquipment.tag || selectedEquipment.name,
+      jobId: drawingId,
+      cnvrtProjectId: projectId,
+      collectionId,
+      unigraphProjectId,
+      limit: 20,
+    } : { limit: 20 }
+    void getIsolationPlans(filters).then((plans) => {
+      if (active) setSavedPlans(plans)
+    }).catch((reason: unknown) => {
+      if (active) {
+        setSavedPlans([])
+        setSavedPlansError(reason instanceof Error ? reason.message : 'Unable to load saved plans.')
+      }
+    }).finally(() => {
+      if (active) setSavedPlansLoading(false)
+    })
+    return () => { active = false }
+  }, [collectionId, drawingId, projectId, selectedEquipment, unigraphProjectId])
 
   useEffect(() => {
     let active = true
@@ -397,6 +432,9 @@ function App() {
     setIsolationError('')
     setIsolationSubmitting(false)
     setSelectedIsolationPointId(null)
+    setSelectedSavedPlan(null)
+    setPlanSaving(false)
+    setPlanSaveError('')
   }
 
   function clearEquipmentSelection() {
@@ -456,11 +494,18 @@ function App() {
     }
   }
 
-  async function openPastRun(run: IsolationRunStatus) {
+  async function restorePersistedRun(run: IsolationRunStatus, savedPlan: SavedIsolationPlan | null = null) {
     if (run.status !== 'succeeded') return
     const context = run.request
     if (!context?.cnvrt_project_id || !context.collection_id || !context.job_id || !context.unigraph_project_id) {
-      setPastRunsError('This historical run does not contain enough saved planning context to reopen its drawing.')
+      const message = 'The linked run does not contain enough saved planning context to reopen its drawing. Its result remains available.'
+      if (savedPlan) setSavedPlansError(message)
+      else setPastRunsError(message)
+      setIsolationResult(null)
+      setIsolationError('')
+      setSelectedIsolationPointId(null)
+      setIsolationRun(run)
+      setSelectedSavedPlan(savedPlan)
       return
     }
     setPastRunsLoading(true)
@@ -487,10 +532,50 @@ function App() {
       setIsolationError('')
       setSelectedIsolationPointId(null)
       setIsolationRun(run)
+      setSelectedSavedPlan(savedPlan)
     } catch (reason) {
-      setPastRunsError(reason instanceof Error ? reason.message : 'Unable to restore the historical run context.')
+      const message = reason instanceof Error ? reason.message : 'Unable to restore the historical run context.'
+      if (savedPlan) setSavedPlansError(message)
+      else setPastRunsError(message)
     } finally {
       setPastRunsLoading(false)
+    }
+  }
+
+  async function openPastRun(run: IsolationRunStatus) {
+    setSelectedSavedPlan(null)
+    await restorePersistedRun(run)
+  }
+
+  async function openSavedPlan(plan: SavedIsolationPlan) {
+    if (runInProgress) return
+    setSavedPlansLoading(true)
+    setSavedPlansError('')
+    try {
+      const detail = await getIsolationPlan(plan.plan_id)
+      const run = await getIsolationRun(detail.latest_version.source_run.run_id)
+      await restorePersistedRun(run, detail)
+    } catch (reason) {
+      setSavedPlansError(reason instanceof Error ? reason.message : 'Unable to open the saved plan.')
+    } finally {
+      setSavedPlansLoading(false)
+    }
+  }
+
+  async function saveCurrentRunAsPlan(areaCode?: string) {
+    if (!isolationRun?.run_id || isolationRun.status !== 'succeeded') return
+    setPlanSaving(true)
+    setPlanSaveError('')
+    try {
+      const plan = await createIsolationPlanFromRun(isolationRun.run_id, areaCode)
+      setSelectedSavedPlan(plan)
+      setSavedPlans((current) => [plan, ...current.filter((item) => item.plan_id !== plan.plan_id)].slice(0, 20))
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : 'Unable to save the draft plan.'
+      setPlanSaveError(message)
+      throw reason
+    } finally {
+      setPlanSaving(false)
     }
   }
 
@@ -564,6 +649,17 @@ function App() {
             {unigraphProjectId && <SearchableSelect disabled={drawingLoading || !equipmentOptions.length} emptyLabel={drawingLoading ? 'Reading drawing equipment' : 'No drawing equipment available'} label="Equipment" onChange={selectEquipment} options={equipmentOptions} placeholder="Select equipment" searchPlaceholder="Filter by tag, name, or class" value={equipmentId} />}
             {error && <div className="border-l-2 border-red-500 bg-red-50 p-3 text-xs text-red-900" role="alert"><p>{error}</p>{!projects.length && <button className="mt-2 underline" onClick={() => void loadProjects()} type="button">Retry project load</button>}</div>}
           </div>
+          <section className="border-t border-slate-300 p-5" aria-label="Saved isolation plans">
+            <div className="flex items-baseline justify-between gap-3"><h2 className="font-mono text-[10px] tracking-[0.12em] text-slate-500">{selectedEquipment ? 'MATCHING PLANS' : 'SAVED PLANS'}</h2>{savedPlansLoading && <span className="text-[10px] text-slate-500">Loading…</span>}</div>
+            {savedPlansError && <p className="mt-2 border-l-2 border-amber-500 bg-amber-50 px-2 py-1 text-xs text-amber-900">{savedPlansError}</p>}
+            {!savedPlansLoading && !savedPlansError && !savedPlans.length && <p className="mt-2 text-xs text-slate-500">No saved advisory plans are available.</p>}
+            {savedPlans.length > 0 && <ol className="mt-2 space-y-2">{savedPlans.map((plan) => <li key={plan.plan_id}><button className={`w-full border bg-white p-2 text-left hover:border-blue-500 disabled:cursor-not-allowed ${selectedSavedPlan?.plan_id === plan.plan_id ? 'border-purple-600' : 'border-slate-200'}`} disabled={savedPlansLoading || runInProgress} onClick={() => void openSavedPlan(plan)} type="button">
+              <span className="flex items-center justify-between gap-2"><span className="truncate font-mono text-[10px] font-semibold text-slate-900">{plan.plan_number} · v{plan.latest_version.version_no}</span><span className="font-mono text-[9px] uppercase text-purple-700">{plan.lifecycle_state}</span></span>
+              <span className="mt-1 flex items-center justify-between gap-2 text-[10px] text-slate-600"><span className="truncate">{plan.latest_version.source_run.equipment_tag}</span><span className="uppercase">{String(plan.latest_version.source_run.assurance_status ?? 'unknown').replaceAll('_', ' ')}</span></span>
+              <span className="mt-1 block text-[9px] text-slate-500">{plan.area_code || 'No area'} · No active version</span>
+            </button></li>)}</ol>}
+            <p className="mt-2 text-[10px] leading-4 text-slate-500">Draft plans are immutable advisory records. Latest does not mean active or authorised.</p>
+          </section>
           <section className="border-t border-slate-300 p-5" aria-label="Previous isolation runs">
             <div className="flex items-baseline justify-between gap-3">
               <h2 className="font-mono text-[10px] tracking-[0.12em] text-slate-500">{selectedEquipment ? 'MATCHING RUNS' : 'RECENT RUNS'}</h2>
@@ -600,8 +696,12 @@ function App() {
               error={isolationError}
               onPointSelect={selectIsolationPoint}
               onReset={resetIsolationRun}
+              onSavePlan={saveCurrentRunAsPlan}
               plan={displayedIsolationPlan}
+              planSaveError={planSaveError}
+              planSaving={planSaving}
               run={isolationRun}
+              savedPlan={selectedSavedPlan}
               selectedPointId={selectedIsolationPointId}
             /> : <div className="p-5 text-sm leading-6 text-slate-600">
               {selectedEquipment ? <>

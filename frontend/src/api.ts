@@ -106,6 +106,49 @@ export type IsolationRunStatus = {
   error?: { kind?: string; message?: string } | null
 }
 
+export type IsolationPlanSourceRun = {
+  run_id: string
+  runner: string
+  status: string
+  equipment_tag: string
+  created_at?: string | null
+  assurance_status?: string | null
+  job_id: string
+  job_name: string
+  cnvrt_project_id: string
+  collection_id: string
+  unigraph_project_id: string
+  request: IsolationRunStatus['request'] & { collection_name?: string }
+  agent?: IsolationRunStatus['agent'] | null
+  result_url: string
+  trace_url: string
+}
+
+export type IsolationPlanVersionSummary = {
+  plan_version_id: string
+  parent_plan_version_id?: string | null
+  version_no: number
+  derivation_status: string
+  input_hash: string
+  model_hash: string
+  derived_at: string
+  superseded_at?: string | null
+  source_run: IsolationPlanSourceRun
+}
+
+export type SavedIsolationPlan = {
+  plan_id: string
+  plan_number: string
+  active_plan_version_id?: string | null
+  mode: string
+  lifecycle_state: string
+  area_code?: string | null
+  created_at: string
+  latest_plan_version_id: string
+  latest_version: IsolationPlanVersionSummary
+  versions?: IsolationPlanVersionSummary[]
+}
+
 export type CreateIsolationRunInput = {
   equipmentTag: string
   jobName: string
@@ -202,7 +245,6 @@ export async function createIsolationRun(input: CreateIsolationRunInput): Promis
       collection_id: input.collectionId,
       collection_name: input.collectionName,
       unigraph_project_id: input.unigraphProjectId,
-      include_viewer: false,
       work_scope: {
         intrusive_work: input.intrusiveWork,
         high_risk_service: input.highRiskService,
@@ -211,6 +253,44 @@ export async function createIsolationRun(input: CreateIsolationRunInput): Promis
   })
   if (!response.ok) throw await responseError(response)
   return await response.json() as IsolationRunAccepted
+}
+
+export async function createIsolationPlanFromRun(runId: string, areaCode?: string): Promise<SavedIsolationPlan> {
+  const response = await fetch(`${apiBaseUrl}/isolation-plans/from-run`, {
+    method: 'POST',
+    headers: requestHeaders(true),
+    body: JSON.stringify({ run_id: runId, area_code: areaCode?.trim() || null }),
+  })
+  if (!response.ok) throw await responseError(response)
+  return await response.json() as SavedIsolationPlan
+}
+
+export async function getIsolationPlans(filters: {
+  equipmentTag?: string
+  jobId?: string
+  cnvrtProjectId?: string
+  collectionId?: string
+  unigraphProjectId?: string
+  lifecycleState?: string
+  planNumber?: string
+  limit?: number
+} = {}): Promise<SavedIsolationPlan[]> {
+  const params = new URLSearchParams()
+  if (filters.equipmentTag) params.set('equipment_tag', filters.equipmentTag)
+  if (filters.jobId) params.set('job_id', filters.jobId)
+  if (filters.cnvrtProjectId) params.set('cnvrt_project_id', filters.cnvrtProjectId)
+  if (filters.collectionId) params.set('collection_id', filters.collectionId)
+  if (filters.unigraphProjectId) params.set('unigraph_project_id', filters.unigraphProjectId)
+  if (filters.lifecycleState) params.set('lifecycle_state', filters.lifecycleState)
+  if (filters.planNumber) params.set('plan_number', filters.planNumber)
+  params.set('limit', String(filters.limit ?? 20))
+  return getItems<SavedIsolationPlan>(`/isolation-plans?${params.toString()}`)
+}
+
+export async function getIsolationPlan(planId: string): Promise<SavedIsolationPlan> {
+  const response = await fetch(`${apiBaseUrl}/isolation-plans/${encodeURIComponent(planId)}`, { headers: requestHeaders() })
+  if (!response.ok) throw await responseError(response)
+  return await response.json() as SavedIsolationPlan
 }
 
 export async function getIsolationRuns(filters: {

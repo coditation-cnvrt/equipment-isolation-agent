@@ -1,0 +1,173 @@
+import unittest
+from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
+from uuid import UUID
+
+from fastapi import HTTPException, Response
+
+from api.models import CreateIsolationPlanFromRunRequest, IsolationPlanDetail
+from api.plans import PlanDomainError, canonical_hash, derivation_status, validate_promotable_result
+from api.routes import create_plan_from_run, list_plans, plan_detail
+
+
+PLAN_ID = "5fbaf888-bf86-4b23-b428-a609156c2f14"
+VERSION_ID = "276627f1-884c-42ad-ae29-90c30dbd95bb"
+RUN_ID = "f" * 32
+
+
+def _plan():
+    now = datetime(2026, 3, 20, tzinfo=timezone.utc)
+    source_run = {
+        "run_id": RUN_ID,
+        "runner": "agentic",
+        "status": "succeeded",
+        "equipment_tag": "N7",
+        "created_at": now,
+        "assurance_status": "not_isolated",
+        "job_id": "2151",
+        "job_name": "Drawing N7",
+        "cnvrt_project_id": "277",
+        "collection_id": "206",
+        "unigraph_project_id": "15",
+        "request": {"job_id": "2151"},
+        "agent": None,
+        "result_url": f"/isolation-runs/{RUN_ID}/result",
+        "trace_url": f"/isolation-runs/{RUN_ID}/trace",
+    }
+    version = {
+        "plan_version_id": VERSION_ID,
+        "parent_plan_version_id": None,
+        "version_no": 1,
+        "derivation_status": "completed",
+        "input_hash": "sha256:input",
+        "model_hash": "sha256:model",
+        "derived_at": now,
+        "superseded_at": None,
+        "source_run": source_run,
+    }
+    return {
+        "plan_id": PLAN_ID,
+        "plan_number": "ISO-2026-000001",
+        "active_plan_version_id": None,
+        "mode": "advisory",
+        "lifecycle_state": "draft",
+        "area_code": "Area 12",
+        "created_at": now,
+        "latest_plan_version_id": VERSION_ID,
+        "latest_version": version,
+        "versions": [version],
+    }
+
+
+class _PlanRepository:
+    def __init__(self):
+        self.plan = _plan()
+        self.created = True
+        self.create_error = None
+        self.create_calls = []
+
+    def create_plan_from_run(self, run_id, area_code):
+        self.create_calls.append((run_id, area_code))
+        if self.create_error:
+            raise self.create_error
+        return self.plan, self.created
+
+    def list_plans(self, **_):
+        summary = dict(self.plan)
+        summary.pop("versions")
+        return [summary], 1
+
+    def get_plan(self, plan_id):
+        return self.plan if plan_id == PLAN_ID else None
+
+
+class PlanTests(unittest.TestCase):
+    def _request(self, repository=None):
+        store = SimpleNamespace(repository=repository)
+        return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(run_store=store)))
+
+    def test_canonical_hash_is_order_independent(self):
+        self.assertEqual(canonical_hash({"b": 2, "a": 1}), canonical_hash({"a": 1, "b": 2}))
+
+    def test_degraded_derivation_uses_distinct_status(self):
+        self.assertEqual(derivation_status({"orchestration_error": {"message": "503"}}), "completed_degraded")
+        self.assertEqual(derivation_status({}), "completed")
+
+    def test_promotable_result_requires_plan_assurance(self):
+        validate_promotable_result({"data": [{"assurance_status": "not_isolated"}]})
+        with self.assertRaises(PlanDomainError) as caught:
+            validate_promotable_result({"data": []})
+        self.assertEqual(caught.exception.kind, "invalid_run_result")
+
+    def test_plan_detail_response_contract_accepts_repository_payload(self):
+        validated = IsolationPlanDetail.model_validate(_plan())
+        self.assertEqual(validated.latest_version.version_no, 1)
+        self.assertIsNone(validated.active_plan_version_id)
+
+    def test_create_from_run_returns_201_and_location(self):
+        repository = _PlanRepository()
+        response = Response()
+        result = create_plan_from_run(
+            self._request(repository),
+            CreateIsolationPlanFromRunRequest(run_id=RUN_ID, area_code=" Area 12 "),
+            response,
+            authorization="Bearer token",
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.headers["location"], f"/isolation-plans/{PLAN_ID}")
+        self.assertEqual(result["active_plan_version_id"], None)
+        self.assertEqual(repository.create_calls, [(RUN_ID, "Area 12")])
+
+    def test_duplicate_promotion_returns_200(self):
+        repository = _PlanRepository()
+        repository.created = False
+        response = Response()
+        create_plan_from_run(
+            self._request(repository),
+            CreateIsolationPlanFromRunRequest(run_id=RUN_ID),
+            response,
+            authorization="Bearer token",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("location", response.headers)
+
+    def test_plan_routes_require_postgres_repository(self):
+        with self.assertRaises(HTTPException) as caught:
+            list_plans(self._request(), authorization="Bearer token")
+        self.assertEqual(caught.exception.status_code, 503)
+        self.assertEqual(caught.exception.detail["kind"], "plan_store_unavailable")
+
+    def test_domain_error_is_preserved_by_create_route(self):
+        repository = _PlanRepository()
+        repository.create_error = PlanDomainError("run_not_succeeded", "Not complete.", 409, {"status": "failed"})
+        with self.assertRaises(HTTPException) as caught:
+            create_plan_from_run(
+                self._request(repository),
+                CreateIsolationPlanFromRunRequest(run_id=RUN_ID),
+                Response(),
+                authorization="Bearer token",
+            )
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertEqual(caught.exception.detail["status"], "failed")
+
+    def test_list_and_detail_are_lightweight_and_versioned(self):
+        repository = _PlanRepository()
+        listed = list_plans(self._request(repository), limit=20, offset=0, authorization="Bearer token")
+        detail = plan_detail(self._request(repository), UUID(PLAN_ID), authorization="Bearer token")
+        self.assertEqual(listed["total"], 1)
+        self.assertNotIn("versions", listed["items"][0])
+        self.assertEqual(detail["versions"][0]["version_no"], 1)
+        self.assertIsNone(detail["active_plan_version_id"])
+
+    def test_schema_contains_bridge_constraints(self):
+        schema = Path("schema.sql").read_text(encoding="utf-8")
+        self.assertIn("CREATE TABLE IF NOT EXISTS isolation_plan", schema)
+        self.assertIn("CREATE TABLE IF NOT EXISTS plan_version", schema)
+        self.assertIn("CREATE TABLE IF NOT EXISTS external_run_link", schema)
+        self.assertIn("external_run_link_one_derivation_idx", schema)
+        self.assertIn("FOREIGN KEY (plan_id, parent_plan_version_id)", schema)
+
+
+if __name__ == "__main__":
+    unittest.main()

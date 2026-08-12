@@ -1,15 +1,19 @@
 """HTTP route handlers for the isolation API."""
 from __future__ import annotations
 
+import logging
 import os
-from pathlib import Path
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from api.models import (
+    CreateIsolationPlanFromRunRequest,
     EquipmentListRequest,
+    IsolationPlanDetail,
+    IsolationPlanList,
     IsolationRunRequest,
     PlanningCollectionList,
     PlanningDrawingList,
@@ -19,6 +23,7 @@ from api.models import (
     RunList,
     RunStatus,
 )
+from api.plans import PlanDomainError
 from api.runs import RunStore, event_stream
 from api.service import (
     list_cnvrt_collections,
@@ -34,10 +39,42 @@ from api.service import (
 from api.db import postgres_configured
 
 router = APIRouter()
+LOGGER = logging.getLogger(__name__)
 
 
 def _store(request: Request) -> RunStore:
     return request.app.state.run_store
+
+
+def _plan_repository(request: Request):
+    repository = getattr(_store(request), "repository", None)
+    if repository is None or not hasattr(repository, "list_plans"):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "kind": "plan_store_unavailable",
+                "message": "Saved-plan persistence requires PostgreSQL.",
+            },
+        )
+    return repository
+
+
+def _raise_plan_error(error: PlanDomainError) -> None:
+    raise HTTPException(status_code=error.status_code, detail=error.detail()) from None
+
+
+def _run_record(request: Request, run_id: str):
+    try:
+        record = _store(request).get(run_id)
+    except Exception:
+        LOGGER.exception("Run read failed")
+        raise HTTPException(
+            status_code=503,
+            detail={"kind": "run_store_unavailable", "message": "Run persistence is unavailable."},
+        ) from None
+    if record is None:
+        raise HTTPException(status_code=404, detail={"kind": "unknown_run", "message": "Unknown run id."})
+    return record
 
 
 def _bearer_token(authorization: str = "") -> str:
@@ -69,6 +106,7 @@ def health():
         "gemini_api_key_configured": bool(os.environ.get("GEMINI_API_KEY")),
         "plant360_server_token_configured": bool(os.environ.get("PLANT360_AUTH_TOKEN")),
         "postgres_configured": postgres_configured(),
+        "plan_persistence_available": postgres_configured(),
         "default_model": os.environ.get("GEMINI_MODEL") or "gemini-2.5-flash",
     }
 
@@ -209,7 +247,14 @@ def create_run(request: Request, request_body: IsolationRunRequest, authorizatio
         raise HTTPException(status_code=400, detail={"kind": "missing_auth_token", "message": "Plant360 auth token is required."})
     if not os.environ.get("GEMINI_API_KEY"):
         raise HTTPException(status_code=503, detail={"kind": "missing_gemini_api_key", "message": "GEMINI_API_KEY is not configured."})
-    record = _store(request).create(request_body, token)
+    try:
+        record = _store(request).create(request_body, token)
+    except Exception:
+        LOGGER.exception("Run creation persistence failed")
+        raise HTTPException(
+            status_code=503,
+            detail={"kind": "run_store_unavailable", "message": "Run persistence is unavailable."},
+        ) from None
     return RunAccepted(
         run_id=record.run_id,
         status=record.status,
@@ -232,8 +277,8 @@ def list_runs(
     authorization: str = Header(default=""),
 ):
     _require_run_read_auth(authorization)
-    return {
-        "items": _store(request).list(
+    try:
+        items = _store(request).list(
             limit=limit,
             offset=offset,
             equipment_tag=equipment_tag,
@@ -243,24 +288,104 @@ def list_runs(
             collection_id=collection_id,
             unigraph_project_id=unigraph_project_id,
         )
-    }
+    except Exception:
+        LOGGER.exception("Run listing failed")
+        raise HTTPException(
+            status_code=503,
+            detail={"kind": "run_store_unavailable", "message": "Run persistence is unavailable."},
+        ) from None
+    return {"items": items}
+
+
+@router.post("/isolation-plans/from-run", response_model=IsolationPlanDetail)
+def create_plan_from_run(
+    request: Request,
+    request_body: CreateIsolationPlanFromRunRequest,
+    response: Response,
+    authorization: str = Header(default=""),
+):
+    _require_run_read_auth(authorization)
+    repository = _plan_repository(request)
+    try:
+        plan, created = repository.create_plan_from_run(request_body.run_id, request_body.area_code)
+    except PlanDomainError as error:
+        _raise_plan_error(error)
+    except Exception:
+        LOGGER.exception("Plan promotion failed")
+        raise HTTPException(
+            status_code=503,
+            detail={"kind": "plan_store_unavailable", "message": "Saved-plan persistence is unavailable."},
+        ) from None
+    response.status_code = 201 if created else 200
+    if created:
+        response.headers["Location"] = f"/isolation-plans/{plan['plan_id']}"
+    return plan
+
+
+@router.get("/isolation-plans", response_model=IsolationPlanList)
+def list_plans(
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    lifecycle_state: str = "",
+    equipment_tag: str = "",
+    job_id: str = "",
+    cnvrt_project_id: str = "",
+    collection_id: str = "",
+    unigraph_project_id: str = "",
+    plan_number: str = "",
+    authorization: str = Header(default=""),
+):
+    _require_run_read_auth(authorization)
+    repository = _plan_repository(request)
+    try:
+        items, total = repository.list_plans(
+            limit=limit,
+            offset=offset,
+            lifecycle_state=lifecycle_state or None,
+            equipment_tag=equipment_tag or None,
+            job_id=job_id or None,
+            cnvrt_project_id=cnvrt_project_id or None,
+            collection_id=collection_id or None,
+            unigraph_project_id=unigraph_project_id or None,
+            plan_number=plan_number or None,
+        )
+    except Exception:
+        LOGGER.exception("Plan listing failed")
+        raise HTTPException(
+            status_code=503,
+            detail={"kind": "plan_store_unavailable", "message": "Saved-plan persistence is unavailable."},
+        ) from None
+    return {"items": items, "limit": limit, "offset": offset, "total": total}
+
+
+@router.get("/isolation-plans/{plan_id}", response_model=IsolationPlanDetail)
+def plan_detail(request: Request, plan_id: UUID, authorization: str = Header(default="")):
+    _require_run_read_auth(authorization)
+    repository = _plan_repository(request)
+    try:
+        plan = repository.get_plan(str(plan_id))
+    except Exception:
+        LOGGER.exception("Plan read failed")
+        raise HTTPException(
+            status_code=503,
+            detail={"kind": "plan_store_unavailable", "message": "Saved-plan persistence is unavailable."},
+        ) from None
+    if plan is None:
+        raise HTTPException(status_code=404, detail={"kind": "unknown_plan", "message": "Unknown plan id."})
+    return plan
 
 
 @router.get("/isolation-runs/{run_id}", response_model=RunStatus)
 def run_status(request: Request, run_id: str, authorization: str = Header(default="")):
     _require_run_read_auth(authorization)
-    record = _store(request).get(run_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail={"kind": "unknown_run", "message": "Unknown run id."})
-    return _store(request).snapshot(record, include_result=False)
+    return _store(request).snapshot(_run_record(request, run_id), include_result=False)
 
 
 @router.get("/isolation-runs/{run_id}/result")
 def run_result(request: Request, run_id: str, authorization: str = Header(default="")):
     _require_run_read_auth(authorization)
-    record = _store(request).get(run_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail={"kind": "unknown_run", "message": "Unknown run id."})
+    record = _run_record(request, run_id)
     if record.status != "succeeded":
         raise HTTPException(status_code=409, detail={"kind": "result_not_ready", "status": record.status, "error": record.error})
     if record.result is None:
@@ -271,12 +396,7 @@ def run_result(request: Request, run_id: str, authorization: str = Header(defaul
 @router.get("/isolation-runs/{run_id}/trace")
 def run_trace(request: Request, run_id: str, authorization: str = Header(default="")):
     _require_run_read_auth(authorization)
-    record = _store(request).get(run_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail={"kind": "unknown_run", "message": "Unknown run id."})
-    trace_path = record.run_dir / "trace.json"
-    if trace_path.exists():
-        return FileResponse(trace_path, media_type="application/json")
+    record = _run_record(request, run_id)
     if record.trace is not None:
         return record.trace
     raise HTTPException(status_code=404, detail={"kind": "trace_not_available", "message": "Trace is not available."})
@@ -285,9 +405,7 @@ def run_trace(request: Request, run_id: str, authorization: str = Header(default
 @router.get("/isolation-runs/{run_id}/events")
 def run_events(request: Request, run_id: str, authorization: str = Header(default="")):
     _require_run_read_auth(authorization)
-    record = _store(request).get(run_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail={"kind": "unknown_run", "message": "Unknown run id."})
+    record = _run_record(request, run_id)
     return StreamingResponse(
         event_stream(record, repository=getattr(_store(request), "repository", None)),
         media_type="text/event-stream",
@@ -296,26 +414,3 @@ def run_events(request: Request, run_id: str, authorization: str = Header(defaul
             "X-Accel-Buffering": "no",
         },
     )
-
-
-@router.get("/isolation-runs/{run_id}/viewer")
-def run_viewer(request: Request, run_id: str, authorization: str = Header(default="")):
-    _require_run_read_auth(authorization)
-    record = _store(request).get(run_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail={"kind": "unknown_run", "message": "Unknown run id."})
-    path = record.run_dir / "viewer.html"
-    if not path.exists():
-        raise HTTPException(status_code=404, detail={"kind": "viewer_not_available", "message": "Viewer is not available."})
-    return FileResponse(path, media_type="text/html")
-
-
-@router.get("/isolation-runs/{run_id}/pid-image")
-def run_pid_image(request: Request, run_id: str):
-    record = _store(request).get(run_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail={"kind": "unknown_run", "message": "Unknown run id."})
-    matches = sorted(Path(record.run_dir).glob("*_pid.*"))
-    if not matches:
-        raise HTTPException(status_code=404, detail={"kind": "pid_image_not_available", "message": "P&ID image is not available."})
-    return FileResponse(matches[0])

@@ -15,8 +15,6 @@ from agent.runner import AgentRunResult, run_agent_pipeline
 from api_client import Plant360Client
 from config import ApiConfig, DEFAULT_UNIGRAPH_API_BASE_URL, JOB_IDS_BY_NAME
 from domain.hilt_geometry import extract_symbols, symbol_bbox
-from image import resolve_pid_image
-from output import write_json, write_viewer
 from pipeline.config_builder import build_run_config
 from pipeline.equipment import add_equipment_jobs, add_equipment_jobs_from_metadata, list_equipment
 from pipeline.stages import resolve_project_metadata
@@ -28,7 +26,7 @@ _stlm_bbox_cache: OrderedDict[tuple[str, int], tuple[float, dict[str, list[int]]
 _stlm_bbox_cache_lock = Lock()
 
 
-def config_from_run_request(request, auth_token: str, output_dir: Path):
+def config_from_run_request(request, auth_token: str):
     scope = request.work_scope
     return build_run_config(
         equipment_tag=request.equipment_tag,
@@ -52,7 +50,7 @@ def config_from_run_request(request, auth_token: str, output_dir: Path):
         high_risk_service=scope.high_risk_service,
         confined_space_entry=scope.confined_space_entry,
         hot_work=scope.hot_work,
-        output_dir=output_dir,
+        output_dir=Path("."),
     )
 
 
@@ -242,10 +240,9 @@ def execute_agent_request(
     run_id: str,
     request,
     auth_token: str,
-    run_dir: Path,
     on_event: Callable | None = None,
 ) -> dict:
-    config = config_from_run_request(request, auth_token, run_dir)
+    config = config_from_run_request(request, auth_token)
     model = request.model or os.environ.get("GEMINI_MODEL") or DEFAULT_MODEL
     result: AgentRunResult = run_agent_pipeline(
         config,
@@ -261,8 +258,6 @@ def execute_agent_request(
         "agent_result": result.agent_result,
         "trace": result.trace,
     }
-    write_json(run_dir / "trace.json", trace_payload)
-
     if not result.final_payload:
         return {
             "ok": False,
@@ -275,26 +270,6 @@ def execute_agent_request(
         }
 
     final_payload = result.final_payload
-    stem = result.config.equipment_tag.replace("/", "_").replace(" ", "_")
-    pid_image_url = ""
-    pid_image_path = ""
-    if request.image_url:
-        pid_image_url = request.image_url
-    else:
-        _file_uri, image_debug = resolve_pid_image(result.config, run_dir, stem)
-        final_payload.setdefault("debug", {}).update(image_debug)
-        pid_image_path = image_debug.get("pid_image_path") or ""
-        if pid_image_path:
-            pid_image_url = f"/isolation-runs/{run_id}/pid-image"
-
-    write_json(run_dir / "result.json", final_payload)
-    artifacts = {"trace_url": f"/isolation-runs/{run_id}/trace"}
-    if pid_image_path:
-        artifacts["pid_image_url"] = f"/isolation-runs/{run_id}/pid-image"
-    if request.include_viewer:
-        write_viewer(run_dir / "viewer.html", final_payload, image_url=pid_image_url)
-        artifacts["viewer_url"] = f"/isolation-runs/{run_id}/viewer"
-
     return {
         "ok": True,
         "config": result.config,
@@ -309,5 +284,4 @@ def execute_agent_request(
             "models_used": result.agent_result.get("models_used") or [model],
             "orchestration_error": result.agent_result.get("orchestration_error"),
         },
-        "artifacts": artifacts,
     }

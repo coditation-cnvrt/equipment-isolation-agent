@@ -1,12 +1,21 @@
 import json
-import tempfile
 import unittest
-from itertools import islice
-from pathlib import Path
 from types import SimpleNamespace
 
 from api.events import compact_event, sse_frame
 from api.runs import event_stream
+
+
+class _EventRepository:
+    def list_events(self, run_id, after_id=0):
+        if after_id:
+            return []
+        return [
+            {
+                "id": 1,
+                "event": {"kind": "tool_call", "payload": {"name": "fetch_boundary"}},
+            }
+        ]
 
 
 class ApiEventTests(unittest.TestCase):
@@ -32,18 +41,14 @@ class ApiEventTests(unittest.TestCase):
         data = frame.split("data: ", 1)[1].strip()
         self.assertEqual(json.loads(data), {"status": "succeeded"})
 
-    def test_event_stream_replays_persisted_events_for_each_subscriber(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            run_dir = Path(tmp)
-            (run_dir / "events.jsonl").write_text(
-                json.dumps({"kind": "tool_call", "payload": {"name": "fetch_boundary"}}) + "\n",
-                encoding="utf-8",
-            )
-            record = SimpleNamespace(run_dir=run_dir, status="succeeded", events=None)
-            first = list(islice(event_stream(record), 2))
-            second = list(islice(event_stream(record), 2))
+    def test_event_stream_replays_database_events_for_each_subscriber(self):
+        repository = _EventRepository()
+        record = SimpleNamespace(run_id="r1", status="succeeded", events=None)
+        first = list(event_stream(record, repository=repository))
+        second = list(event_stream(record, repository=repository))
         self.assertEqual(first, second)
         self.assertIn("fetch_boundary", first[0])
+        self.assertIn("event: done", first[-1])
 
 
 if __name__ == "__main__":

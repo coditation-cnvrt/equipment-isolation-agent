@@ -16,8 +16,7 @@ http:
       {
         "equipment_tag": "{{EQUIPMENT_TAG}}",
         "cnvrt_project_id": "{{CNVRT_PROJECT_ID}}",
-        "collection_name": "{{COLLECTION_NAME}}",
-        "include_viewer": false
+        "collection_name": "{{COLLECTION_NAME}}"
       }
 
 settings:

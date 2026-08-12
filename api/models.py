@@ -1,6 +1,7 @@
 """Pydantic models for the isolation API."""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -30,8 +31,6 @@ class IsolationRunRequest(BaseModel):
     work_scope: WorkScopeRequest = Field(default_factory=WorkScopeRequest)
     model: str = ""
     max_steps: int = 16
-    image_url: str = ""
-    include_viewer: bool = True
     runner: Literal["agentic"] = "agentic"
 
     @field_validator("equipment_tag", "cnvrt_project_id", "collection_id", "unigraph_project_id")
@@ -125,9 +124,72 @@ class RunStatus(BaseModel):
     finished_at: float | None = None
     agent: dict[str, Any] | None = None
     request: dict[str, Any] = Field(default_factory=dict)
-    artifacts: dict[str, str] = Field(default_factory=dict)
     error: dict[str, Any] | None = None
 
 
 class RunList(BaseModel):
     items: list[RunStatus]
+
+
+class CreateIsolationPlanFromRunRequest(BaseModel):
+    run_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
+    area_code: str | None = Field(default=None, max_length=100)
+
+    @field_validator("area_code")
+    @classmethod
+    def _normalize_area_code(cls, value: str | None) -> str | None:
+        value = str(value or "").strip()
+        return value or None
+
+
+class PlanSourceRun(BaseModel):
+    run_id: str
+    runner: str
+    status: str
+    equipment_tag: str
+    created_at: datetime | None = None
+    assurance_status: str | None = None
+    job_id: str = ""
+    job_name: str = ""
+    cnvrt_project_id: str = ""
+    collection_id: str = ""
+    unigraph_project_id: str = ""
+    request: dict[str, Any] = Field(default_factory=dict)
+    agent: dict[str, Any] | None = None
+    result_url: str
+    trace_url: str
+
+
+class PlanVersionSummary(BaseModel):
+    plan_version_id: str
+    parent_plan_version_id: str | None = None
+    version_no: int
+    derivation_status: str
+    input_hash: str
+    model_hash: str
+    derived_at: datetime
+    superseded_at: datetime | None = None
+    source_run: PlanSourceRun
+
+
+class IsolationPlanSummary(BaseModel):
+    plan_id: str
+    plan_number: str
+    active_plan_version_id: str | None = None
+    mode: str
+    lifecycle_state: str
+    area_code: str | None = None
+    created_at: datetime
+    latest_plan_version_id: str
+    latest_version: PlanVersionSummary
+
+
+class IsolationPlanDetail(IsolationPlanSummary):
+    versions: list[PlanVersionSummary]
+
+
+class IsolationPlanList(BaseModel):
+    items: list[IsolationPlanSummary]
+    limit: int
+    offset: int
+    total: int

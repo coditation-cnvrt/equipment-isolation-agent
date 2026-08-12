@@ -1,4 +1,6 @@
-import type { IsolationPlan, IsolationPoint, IsolationRunStatus } from './api'
+import { useState } from 'react'
+
+import type { IsolationPlan, IsolationPoint, IsolationRunStatus, SavedIsolationPlan } from './api'
 
 type IsolationPlanPanelProps = {
   run: IsolationRunStatus | null
@@ -7,6 +9,10 @@ type IsolationPlanPanelProps = {
   selectedPointId: string | null
   onPointSelect: (point: IsolationPoint) => void
   onReset: () => void
+  savedPlan: SavedIsolationPlan | null
+  planSaving: boolean
+  planSaveError: string
+  onSavePlan: (areaCode?: string) => Promise<void>
 }
 
 function humanize(value: unknown): string {
@@ -58,7 +64,9 @@ function RunProgress({ run, error, onReset }: Pick<IsolationPlanPanelProps, 'run
   )
 }
 
-export default function IsolationPlanPanel({ run, plan, error, selectedPointId, onPointSelect, onReset }: IsolationPlanPanelProps) {
+export default function IsolationPlanPanel({ run, plan, error, selectedPointId, onPointSelect, onReset, savedPlan, planSaving, planSaveError, onSavePlan }: IsolationPlanPanelProps) {
+  const [saveOpen, setSaveOpen] = useState(false)
+  const [areaCode, setAreaCode] = useState('')
   if (!plan) return <RunProgress error={error} onReset={onReset} run={run} />
 
   const validation = plan.isolation_validation ?? {}
@@ -81,8 +89,11 @@ export default function IsolationPlanPanel({ run, plan, error, selectedPointId, 
     <div className="p-5">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="font-mono text-[10px] tracking-[0.12em] text-slate-500">ADVISORY PLAN RESULT</p>
-          <p className="mt-1 font-mono text-[10px] text-slate-500">RUN {run?.run_id?.slice(0, 12) ?? '—'}</p>
+          <p className="font-mono text-[10px] tracking-[0.12em] text-slate-500">{savedPlan ? 'SAVED ADVISORY PLAN' : 'ADVISORY PLAN RESULT'}</p>
+          {savedPlan ? <>
+            <p className="mt-1 font-mono text-xs font-semibold text-slate-900">{savedPlan.plan_number} · v{savedPlan.latest_version.version_no}</p>
+            <p className="mt-1 font-mono text-[9px] uppercase text-purple-800">{savedPlan.lifecycle_state} · {savedPlan.mode} · no active version</p>
+          </> : <p className="mt-1 font-mono text-[10px] text-slate-500">RUN {run?.run_id?.slice(0, 12) ?? '—'}</p>}
         </div>
         <button className="border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100" onClick={onReset} type="button">New run</button>
       </div>
@@ -175,6 +186,16 @@ export default function IsolationPlanPanel({ run, plan, error, selectedPointId, 
           </ol>
         </details>
       </div>
+
+      {!savedPlan && run?.status === 'succeeded' && <section className="mt-5 border border-slate-300 bg-slate-50 p-3">
+        {!saveOpen ? <button className="w-full border border-blue-700 bg-white px-3 py-2 font-mono text-[10px] font-semibold tracking-wide text-blue-800 hover:bg-blue-50" disabled={planSaving} onClick={() => setSaveOpen(true)} type="button">SAVE AS DRAFT PLAN</button> : <form onSubmit={(event) => { event.preventDefault(); void onSavePlan(areaCode).then(() => setSaveOpen(false)).catch(() => undefined) }}>
+          <p className="text-xs font-medium text-slate-900">Save advisory plan</p>
+          <p className="mt-1 text-[10px] leading-4 text-slate-600">Creates an immutable advisory draft. It does not authorise isolation or perform plant action.</p>
+          <label className="mt-3 block text-[10px] font-medium text-slate-700" htmlFor="plan-area-code">Area code (optional)<input className="mt-1 block w-full border border-slate-300 bg-white px-2 py-1.5 text-xs outline-none focus:border-blue-700" id="plan-area-code" maxLength={100} onChange={(event) => setAreaCode(event.target.value)} placeholder="Area 12" value={areaCode} /></label>
+          <div className="mt-3 flex justify-end gap-2"><button className="border border-slate-300 px-3 py-1.5 text-[10px] hover:bg-white" disabled={planSaving} onClick={() => setSaveOpen(false)} type="button">CANCEL</button><button className="bg-blue-700 px-3 py-1.5 font-mono text-[10px] text-white disabled:bg-slate-300" disabled={planSaving} type="submit">{planSaving ? 'SAVING…' : 'SAVE DRAFT'}</button></div>
+        </form>}
+        {planSaveError && <p className="mt-2 border-l-2 border-red-500 bg-red-50 px-2 py-1 text-[10px] text-red-900">{planSaveError}</p>}
+      </section>}
 
       <p className="mt-5 border-l-2 border-slate-400 pl-3 text-[10px] leading-4 text-slate-500">Agent-derived decision support. The deterministic validator status is authoritative for this payload. No plant action or authorisation is performed.</p>
     </div>

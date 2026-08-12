@@ -20,8 +20,7 @@ http:
         "unigraph_project_id": "{{UNIGRAPH_PROJECT_ID}}",
         "collection_name": "{{COLLECTION_NAME}}",
         "job_name": "{{JOB_NAME}}",
-        "job_id": "{{JOB_ID}}",
-        "include_viewer": false
+        "job_id": "{{JOB_ID}}"
       }
 
 settings:

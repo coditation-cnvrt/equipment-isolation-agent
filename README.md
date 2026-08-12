@@ -158,13 +158,23 @@ GET  /isolation-runs/{run_id}
 GET  /isolation-runs/{run_id}/events
 GET  /isolation-runs/{run_id}/result
 GET  /isolation-runs/{run_id}/trace
-GET  /isolation-runs/{run_id}/viewer
+POST /isolation-plans/from-run
+GET  /isolation-plans?equipment_tag=&job_id=&cnvrt_project_id=&collection_id=&unigraph_project_id=
+GET  /isolation-plans/{plan_id}
 ```
 
-Run artifacts are written under `EIA_RUNS_DIR` (default `api_runs/`). If
-`POSTGRES_HOST`, `POSTGRES_DB`, and `POSTGRES_USER` are set, run status/result
-metadata is also persisted to Postgres; set `EIA_AUTO_INIT_SCHEMA_ON_STARTUP=true`
-only when this process should initialize `schema.sql`.
+`POST /isolation-plans/from-run` idempotently promotes a succeeded persisted run
+to an immutable advisory draft (`isolation_plan` + version 1 + run link). The
+latest draft is not active or authorised, and reopening it does not invoke the
+agent.
+
+PostgreSQL is mandatory for the API and is the sole persistence layer for run
+requests, status, events, results, traces, plans, and versions. The API fails to
+start when PostgreSQL is unconfigured, unreachable, or missing the required
+schema. It does not create run files. Set `EIA_AUTO_INIT_SCHEMA_ON_STARTUP=true`
+only when this process should initialize `schema.sql`; otherwise apply the schema
+explicitly before startup. Drawing images and HILT content are served through the
+authenticated CNVRT proxy endpoints rather than retained as run artifacts.
 
 ## Tests
 

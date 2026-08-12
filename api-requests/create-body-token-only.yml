@@ -19,8 +19,7 @@ http:
         "collection_id": "{{COLLECTION_ID}}",
         "unigraph_project_id": "{{UNIGRAPH_PROJECT_ID}}",
         "collection_name": "{{COLLECTION_NAME}}",
-        "auth_token": "body-token-must-not-be-used",
-        "include_viewer": false
+        "auth_token": "body-token-must-not-be-used"
       }
 
 settings:
