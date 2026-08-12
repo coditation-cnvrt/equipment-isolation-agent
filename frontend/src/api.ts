@@ -233,6 +233,69 @@ export async function getIsolationRuns(filters: {
   return getItems<IsolationRunStatus>(`/isolation-runs?${params.toString()}`)
 }
 
+export type IsolationRunEvent = {
+  kind: string
+  payload?: Record<string, unknown>
+}
+
+export async function streamIsolationRunEvents(
+  runId: string,
+  callbacks: {
+    onEvent?: (event: IsolationRunEvent) => void
+    onDone?: (status?: string) => void
+  },
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetch(`${apiBaseUrl}/isolation-runs/${encodeURIComponent(runId)}/events`, {
+    headers: { ...requestHeaders(), Accept: 'text/event-stream' },
+    signal,
+  })
+  if (!response.ok) throw await responseError(response)
+  if (!response.body) throw new Error('The run event stream has no response body.')
+
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
+  let buffer = ''
+  let eventName = 'message'
+  let dataLines: string[] = []
+
+  const dispatch = () => {
+    if (!dataLines.length) return
+    const rawData = dataLines.join('\n')
+    let data: unknown
+    try {
+      data = JSON.parse(rawData)
+    } catch {
+      data = { kind: eventName, payload: { text: rawData } }
+    }
+    if (eventName === 'done') {
+      const payload = data as { status?: string }
+      callbacks.onDone?.(payload.status)
+    } else {
+      const event = data as IsolationRunEvent
+      callbacks.onEvent?.(event.kind ? event : { kind: eventName, payload: data as Record<string, unknown> })
+    }
+    eventName = 'message'
+    dataLines = []
+  }
+
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += value
+    const lines = buffer.split(/\r?\n/)
+    buffer = lines.pop() ?? ''
+    for (const line of lines) {
+      if (!line) dispatch()
+      else if (line.startsWith('event:')) eventName = line.slice(6).trim()
+      else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart())
+    }
+  }
+  if (buffer) {
+    if (buffer.startsWith('data:')) dataLines.push(buffer.slice(5).trimStart())
+    dispatch()
+  }
+}
+
 export async function getIsolationRun(runId: string): Promise<IsolationRunStatus> {
   const response = await fetch(`${apiBaseUrl}/isolation-runs/${encodeURIComponent(runId)}`, { headers: requestHeaders() })
   if (!response.ok) throw await responseError(response)

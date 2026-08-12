@@ -12,6 +12,7 @@ import {
   getIsolationRuns,
   getProjects,
   getUniGraphProjects,
+  streamIsolationRunEvents,
   type Collection,
   type Drawing,
   type Equipment,
@@ -235,29 +236,60 @@ function App() {
   }, [equipment, pendingHistoricalEquipmentTag])
 
   useEffect(() => {
-    if (!isolationRun || !['queued', 'running'].includes(isolationRun.status)) return
+    const runId = isolationRun?.run_id
+    if (!runId || !['queued', 'running'].includes(isolationRun.status)) return
+    const controller = new AbortController()
     let active = true
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        try {
-          const nextRun = await getIsolationRun(isolationRun.run_id)
-          if (!active) return
-          setIsolationRun(nextRun)
-          if (nextRun.status === 'failed') {
-            setIsolationError(nextRun.error?.message || 'The isolation run failed.')
-          }
-        } catch (reason) {
-          if (!active) return
-          setIsolationError(reason instanceof Error ? reason.message : 'Unable to read isolation run status.')
-          setIsolationRun((current) => current ? { ...current, status: 'failed' } : current)
+    let reconnectTimer: number | null = null
+
+    const reconcile = async () => {
+      const nextRun = await getIsolationRun(runId)
+      if (!active) return
+      setIsolationRun(nextRun)
+      if (nextRun.status === 'failed') setIsolationError(nextRun.error?.message || 'The isolation run failed.')
+    }
+
+    const connect = async () => {
+      try {
+        let terminalEventReceived = false
+        await streamIsolationRunEvents(runId, {
+          onEvent: (event) => {
+            if (!active || !['tool_call', 'tool_result'].includes(event.kind)) return
+            const tool = String(event.payload?.name ?? '')
+            if (!tool) return
+            setIsolationRun((current) => current?.run_id === runId ? {
+              ...current,
+              status: 'running',
+              agent: {
+                ...current.agent,
+                progress: { kind: event.kind, tool, updated_at: Date.now() / 1000 },
+              },
+            } : current)
+          },
+          onDone: () => { terminalEventReceived = true },
+        }, controller.signal)
+        if (active) {
+          await reconcile()
+          if (!terminalEventReceived) throw new Error('Run event stream ended before a terminal event.')
         }
-      })()
-    }, 1000)
+      } catch {
+        if (!active || controller.signal.aborted) return
+        try {
+          await reconcile()
+        } catch {
+          // A transient stream/status failure is retried without declaring the run failed.
+        }
+        if (active) reconnectTimer = window.setTimeout(() => { void connect() }, 2000)
+      }
+    }
+
+    void connect()
     return () => {
       active = false
-      window.clearTimeout(timer)
+      controller.abort()
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer)
     }
-  }, [isolationRun])
+  }, [isolationRun?.run_id, isolationRun?.status])
 
   useEffect(() => {
     if (!isolationRun?.run_id || !['succeeded', 'failed'].includes(isolationRun.status)) return

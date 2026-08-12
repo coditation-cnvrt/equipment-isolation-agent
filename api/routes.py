@@ -291,6 +291,10 @@ def run_events(request: Request, run_id: str, authorization: str = Header(defaul
     return StreamingResponse(
         event_stream(record, repository=getattr(_store(request), "repository", None)),
         media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
