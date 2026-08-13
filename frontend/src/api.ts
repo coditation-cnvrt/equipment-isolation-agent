@@ -23,6 +23,8 @@ export type Equipment = {
 
 export type IsolationPoint = {
   uuid: string
+  selection_id?: string
+  drawing_entity_id?: string | null
   source_visual_id?: string | null
   visual_id?: string | null
   tag_number?: string | null
@@ -32,6 +34,8 @@ export type IsolationPoint = {
   requires_manual_review?: boolean
   positive_isolation_requires_field_confirmation?: boolean
   bbox?: number[]
+  bbox_source?: string | null
+  bbox_match_method?: string | null
   validation_state?: 'barrier' | 'positive' | 'manual' | 'rejected'
 }
 

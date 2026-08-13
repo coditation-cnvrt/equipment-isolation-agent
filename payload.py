@@ -26,11 +26,18 @@ def build_final_payload(validation_data, config, downstream_impact=None):
     for candidate in candidates:
         properties = candidate.get("properties", {}) or {}
         entity_class = properties.get("entity_class") or candidate.get("candidate_label")
+        drawing_entity_id = candidate.get("visual_node_id") or candidate.get("visual_id")
         isolation_points.append(
             {
                 "equipment_id": candidate.get("equipment_tag"),
                 "uuid": str(candidate.get("candidate_id")),
+                # The isolation device's exact HILT drawing identity. Keep this
+                # separate from source_visual_id, which identifies the source
+                # nozzle and must never be highlighted as the barrier device.
+                "drawing_entity_id": str(drawing_entity_id) if drawing_entity_id not in (None, "") else None,
                 "bbox": candidate.get("bbox") or [],
+                "bbox_source": candidate.get("visual_source"),
+                "bbox_match_method": candidate.get("bbox_match_method"),
                 "entity_class": entity_class,
                 "tag_number": candidate.get("tag_number"),
                 "energy_type": (candidate.get("energy_type") or ["process"])[0],

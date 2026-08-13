@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
+  getHiltEntityId,
   HiltViewer,
+  normalizeHiltGraph,
   type HiltGraphInput,
+  type HiltHighlight,
   type HiltPointerContext,
   type HiltSelection,
   type HiltSymbol,
@@ -48,21 +51,56 @@ function Workspace({
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [missingSymbols, setMissingSymbols] = useState<string[]>([])
   const activeId = drawingSelection?.id ?? selectedEntityId
-  const highlights = useMemo(
-    () => selectedEntityId ? [{ entityId: selectedEntityId, color: '#2563eb', label: 'TARGET' }] : [],
-    [selectedEntityId],
-  )
-  const bboxHighlights = useMemo(() => {
-    const selectedIndex = isolationPoints.findIndex((point) => point.visual_id === selectedIsolationPointId)
-    const point = selectedIndex >= 0 ? isolationPoints[selectedIndex] : null
-    if (!point?.bbox || point.bbox.length !== 4) return []
-    return [{
-      id: point.visual_id || `candidate-${selectedIndex}`,
-      bbox: point.bbox as [number, number, number, number],
-      color: point.validation_state === 'rejected' || point.validation_state === 'manual' || point.requires_manual_review ? '#b45309' : '#6d28d9',
-      label: `${point.validation_state === 'rejected' ? 'C' : 'P'}-${String(selectedIndex + 1).padStart(2, '0')}`,
-    }]
-  }, [isolationPoints, selectedIsolationPointId])
+  const drawingNodeIds = useMemo(() => {
+    if (!graph) return new Set<string>()
+    return new Set(normalizeHiltGraph(graph).nodes.map(getHiltEntityId).filter(Boolean))
+  }, [graph])
+  const mappedPoints = useMemo(() => isolationPoints.map((point, index) => {
+    const explicitId = String(point.drawing_entity_id || '').trim()
+    const legacyExactId = explicitId ? '' : String(point.uuid || '').trim()
+    const drawingEntityId = drawingNodeIds.has(explicitId)
+      ? explicitId
+      : drawingNodeIds.has(legacyExactId) ? legacyExactId : null
+    return { point, index, drawingEntityId }
+  }), [drawingNodeIds, isolationPoints])
+  const highlights = useMemo(() => {
+    const pointHighlights = new Map<string, HiltHighlight & { selected: boolean }>()
+    for (const { point, index, drawingEntityId } of mappedPoints) {
+      if (!drawingEntityId) continue
+      const selected = Boolean(point.selection_id && point.selection_id === selectedIsolationPointId)
+      const rejected = point.validation_state === 'rejected'
+      const highlight = {
+        entityId: drawingEntityId,
+        color: rejected || point.validation_state === 'manual' || point.requires_manual_review ? '#b45309' : '#6d28d9',
+        label: `${rejected ? 'C' : 'P'}-${String(index + 1).padStart(2, '0')}`,
+        className: selected ? 'isolation-point-highlight--selected' : 'isolation-point-highlight--muted',
+        selected,
+      }
+      const existing = pointHighlights.get(drawingEntityId)
+      if (!existing || selected) pointHighlights.set(drawingEntityId, highlight)
+    }
+    const result = [...pointHighlights.values()]
+      .sort((left, right) => Number(left.selected) - Number(right.selected))
+      .map(({ selected: _selected, ...highlight }) => highlight)
+    if (selectedEntityId) result.push({ entityId: selectedEntityId, color: '#0f62fe', label: 'SELECTED', badgeVariant: 'flag', className: 'equipment-target-highlight' })
+    return result
+  }, [mappedPoints, selectedEntityId, selectedIsolationPointId])
+  const bboxHighlights = useMemo(() => mappedPoints
+    .map(({ point, index, drawingEntityId }) => {
+      if (drawingEntityId || !point.bbox || point.bbox.length !== 4) return null
+      const selected = Boolean(point.selection_id && point.selection_id === selectedIsolationPointId)
+      return {
+        id: `${point.selection_id || point.uuid || 'candidate'}-${index}`,
+        bbox: point.bbox as [number, number, number, number],
+        color: point.validation_state === 'rejected' || point.validation_state === 'manual' || point.requires_manual_review ? '#b45309' : '#6d28d9',
+        label: `${point.validation_state === 'rejected' ? 'C' : 'P'}-${String(index + 1).padStart(2, '0')}`,
+        className: selected ? 'isolation-point-highlight--selected' : 'isolation-point-highlight--muted',
+        selected,
+      }
+    })
+    .filter((highlight): highlight is NonNullable<typeof highlight> => highlight !== null)
+    .sort((left, right) => Number(left.selected) - Number(right.selected))
+    .map(({ selected: _selected, ...highlight }) => highlight), [mappedPoints, selectedIsolationPointId])
 
   useEffect(() => {
     setContextMenu(null)
@@ -70,10 +108,12 @@ function Workspace({
 
   useEffect(() => {
     if (!selectedIsolationPointId) return
-    const point = isolationPoints.find((item) => item.visual_id === selectedIsolationPointId)
-    if (!point?.bbox || point.bbox.length !== 4) return
-    viewerRef.current?.panToBBox(point.bbox as [number, number, number, number])
-  }, [isolationPoints, selectedIsolationPointId])
+    const mapped = mappedPoints.find(({ point }) => point.selection_id === selectedIsolationPointId)
+    if (!mapped) return
+    if (mapped.drawingEntityId && viewerRef.current?.panToEntity?.(mapped.drawingEntityId)) return
+    if (!mapped.point.bbox || mapped.point.bbox.length !== 4) return
+    viewerRef.current?.panToBBox(mapped.point.bbox as [number, number, number, number])
+  }, [mappedPoints, selectedIsolationPointId])
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-white">

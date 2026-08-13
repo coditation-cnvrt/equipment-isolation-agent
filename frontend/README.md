@@ -10,7 +10,7 @@ pnpm install
 pnpm dev
 ```
 
-The frontend currently uses the viewer through `link:../../../p360-hitl-viewer`, so keep the viewer repository at that sibling path during local development.
+The frontend installs `@coditation-cnvrt/p360-hitl-viewer` from the private GitHub Packages registry. Configure the `@coditation-cnvrt` registry in npm and provide a `GITHUB_PACKAGES_TOKEN` with `read:packages` before running `pnpm install`.
 
 Set `VITE_API_AUTH_TOKEN` in `.env.local` because isolation-run status and result endpoints require bearer authentication. The value is embedded in the local browser bundle, so use a read-only developer token and never commit it. Production deployments should inject the authenticated user's token through the hosting application rather than a build-time secret.
 

@@ -13,3 +13,57 @@
 body {
   font-family: var(--font-sans);
 }
+
+/* Keep every locatable isolation point visible without competing with the active point. */
+.p360-hilt-bbox-highlight.isolation-point-highlight--muted rect {
+  fill: color-mix(in srgb, var(--p360-hilt-highlight) 8%, transparent);
+  stroke-width: 1.25px !important;
+  stroke-dasharray: 3px 4px !important;
+  stroke-linecap: butt;
+  stroke-opacity: 0.82;
+}
+
+.p360-hilt-bbox-highlight.isolation-point-highlight--muted .p360-hilt-bbox-highlight__badge {
+  opacity: 0.78;
+}
+
+.p360-hilt-bbox-highlight.isolation-point-highlight--selected rect {
+  fill: color-mix(in srgb, var(--p360-hilt-highlight) 20%, transparent);
+  stroke-width: 2.5px !important;
+  stroke-dasharray: 5px 3px !important;
+  stroke-linecap: butt;
+  stroke-opacity: 1;
+}
+
+.p360-hilt-bbox-highlight.isolation-point-highlight--selected .p360-hilt-bbox-highlight__badge {
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--p360-hilt-highlight) 65%, transparent));
+}
+
+.p360-hilt-node.isolation-point-highlight--muted .p360-hilt-node__outline {
+  stroke-width: 1.25px !important;
+  stroke-dasharray: 3px 4px !important;
+  stroke-linecap: butt;
+  stroke-opacity: 0.82;
+}
+
+.p360-hilt-node.isolation-point-highlight--muted .p360-hilt-node__badge {
+  opacity: 0.78;
+}
+
+.p360-hilt-node.isolation-point-highlight--selected .p360-hilt-node__outline {
+  stroke-width: 2.5px !important;
+  stroke-dasharray: 5px 3px !important;
+  stroke-linecap: butt;
+  stroke-opacity: 1;
+}
+
+.p360-hilt-node.isolation-point-highlight--selected .p360-hilt-node__badge {
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--p360-hilt-highlight) 65%, transparent));
+}
+
+/* The selected equipment target uses the same dashed visual language. */
+.p360-hilt-node.equipment-target-highlight .p360-hilt-node__outline {
+  stroke-width: 2px !important;
+  stroke-dasharray: 6px 4px !important;
+  stroke-linecap: butt;
+}

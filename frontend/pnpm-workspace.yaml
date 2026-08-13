@@ -1,0 +1,4 @@
+# This private package is produced by our own release workflow and may be
+# consumed immediately, before the global minimum-release-age window expires.
+minimumReleaseAgeExclude:
+  - '@coditation-cnvrt/p360-hitl-viewer'

@@ -121,9 +121,9 @@ export default function IsolationPlanPanel({ run, plan, error, selectedPointId, 
         </div>
         <ol className="mt-2 space-y-2">
           {points.map((point, index) => {
-            const visualId = point.visual_id || ''
-            const canLocate = point.bbox?.length === 4
-            const selected = Boolean(canLocate && visualId && selectedPointId === visualId)
+            const selectionId = point.selection_id || ''
+            const canLocate = Boolean(point.drawing_entity_id || point.bbox?.length === 4)
+            const selected = Boolean(canLocate && selectionId && selectedPointId === selectionId)
             const pointRejected = point.validation_state === 'rejected'
             return <li key={`${point.uuid}-${index}`}>
               <button

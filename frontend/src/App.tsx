@@ -135,7 +135,7 @@ function App() {
       const id = String(point.uuid)
       return {
         ...point,
-        visual_id: `candidate:${id}:${index}`,
+        selection_id: `candidate:${id}:${index}`,
         validation_state: barriers.has(id) ? 'barrier' as const
           : positives.has(id) ? 'positive' as const
             : manual.has(id) ? 'manual' as const
@@ -580,14 +580,17 @@ function App() {
   }
 
   function selectIsolationPoint(point: IsolationPoint) {
-    const visualId = point.visual_id
-    if (!visualId) return
+    const selectionId = point.selection_id
+    if (!selectionId) return
     setDrawingSelection(null)
-    setSelectedIsolationPointId(visualId)
+    setSelectedIsolationPointId(selectionId)
   }
 
   function selectDrawingEntity(nextSelection: HiltSelection | null) {
-    const resultPoint = nextSelection && isolationPoints.find((point) => point.visual_id === nextSelection.id)
+    const resultPoint = nextSelection && (
+      isolationPoints.find((point) => point.selection_id === selectedIsolationPointId && (point.drawing_entity_id || point.uuid) === nextSelection.id)
+      ?? isolationPoints.find((point) => (point.drawing_entity_id || point.uuid) === nextSelection.id)
+    )
     if (resultPoint) {
       selectIsolationPoint(resultPoint)
       return

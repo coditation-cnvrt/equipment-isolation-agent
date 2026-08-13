@@ -106,7 +106,11 @@ class IsolationPointTests(unittest.TestCase):
                     {
                         "candidate_id": 7,
                         "equipment_tag": "BT-11",
+                        "visual_id": "graph-node-fallback",
+                        "visual_node_id": "hilt-valve-uuid",
                         "bbox": [1, 2, 3, 4],
+                        "visual_source": "hilt_graph",
+                        "bbox_match_method": "hilt_uuid",
                         "properties": {"entity_class": "gate_valve"},
                         "tag_number": "V-1",
                         "source_component_tag": "N1",
@@ -121,9 +125,31 @@ class IsolationPointTests(unittest.TestCase):
         point = record["isolation_points"][0]
         self.assertEqual(point["uuid"], "7")  # always stringified
         self.assertEqual(point["entity_class"], "gate_valve")
+        self.assertEqual(point["drawing_entity_id"], "hilt-valve-uuid")
         self.assertEqual(point["bbox"], [1, 2, 3, 4])
+        self.assertEqual(point["bbox_source"], "hilt_graph")
+        self.assertEqual(point["bbox_match_method"], "hilt_uuid")
         self.assertEqual(point["energy_type"], "process")  # default
         self.assertIn("Candidate vertex id: 7", point["reason"])
+
+    def test_drawing_identity_falls_back_to_candidate_visual_id_not_source_nozzle(self):
+        record = build_final_payload(
+            {
+                "candidates": [
+                    {
+                        "candidate_id": 1,
+                        "visual_id": "isolation-device-node",
+                        "source_visual_id": "source-nozzle-node",
+                    }
+                ]
+            },
+            self.config,
+        )["data"][0]
+
+        point = record["isolation_points"][0]
+        self.assertEqual(point["drawing_entity_id"], "isolation-device-node")
+        self.assertEqual(point["source_visual_id"], "source-nozzle-node")
+        self.assertNotEqual(point["drawing_entity_id"], point["source_visual_id"])
 
     def test_entity_class_falls_back_to_candidate_label(self):
         record = build_final_payload(
