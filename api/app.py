@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from api.auth import CnvrtAuthMiddleware
 from api.db import PostgresRunRepository, auto_init_schema_on_startup, init_schema, postgres_config_from_env
 from api.routes import router
 from api.runs import RunStore
@@ -34,6 +35,7 @@ def create_app() -> FastAPI:
             run_store.shutdown()
 
     app = FastAPI(title="Equipment Isolation Agent API", version="0.1.0", lifespan=lifespan)
+    app.add_middleware(CnvrtAuthMiddleware)
     origins = [
         item.strip()
         for item in os.environ.get("EIA_CORS_ORIGINS", "http://localhost:5173").split(",")

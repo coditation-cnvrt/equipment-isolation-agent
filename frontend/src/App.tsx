@@ -31,6 +31,7 @@ import DrawingSelectionInspector from './DrawingSelectionInspector'
 import IsolationPlanPanel from './IsolationPlanPanel'
 import Skeleton from './Skeleton'
 import SearchableSelect from './SearchableSelect'
+import { useUser } from './auth-context'
 
 const Workspace = lazy(() => import('./Workspace'))
 
@@ -78,6 +79,7 @@ function getSymbolProjectId(graphInput: HiltGraphInput, fallback: string): strin
 }
 
 function App() {
+  const { logout, user } = useUser()
   const [projects, setProjects] = useState<Project[]>([])
   const [collections, setCollections] = useState<Collection[]>([])
   const [drawings, setDrawings] = useState<Drawing[]>([])
@@ -641,7 +643,7 @@ function App() {
     <div className="h-screen overflow-hidden bg-[#f7f8fa] text-slate-950">
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-300 bg-white px-4 sm:px-6">
         <div className="flex items-center gap-4"><span className="text-sm font-semibold">Plant360</span><span className="font-mono text-xs text-slate-600">ISOLATION PLANNING</span></div>
-        <span className="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 font-mono text-[10px] text-amber-900">ADVISORY ONLY</span>
+        <div className="flex items-center gap-3"><span className="hidden max-w-52 truncate text-xs text-slate-600 sm:inline">{user?.profile?.email}</span><span className="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 font-mono text-[10px] text-amber-900">ADVISORY ONLY</span><button className="font-mono text-[10px] font-semibold tracking-wide text-slate-600 hover:text-blue-700" onClick={logout} type="button">LOGOUT</button></div>
       </header>
       <main className="grid h-[calc(100vh-3.5rem)] min-h-0 grid-cols-1 overflow-hidden xl:grid-cols-[20rem_minmax(0,1fr)_26rem]">
         <aside className="overflow-y-auto border-b border-slate-300 bg-slate-50 xl:border-b-0 xl:border-r">

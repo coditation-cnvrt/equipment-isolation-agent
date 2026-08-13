@@ -177,13 +177,15 @@ export type CreateIsolationRunInput = {
   highRiskService: boolean
 }
 
+import { authenticationRequiredEvent, getStoredAccessToken } from './auth-storage'
+
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8088').replace(/\/$/, '')
-const apiAuthToken = String(import.meta.env.VITE_API_AUTH_TOKEN || '').trim()
 
 function requestHeaders(json = false): HeadersInit {
   const headers: Record<string, string> = {}
   if (json) headers['Content-Type'] = 'application/json'
-  if (apiAuthToken) headers.Authorization = `Bearer ${apiAuthToken}`
+  const accessToken = getStoredAccessToken()
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`
   return headers
 }
 
@@ -197,8 +199,9 @@ async function responseError(response: Response): Promise<Error> {
   } catch {
     // Keep the HTTP status fallback when the body is not JSON.
   }
-  if (response.status === 401 && !apiAuthToken) {
-    message = 'Run status requires VITE_API_AUTH_TOKEN in the frontend environment.'
+  if (response.status === 401) {
+    window.dispatchEvent(new Event(authenticationRequiredEvent))
+    message = 'Your CNVRT authentication has expired. Sign in again.'
   }
   return new Error(message)
 }
