@@ -4,7 +4,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from domain.identity import REQUEST_SCHEMA_VERSION, RESULT_SCHEMA_VERSION
 
 
 class WorkScopeRequest(BaseModel):
@@ -14,7 +16,25 @@ class WorkScopeRequest(BaseModel):
     hot_work: bool = False
 
 
+class SelectedAssetRequest(BaseModel):
+    """Exact browser selection identity; optional during the legacy transition."""
+
+    hilt_entity_id: str = Field(..., min_length=1)
+    tag: str = Field(..., min_length=1)
+    entity_class: str = ""
+    selection_source: Literal["hilt_equipment_list", "hilt_canvas"]
+
+    @field_validator("hilt_entity_id", "tag")
+    @classmethod
+    def _identity_string_is_not_blank(cls, value: str) -> str:
+        value = str(value or "").strip()
+        if not value:
+            raise ValueError("field is required")
+        return value
+
+
 class IsolationRunRequest(BaseModel):
+    request_schema_version: Literal[REQUEST_SCHEMA_VERSION] = REQUEST_SCHEMA_VERSION
     equipment_tag: str = Field(..., min_length=1)
     job_name: str = ""
     job_id: str = ""
@@ -29,6 +49,7 @@ class IsolationRunRequest(BaseModel):
     traversal_source: str = ""
     max_depth: int | None = None
     work_scope: WorkScopeRequest = Field(default_factory=WorkScopeRequest)
+    selected_asset: SelectedAssetRequest | None = None
     model: str = ""
     max_steps: int = 16
     runner: Literal["agentic"] = "agentic"
@@ -40,6 +61,16 @@ class IsolationRunRequest(BaseModel):
         if not value:
             raise ValueError("field is required")
         return value
+
+    @model_validator(mode="after")
+    def _validate_selected_asset_context(self):
+        if self.selected_asset is None:
+            return self
+        if not str(self.job_id or "").strip():
+            raise ValueError("job_id is required when selected_asset is supplied")
+        if self.selected_asset.tag != self.equipment_tag:
+            raise ValueError("selected_asset.tag must equal equipment_tag")
+        return self
 
 
 class EquipmentListRequest(BaseModel):
@@ -108,6 +139,8 @@ class PlanningUniGraphProjectList(BaseModel):
 
 
 class RunAccepted(BaseModel):
+    request_schema_version: Literal[REQUEST_SCHEMA_VERSION] = REQUEST_SCHEMA_VERSION
+    result_schema_version: Literal[RESULT_SCHEMA_VERSION] = RESULT_SCHEMA_VERSION
     run_id: str
     status: str
     status_url: str

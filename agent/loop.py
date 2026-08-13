@@ -74,6 +74,7 @@ def run_agent(
     active_model = model
     models_used = [model]
     orchestration_error: dict | None = None
+    terminal_tool_failure = False
 
     _emit(on_event, "start", {"equipment": equipment_tag, "model": model, "max_steps": max_steps})
 
@@ -131,6 +132,14 @@ def run_agent(
                 assurance_status = result.get("assurance_status")
                 if result.get("terminal"):
                     validate_terminal = True
+            if name == "fetch_boundary" and result.get("error") and session.boundary_data is None:
+                orchestration_error = {
+                    "kind": "pipeline_prerequisite_failed",
+                    "tool": name,
+                    "message": str(result["error"]),
+                }
+                terminal_tool_failure = True
+                _emit(on_event, "pipeline_error", orchestration_error)
             contents.append(
                 types.Content(
                     role="user",
@@ -141,8 +150,12 @@ def run_agent(
                     ],
                 )
             )
+            if terminal_tool_failure:
+                break
+        if terminal_tool_failure:
+            break
 
-    forced = _ensure_pipeline(session, validate_terminal, on_event)
+    forced = [] if terminal_tool_failure else _ensure_pipeline(session, validate_terminal, on_event)
     if forced:
         transcript.append(
             {"step": "guardrail", "role": "system", "kind": "guardrail", "forced": forced}

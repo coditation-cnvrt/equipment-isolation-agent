@@ -30,7 +30,8 @@ class PayloadEnvelopeTests(unittest.TestCase):
 
     def test_envelope_shape(self):
         payload = build_final_payload({}, self.config)
-        self.assertEqual(sorted(payload), ["data", "debug", "error", "message"])
+        self.assertEqual(sorted(payload), ["data", "debug", "error", "message", "result_schema_version"])
+        self.assertEqual(payload["result_schema_version"], "1.0")
         self.assertIs(payload["error"], False)
         self.assertEqual(payload["message"], "Completed")
         self.assertEqual(len(payload["data"]), 1)
@@ -70,6 +71,7 @@ class PayloadEnvelopeTests(unittest.TestCase):
                 "secondary_energy_context",
                 "selected_equipment",
                 "selected_equipment_overlays",
+                "target_identity",
                 "unselected_boundary_sources",
             ],
         )
@@ -93,6 +95,15 @@ class PayloadEnvelopeTests(unittest.TestCase):
     def test_validation_context_overrides_config_context(self):
         record = build_final_payload({"context": {"job_id": 999}}, self.config)["data"][0]
         self.assertEqual(record["job_id"], 999)
+
+    def test_target_identity_defaults_to_explicit_legacy_quality(self):
+        record = build_final_payload({}, self.config)["data"][0]
+        self.assertEqual(record["target_identity"]["identity_quality"], "legacy_tag_only")
+
+    def test_verified_target_identity_is_passed_through(self):
+        identity = {"status": "verified", "hilt_entity_id": "hilt-p3", "unigraph_vertex_id": "172184"}
+        record = build_final_payload({"target_identity": identity}, self.config)["data"][0]
+        self.assertEqual(record["target_identity"], identity)
 
 
 class IsolationPointTests(unittest.TestCase):

@@ -74,12 +74,15 @@ export type IsolationPlan = {
 }
 
 export type IsolationResult = {
+  result_schema_version?: '1.0'
   error: boolean
   message: string
   data: IsolationPlan[]
 }
 
 export type IsolationRunAccepted = {
+  request_schema_version?: '1.0'
+  result_schema_version?: '1.0'
   run_id: string
   status: string
   status_url: string
@@ -95,11 +98,18 @@ export type IsolationRunStatus = {
   started_at?: number | null
   finished_at?: number | null
   request?: {
+    request_schema_version?: '1.0'
     job_id?: string
     job_name?: string
     cnvrt_project_id?: string
     collection_id?: string
     unigraph_project_id?: string
+    selected_asset?: {
+      hilt_entity_id: string
+      tag: string
+      entity_class?: string
+      selection_source: 'hilt_equipment_list' | 'hilt_canvas'
+    }
     work_scope?: { intrusive_work?: boolean; high_risk_service?: boolean }
   }
   agent?: {
@@ -155,6 +165,8 @@ export type SavedIsolationPlan = {
 
 export type CreateIsolationRunInput = {
   equipmentTag: string
+  equipmentHiltEntityId: string
+  equipmentEntityClass: string
   jobName: string
   jobId: string
   cnvrtProjectId: string
@@ -242,7 +254,14 @@ export async function createIsolationRun(input: CreateIsolationRunInput): Promis
     method: 'POST',
     headers: requestHeaders(true),
     body: JSON.stringify({
+      request_schema_version: '1.0',
       equipment_tag: input.equipmentTag,
+      selected_asset: {
+        hilt_entity_id: input.equipmentHiltEntityId,
+        tag: input.equipmentTag,
+        entity_class: input.equipmentEntityClass,
+        selection_source: 'hilt_equipment_list',
+      },
       job_name: input.jobName,
       job_id: input.jobId,
       cnvrt_project_id: input.cnvrtProjectId,

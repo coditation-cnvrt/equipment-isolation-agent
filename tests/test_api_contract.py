@@ -7,7 +7,7 @@ from unittest import mock
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from api.models import EquipmentListRequest, IsolationRunRequest, RunStatus
+from api.models import EquipmentListRequest, IsolationRunRequest, RunStatus, SelectedAssetRequest
 from api.routes import (
     create_run,
     equipment,
@@ -23,6 +23,7 @@ from api.routes import (
     run_status,
 )
 from api.service import (
+    config_from_run_request,
     get_cnvrt_hilt_graph,
     get_hilt_ui_symbols,
     list_cnvrt_collections,
@@ -141,6 +142,87 @@ class ApiContractTests(unittest.TestCase):
     def test_request_model_requires_project_context(self):
         with self.assertRaises(ValidationError):
             IsolationRunRequest(equipment_tag="P3")
+
+    def test_request_contract_is_versioned(self):
+        request = IsolationRunRequest(
+            equipment_tag="P3",
+            cnvrt_project_id="277",
+            collection_id="206",
+            unigraph_project_id="15",
+        )
+        self.assertEqual(request.request_schema_version, "1.0")
+
+    def test_request_accepts_exact_selected_asset_identity(self):
+        request = IsolationRunRequest(
+            equipment_tag="P3",
+            job_id="2151",
+            cnvrt_project_id="277",
+            collection_id="206",
+            unigraph_project_id="15",
+            selected_asset=SelectedAssetRequest(
+                hilt_entity_id="08196784-d2a7-48bc-80e8-08bfd3b2657a",
+                tag="P3",
+                entity_class="vertical_vessel",
+                selection_source="hilt_equipment_list",
+            ),
+        )
+        self.assertEqual(request.selected_asset.tag, request.equipment_tag)
+
+    def test_selected_asset_rejects_blank_hilt_identity(self):
+        with self.assertRaises(ValidationError):
+            SelectedAssetRequest(
+                hilt_entity_id="  ",
+                tag="P3",
+                selection_source="hilt_canvas",
+            )
+
+    def test_selected_asset_requires_drawing_context(self):
+        with self.assertRaises(ValidationError):
+            IsolationRunRequest(
+                equipment_tag="P3",
+                cnvrt_project_id="277",
+                collection_id="206",
+                unigraph_project_id="15",
+                selected_asset=SelectedAssetRequest(
+                    hilt_entity_id="hilt-p3",
+                    tag="P3",
+                    selection_source="hilt_equipment_list",
+                ),
+            )
+
+    def test_selected_asset_tag_must_match_legacy_equipment_tag(self):
+        with self.assertRaises(ValidationError):
+            IsolationRunRequest(
+                equipment_tag="P3",
+                job_id="2151",
+                cnvrt_project_id="277",
+                collection_id="206",
+                unigraph_project_id="15",
+                selected_asset=SelectedAssetRequest(
+                    hilt_entity_id="hilt-p3",
+                    tag="P4",
+                    selection_source="hilt_equipment_list",
+                ),
+            )
+
+    def test_selected_asset_is_adapted_to_typed_run_config(self):
+        request = IsolationRunRequest(
+            equipment_tag="P3",
+            job_id="2151",
+            cnvrt_project_id="277",
+            collection_id="206",
+            unigraph_project_id="15",
+            selected_asset=SelectedAssetRequest(
+                hilt_entity_id="hilt-p3",
+                tag="P3",
+                entity_class="vertical_vessel",
+                selection_source="hilt_equipment_list",
+            ),
+        )
+        config = config_from_run_request(request, "plant-token")
+        self.assertEqual(config.selected_asset.hilt_entity_id, "hilt-p3")
+        self.assertEqual(config.selected_asset.context.job_id, "2151")
+        self.assertEqual(config.selected_asset.context.unigraph_project_id, "15")
 
     def test_create_run_can_use_server_side_plant360_token(self):
         os.environ["PLANT360_AUTH_TOKEN"] = "server-token"

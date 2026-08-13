@@ -32,6 +32,20 @@ class _StubSession:
         self.config = type("C", (), {"equipment_tag": "N7"})()
         self.trace = []
 
+    def record(self, tool, args, result, error=None):
+        self.trace.append({"tool": tool, "args": args, "result": result, "error": error})
+
+
+class _Part:
+    def __init__(self, function_call=None, text=None):
+        self.function_call = function_call
+        self.text = text
+
+
+class _Response:
+    def __init__(self, parts):
+        self.candidates = [type("Candidate", (), {"content": type("Content", (), {"parts": parts})()})()]
+
 
 class _Models:
     def __init__(self, responses):
@@ -102,6 +116,27 @@ class GuardrailOrderingTests(unittest.TestCase):
         self.assertEqual(models.calls, ["primary-model", "primary-model", "primary-model", "fallback-model"])
         self.assertEqual([kind for kind, _ in events].count("model_retry"), 2)
         self.assertIn("model_fallback", [kind for kind, _ in events])
+
+    def test_boundary_infrastructure_failure_stops_without_retry_or_guardrail(self):
+        call = type("FunctionCall", (), {"name": "fetch_boundary", "args": {"equipment_tag": "N7"}})()
+        response = _Response([_Part(function_call=call)])
+        models = _Models([response])
+        client = type("Client", (), {"models": models})()
+        session = _StubSession()
+        session.boundary_data = None
+        events = []
+
+        with mock.patch.object(loop.genai, "Client", return_value=client), \
+             mock.patch.object(loop, "call_tool", return_value={"error": "ConnectionTimeoutError: graph unavailable"}) as tool, \
+             mock.patch.object(loop, "_ensure_pipeline") as guardrail:
+            result = loop.run_agent(session, model="primary-model", api_key="key", on_event=lambda kind, payload: events.append((kind, payload)))
+
+        tool.assert_called_once()
+        guardrail.assert_not_called()
+        self.assertEqual(result["steps_used"], 1)
+        self.assertEqual(result["forced"], [])
+        self.assertEqual(result["orchestration_error"]["kind"], "pipeline_prerequisite_failed")
+        self.assertIn("pipeline_error", [kind for kind, _ in events])
 
     def test_model_failure_is_recorded_and_deterministic_guardrail_runs(self):
         unavailable = loop.errors.ServerError(503, {"error": {"code": 503, "status": "UNAVAILABLE", "message": "down"}})

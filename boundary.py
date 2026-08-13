@@ -6,8 +6,13 @@ from graph_client import GraphClient, normalize_vertex, props_only, vertex_id, v
 def fetch_boundaries(config):
     with GraphClient(config.graph) as client:
         g = client.g
-        equipment_rows = _fetch_equipment_vertices(g, config.equipment_tag)
+        equipment_rows = (
+            _fetch_selected_equipment_vertices(g, config.selected_asset.hilt_entity_id)
+            if config.selected_asset is not None
+            else _fetch_equipment_vertices(g, config.equipment_tag)
+        )
         equipment_vertices = _dedupe_vertices(normalize_vertex(row) for row in equipment_rows)
+        equipment_vertices, target_identity = _verify_selected_asset(equipment_vertices, config.selected_asset)
         equipment_results = []
         traversal_limit_hit = False
 
@@ -57,8 +62,72 @@ def fetch_boundaries(config):
         "max_traversal_depth": config.policy.max_traversal_depth,
         "traversal_limit_hit": traversal_limit_hit,
         "equipment_boundaries": equipment_results,
+        "target_identity": target_identity,
         "context": config.context,
     }
+
+
+def _verify_selected_asset(equipment_vertices, selected_asset):
+    """Resolve exact HILT identity against one graph equipment vertex.
+
+    Tag matching discovers a bounded set for legacy compatibility, but never
+    proves identity. Browser selections must match an explicit source identity
+    property on exactly one vertex.
+    """
+    if selected_asset is None:
+        return equipment_vertices, {
+            "status": "legacy_tag_only",
+            "identity_quality": "legacy_tag_only",
+            "tag": "",
+        }
+
+    wanted = str(selected_asset.hilt_entity_id)
+    matches = []
+    matched_properties = []
+    for vertex in equipment_vertices:
+        properties = props_only(vertex)
+        for property_name in ("node_id", "cnvrt_id", "source_id", "uuid"):
+            if str(properties.get(property_name) or "").strip() == wanted:
+                matches.append(vertex)
+                matched_properties.append(property_name)
+                break
+
+    if len(matches) != 1:
+        reason = "not_found" if not matches else "ambiguous"
+        raise RuntimeError(
+            f"Selected HILT equipment identity could not be verified: {reason} "
+            f"for job {selected_asset.context.job_id}."
+        )
+
+    vertex = matches[0]
+    return matches, {
+        "status": "verified",
+        "identity_quality": "exact",
+        "selection_source": selected_asset.selection_source.value,
+        "tag": selected_asset.tag,
+        "hilt_entity_id": wanted,
+        "hilt_entity_class": selected_asset.hilt_entity_class,
+        "unigraph_vertex_id": str(vertex_id(vertex)),
+        "unigraph_identity_property": matched_properties[0],
+        "unigraph_project_id": selected_asset.context.unigraph_project_id,
+        "job_id": selected_asset.context.job_id,
+    }
+
+
+def _fetch_selected_equipment_vertices(g, hilt_entity_id):
+    """Fetch by source identity only; tags deliberately do not participate."""
+    return (
+        g.V()
+        .hasLabel("Equipment")
+        .or_(
+            __.has("node_id", hilt_entity_id),
+            __.has("cnvrt_id", hilt_entity_id),
+            __.has("source_id", hilt_entity_id),
+            __.has("uuid", hilt_entity_id),
+        )
+        .valueMap(True)
+        .toList()
+    )
 
 
 def _fetch_equipment_vertices(g, equipment_tag):

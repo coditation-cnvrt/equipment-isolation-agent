@@ -84,6 +84,7 @@ def find_candidates(boundary_data, policy):
         "candidates": ranked,
         "_candidate_pool": raw_candidates,
         "selected_equipment_nodes": selected_equipment_nodes,
+        "target_identity": boundary_data.get("target_identity") or {},
         "context": boundary_data.get("context") or {},
         "debug": {
             "candidate_finder_mode": "local_nearest_boundary_candidate_per_source_component",

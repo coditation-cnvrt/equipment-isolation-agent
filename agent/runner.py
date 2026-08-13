@@ -39,6 +39,10 @@ def run_agent_pipeline(
     )
 
     final_payload = session.final_payload
+    if not final_payload and agent_result.get("orchestration_error"):
+        error = agent_result["orchestration_error"]
+        if error.get("kind") == "pipeline_prerequisite_failed":
+            raise RuntimeError(f"Pipeline prerequisite failed in {error.get('tool')}: {error.get('message')}")
     if final_payload:
         payload_data = final_payload.setdefault("data", [{}])[0]
         if session.loto_procedure:

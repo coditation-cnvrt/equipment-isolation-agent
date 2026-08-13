@@ -464,6 +464,8 @@ function App() {
     try {
       const accepted = await createIsolationRun({
         equipmentTag: selectedEquipment.tag || selectedEquipment.name,
+        equipmentHiltEntityId: selectedEquipment.node_id,
+        equipmentEntityClass: selectedEquipment.entity_class,
         jobName: selectedDrawing.name,
         jobId: selectedDrawing.id,
         cnvrtProjectId: selectedProject.id,

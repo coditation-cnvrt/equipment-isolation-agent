@@ -4,6 +4,7 @@ Pure dict construction -- no filesystem, no HTML. Split out of output.py so the
 agent tool layer can build payloads without importing the HTML renderer.
 Covered by tests/test_payload.py.
 """
+from domain.identity import RESULT_SCHEMA_VERSION
 from domain.isolation_actions import operation_kind, requires_positive_field_confirmation
 from domain.serialization import to_jsonable  # noqa: F401  (re-exported for callers)
 from secondary_context import build_secondary_energy_context
@@ -21,6 +22,11 @@ def build_final_payload(validation_data, config, downstream_impact=None):
     isolated_envelope = validation_data.get("isolated_envelope") or {}
     detected_isolation_schemes = validation_data.get("detected_isolation_schemes") or {}
     relief_candidates = validation_data.get("relief_candidates") or {}
+    target_identity = validation_data.get("target_identity") or {
+        "status": "legacy_tag_only",
+        "identity_quality": "legacy_tag_only",
+        "tag": config.equipment_tag,
+    }
     secondary_energy_context = validation_data.get("secondary_energy_context") or build_secondary_energy_context(validation_data)
     isolation_points = []
     for candidate in candidates:
@@ -60,6 +66,7 @@ def build_final_payload(validation_data, config, downstream_impact=None):
             }
         )
     return {
+        "result_schema_version": RESULT_SCHEMA_VERSION,
         "error": False,
         "message": "Completed",
         "debug": validation_data.get("debug", {}),
@@ -72,6 +79,7 @@ def build_final_payload(validation_data, config, downstream_impact=None):
                 "collection_id": _int_or_text(context.get("collection_id")),
                 "collection_name": context.get("collection_name"),
                 "selected_equipment": [config.equipment_tag],
+                "target_identity": target_identity,
                 "input_details": {**context, "selected_equipment": [config.equipment_tag], "target_mode": "selected_equipment"},
                 "assurance_status": validation_data.get("assurance_status"),
                 "isolation_validation": validation_data.get("isolation_validation"),

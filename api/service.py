@@ -5,6 +5,7 @@ import os
 import hashlib
 import time
 from collections import OrderedDict
+from dataclasses import replace
 from pathlib import Path
 from threading import Lock
 from typing import Callable
@@ -15,6 +16,7 @@ from agent.runner import AgentRunResult, run_agent_pipeline
 from api_client import Plant360Client
 from config import ApiConfig, DEFAULT_UNIGRAPH_API_BASE_URL, JOB_IDS_BY_NAME
 from domain.hilt_geometry import extract_symbols, symbol_bbox
+from domain.identity import PlanningContext, SelectedAsset, SelectionSource
 from pipeline.config_builder import build_run_config
 from pipeline.equipment import add_equipment_jobs, add_equipment_jobs_from_metadata, list_equipment
 from pipeline.stages import resolve_project_metadata
@@ -28,7 +30,7 @@ _stlm_bbox_cache_lock = Lock()
 
 def config_from_run_request(request, auth_token: str):
     scope = request.work_scope
-    return build_run_config(
+    config = build_run_config(
         equipment_tag=request.equipment_tag,
         job_name=request.job_name,
         job_id=request.job_id,
@@ -52,6 +54,25 @@ def config_from_run_request(request, auth_token: str):
         hot_work=scope.hot_work,
         output_dir=Path("."),
     )
+    if request.selected_asset is None:
+        return config
+    context = PlanningContext(
+        cnvrt_project_id=request.cnvrt_project_id,
+        collection_id=request.collection_id,
+        unigraph_project_id=request.unigraph_project_id,
+        collection_name=request.collection_name,
+        job_name=request.job_name,
+        job_id=request.job_id,
+        traversal_source=request.traversal_source,
+    )
+    selected_asset = SelectedAsset(
+        tag=request.selected_asset.tag,
+        context=context,
+        selection_source=SelectionSource(request.selected_asset.selection_source),
+        hilt_entity_id=request.selected_asset.hilt_entity_id,
+        hilt_entity_class=request.selected_asset.entity_class,
+    )
+    return replace(config, selected_asset=selected_asset)
 
 
 def config_from_equipment_request(request, auth_token: str):

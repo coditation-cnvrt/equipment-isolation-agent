@@ -3,6 +3,8 @@ import os
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+from domain.identity import PlanningContext, SelectedAsset
+
 
 JOB_IDS_BY_NAME = {
     "pnid_1_bio_final": "2099",
@@ -134,6 +136,7 @@ class RunConfig:
     api: ApiConfig = field(default_factory=ApiConfig)
     policy: IsolationPolicy = field(default_factory=IsolationPolicy)
     work_scope: WorkScope = field(default_factory=WorkScope)
+    selected_asset: SelectedAsset | None = None
     output_dir: Path = Path("output")
 
     @property
@@ -141,7 +144,20 @@ class RunConfig:
         return self.job_id or self.job_ids_by_name.get(self.job_name, "") or JOB_IDS_BY_NAME.get(self.job_name, "")
 
     @property
+    def planning_context(self) -> PlanningContext:
+        return PlanningContext(
+            cnvrt_project_id=self.cnvrt_project_id,
+            collection_id=self.collection_id,
+            unigraph_project_id=self.graph.project_id,
+            collection_name=self.collection_name,
+            job_name=self.job_name,
+            job_id=self.resolved_job_id,
+            traversal_source=self.graph.traversal_source,
+        )
+
+    @property
     def context(self) -> dict:
+        """Legacy dictionary projection consumed by existing pipeline stages."""
         context = {
             "project_id": self.graph.project_id,
             "unigraph_project_id": self.graph.project_id,
