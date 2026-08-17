@@ -98,16 +98,26 @@ function RunProgress({ run, error, onReset }: Pick<IsolationPlanPanelProps, 'run
   const status = run?.status ?? (error ? 'failed' : 'queued')
   const currentTool = run?.agent?.progress?.tool || ''
   const stage = TOOL_STAGE[currentTool] || 'Gathering graph evidence and running deterministic checks'
+  const active = status === 'queued' || status === 'running'
   return (
     <div className="p-5">
       <p className="font-mono text-[10px] tracking-[0.12em] text-slate-500">AGENT RUN</p>
-      <div className="mt-4 border-l-2 border-blue-600 bg-blue-50 p-4">
-        <p className="font-mono text-xs font-semibold uppercase text-blue-900">{humanize(status)}</p>
+      <div aria-live="polite" className="mt-4 border-l-2 border-blue-600 bg-blue-50 p-4" role="status">
+        <div className="flex items-center gap-2">
+          {active && <span aria-hidden="true" className="size-4 shrink-0 animate-spin rounded-full border-2 border-blue-200 border-t-blue-700 motion-reduce:animate-none" />}
+          <p className="font-mono text-xs font-semibold uppercase text-blue-900">{humanize(status)}</p>
+        </div>
         <p className="mt-2 text-sm leading-5 text-blue-950">
           {status === 'queued' && 'The isolation request is waiting for an agent worker.'}
           {status === 'running' && `${stage}.`}
           {status === 'failed' && (error || run?.error?.message || 'The isolation run failed.')}
         </p>
+        {active && <>
+          <div aria-label="Agent run in progress" className="mt-4 h-1 overflow-hidden bg-blue-200" role="progressbar">
+            <div className="agent-progress-indeterminate h-full w-1/3 bg-blue-700" />
+          </div>
+          <p className="mt-3 text-xs leading-5 text-blue-800">This may take a few minutes. Keep this page open.</p>
+        </>}
         {run?.run_id && <p className="mt-3 break-all font-mono text-[10px] text-blue-700">RUN {run.run_id}</p>}
       </div>
       {status === 'failed' && <button className="mt-4 w-full border border-slate-400 px-3 py-2 text-xs hover:bg-slate-100" onClick={onReset} type="button">Return to work scope</button>}

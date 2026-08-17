@@ -14,6 +14,22 @@ body {
   font-family: var(--font-sans);
 }
 
+@keyframes agent-progress-indeterminate {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(310%); }
+}
+
+.agent-progress-indeterminate {
+  animation: agent-progress-indeterminate 1.35s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-progress-indeterminate {
+    animation: none;
+    transform: translateX(100%);
+  }
+}
+
 /* Keep every locatable isolation point visible without competing with the active point. */
 .p360-hilt-bbox-highlight.isolation-point-highlight--muted rect {
   fill: color-mix(in srgb, var(--p360-hilt-highlight) 8%, transparent);
