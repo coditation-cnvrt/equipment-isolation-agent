@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-import type { IsolationPlan, IsolationPoint, IsolationRunStatus, SavedIsolationPlan } from './api'
+import type { AssuranceReason, IsolationPlan, IsolationPoint, IsolationRunStatus, SavedIsolationPlan } from './api'
 
 type IsolationPlanPanelProps = {
   run: IsolationRunStatus | null
@@ -27,6 +27,57 @@ function assuranceStyle(status: string): string {
   if (status === 'not_isolated') return 'border-red-500 bg-red-50 text-red-950'
   if (status.includes('provisional') || status.includes('unproven')) return 'border-amber-500 bg-amber-50 text-amber-950'
   return 'border-blue-600 bg-blue-50 text-blue-950'
+}
+
+function assuranceLabel(status: string): string {
+  return status === 'not_isolated' ? 'Isolation not demonstrated' : humanize(status)
+}
+
+const CHECK_LABELS: Record<string, string> = {
+  find_bypass_paths: 'Check for bypasses or alternate routes around the selected barriers.',
+  find_blinds_spades_flanges: 'Confirm the positive-isolation devices required by the work scope.',
+  find_bleeds_vents_drains: 'Confirm a bleed, vent, or drain for stored-energy release.',
+  find_pressure_indicators: 'Confirm a pressure indicator or approved zero-energy test point.',
+}
+
+function reasonTitle(reason: AssuranceReason): string {
+  if (reason.code === 'boundary_path_without_barrier') return reason.boundary_label || 'Unidentified boundary path'
+  if (reason.code === 'no_isolation_candidates') return 'No isolation candidates found'
+  if (reason.code === 'no_deterministic_barrier') return 'No accepted isolation barrier'
+  if (reason.code === 'conditional_device_manual_review') return 'Conditional device requires review'
+  if (reason.code === 'zero_energy_verification_missing') return 'Zero-energy verification is missing'
+  if (reason.code === 'evidence_check_incomplete') return 'Required evidence check'
+  return humanize(reason.code)
+}
+
+function reasonDescription(reason: AssuranceReason): string {
+  if (reason.code === 'boundary_path_without_barrier') {
+    if (reason.boundary_count && !reason.boundary_label) return `${reason.boundary_count} boundary path(s) have no identified isolation barrier.`
+    if (reason.terminal?.terminal_reason === 'unresolved_off_page_connector') {
+      const mapping = reason.terminal.partner_mapping_status
+      return mapping === 'missing'
+        ? 'No isolation barrier was found before this path reached an off-page connector. The connector has no exact partner mapping, so topology beyond this drawing cannot be checked.'
+        : 'No isolation barrier was found before this path reached an off-page connector.'
+    }
+    if (reason.terminal?.terminal_reason === 'topology_search_limit_reached') return 'No isolation barrier was found before the deterministic topology search limit was reached.'
+    return 'No isolation barrier was found on this known boundary path.'
+  }
+  if (reason.code === 'no_isolation_candidates') return 'The deterministic candidate search returned no isolation devices for this equipment.'
+  if (reason.code === 'no_deterministic_barrier') return 'Candidates were found, but none met the deterministic barrier rules.'
+  if (reason.code === 'conditional_device_manual_review') return 'A selected conditional device must be confirmed before it can be accepted as a barrier.'
+  if (reason.code === 'zero_energy_verification_missing') return 'The available evidence does not include proof of zero or safe energy.'
+  if (reason.code === 'evidence_check_incomplete') return CHECK_LABELS[reason.check_name || ''] || `Complete the ${humanize(reason.check_name)} check.`
+  return 'Additional deterministic evidence is required.'
+}
+
+function requiredAction(reason: AssuranceReason): string | null {
+  if (reason.required_action === 'resolve_connector_mapping_and_rerun_validation') return 'Resolve the connector mapping, then rerun validation to identify or confirm the boundary barrier.'
+  if (reason.required_action === 'traverse_partner_connector_and_rerun_validation') return 'Load and traverse the mapped partner drawing, then rerun validation.'
+  if (reason.required_action === 'extend_topology_search_and_rerun_validation') return 'Extend the topology search, then rerun validation.'
+  if (reason.required_action === 'identify_or_confirm_boundary_barrier_and_rerun_validation') return 'Identify or confirm a barrier on this path, then rerun validation.'
+  if (reason.required_action === 'confirm_conditional_device_in_field') return 'Confirm the device type and isolation function in the field.'
+  if (reason.required_action === 'provide_zero_energy_verification_evidence') return 'Provide an approved zero-energy verification method.'
+  return null
 }
 
 const TOOL_STAGE: Record<string, string> = {
@@ -79,9 +130,19 @@ export default function IsolationPlanPanel({ run, plan, error, selectedPointId, 
   const unresolvedObligations = validation.unresolved_isolation_obligations ?? []
   const unresolvedEvidence = validation.unresolved_evidence_checks ?? []
   const missingEvidence = validation.missing_evidence ?? []
+  const explanation = validation.assurance_explanation
+  const primaryReasons = explanation?.primary_reasons ?? []
+  const outstandingRequirements = explanation?.outstanding_requirements ?? []
+  const structuredExplanation = Boolean(explanation)
+  const blockerCount = explanation?.summary.primary_reason_count
+    ?? (plan.assurance_status === 'not_isolated' ? Math.max(missingBoundaryCount, 1) : 0)
+  const notIsolated = plan.assurance_status === 'not_isolated'
+  const primaryReasonLabel = notIsolated ? 'PRIMARY BLOCKER' : 'DETERMINING REQUIREMENT'
+  const primaryReasonTone = notIsolated
+    ? { label: 'text-red-700', border: 'border-red-500', background: 'bg-red-50', heading: 'text-red-950', body: 'text-red-900', detail: 'text-red-800' }
+    : { label: 'text-amber-700', border: 'border-amber-500', background: 'bg-amber-50', heading: 'text-amber-950', body: 'text-amber-900', detail: 'text-amber-800' }
   const downstreamWarnings = plan.downstream_impact?.warnings ?? []
   const phases = plan.loto_procedure?.phases ?? []
-  const gaps = missingBoundaryCount + unselectedSources.length + manualChecks.length + unresolvedObligations.length + unresolvedEvidence.length + missingEvidence.length
   const acceptedPointCount = points.filter((point) => point.validation_state === 'barrier' || point.validation_state === 'positive').length
   const allRejected = points.length > 0 && acceptedPointCount === 0
 
@@ -104,15 +165,33 @@ export default function IsolationPlanPanel({ run, plan, error, selectedPointId, 
 
       <section className={`mt-4 border-l-4 p-4 ${assuranceStyle(plan.assurance_status)}`}>
         <p className="font-mono text-[10px] tracking-[0.1em]">AUTHORITATIVE VALIDATOR STATUS</p>
-        <h3 className="mt-2 text-base font-semibold capitalize">{humanize(plan.assurance_status)}</h3>
+        <h3 className="mt-2 text-base font-semibold">{assuranceLabel(plan.assurance_status)}</h3>
         {validation.rationale && <p className="mt-2 text-xs leading-5">{validation.rationale}</p>}
       </section>
 
       <dl className="mt-4 grid grid-cols-3 gap-px bg-slate-200 text-center">
         <div className="bg-slate-50 p-3"><dt className="font-mono text-[9px] text-slate-500">POINTS</dt><dd className="mt-1 text-lg font-medium">{points.length}</dd></div>
         <div className="bg-slate-50 p-3"><dt className="font-mono text-[9px] text-slate-500">COVERAGE</dt><dd className="mt-1 text-lg font-medium">{coveredBoundaryCount}/{expectedBoundaryCount}</dd></div>
-        <div className="bg-slate-50 p-3"><dt className="font-mono text-[9px] text-slate-500">GAPS</dt><dd className="mt-1 text-lg font-medium">{gaps}</dd></div>
+        <div className="bg-slate-50 p-3"><dt className="font-mono text-[9px] text-slate-500">{notIsolated ? 'BLOCKERS' : 'REQUIREMENTS'}</dt><dd className="mt-1 text-lg font-medium">{blockerCount}</dd></div>
       </dl>
+
+      {structuredExplanation && (primaryReasons.length > 0 || outstandingRequirements.length > 0) && <section className="mt-6 border-y border-slate-200 py-4" aria-label="Deterministic assurance explanation">
+        <h3 className="font-mono text-[10px] font-semibold tracking-[0.12em] text-slate-700">WHY THIS STATUS</h3>
+        {primaryReasons.length > 0 && <div className="mt-3 space-y-3">
+          <p className={`font-mono text-[9px] ${primaryReasonTone.label}`}>{primaryReasonLabel}{primaryReasons.length === 1 ? '' : 'S'} · {primaryReasons.length}</p>
+          {primaryReasons.map((reason) => <article className={`border-l-2 px-3 py-2 ${primaryReasonTone.border} ${primaryReasonTone.background}`} key={reason.reason_id}>
+            <h4 className={`text-xs font-semibold ${primaryReasonTone.heading}`}>{reasonTitle(reason)}</h4>
+            <p className={`mt-1 text-xs leading-5 ${primaryReasonTone.body}`}>{reasonDescription(reason)}</p>
+            {reason.terminal?.display_text?.length ? <p className={`mt-1 text-[10px] leading-4 ${primaryReasonTone.detail}`}>Drawing label: {reason.terminal.display_text.join(' · ')}. Label shown for context only; it is not connectivity proof.</p> : null}
+            {requiredAction(reason) && <p className={`mt-2 text-[10px] font-medium leading-4 ${primaryReasonTone.heading}`}>Required resolution: {requiredAction(reason)}</p>}
+            <details className={`mt-2 text-[9px] ${primaryReasonTone.detail}`}><summary className="cursor-pointer">Technical details</summary><dl className="mt-1 space-y-0.5 font-mono"><div><dt className="inline">Reason: </dt><dd className="inline">{reason.code}</dd></div>{reason.boundary_id && <div><dt className="inline">Boundary: </dt><dd className="inline break-all">{reason.boundary_id}</dd></div>}{reason.terminal?.entity_id && <div><dt className="inline">Terminal entity: </dt><dd className="inline break-all">{reason.terminal.entity_id}</dd></div>}</dl></details>
+          </article>)}
+        </div>}
+        {outstandingRequirements.length > 0 && <details className="mt-4">
+          <summary className="cursor-pointer font-mono text-[9px] font-semibold text-amber-800">OUTSTANDING REQUIREMENTS · {outstandingRequirements.length}</summary>
+          <ul className="mt-2 list-disc space-y-1 pl-4 text-xs leading-5 text-slate-600">{outstandingRequirements.map((reason) => <li key={reason.reason_id}>{reasonDescription(reason)}</li>)}</ul>
+        </details>}
+      </section>}
 
       <section className="mt-6">
         <div className="flex items-baseline justify-between gap-3">
@@ -153,18 +232,18 @@ export default function IsolationPlanPanel({ run, plan, error, selectedPointId, 
       </section>
 
       <div className="mt-6 divide-y divide-slate-200 border-y border-slate-200">
-        <details className="py-3" open={gaps > 0}>
-          <summary className="cursor-pointer font-mono text-[10px] font-semibold tracking-[0.1em] text-slate-700">GAPS AND REQUIRED CHECKS · {gaps}</summary>
+        {!structuredExplanation && <details className="py-3" open={blockerCount > 0}>
+          <summary className="cursor-pointer font-mono text-[10px] font-semibold tracking-[0.1em] text-slate-700">LEGACY VALIDATION DETAILS</summary>
           <div className="mt-3 space-y-2 text-xs leading-5 text-slate-600">
-            <p>{missingBoundaryCount} missing boundary source{missingBoundaryCount === 1 ? '' : 's'}.</p>
+            <p className="border-l-2 border-amber-500 bg-amber-50 px-2 py-1 text-amber-900">Detailed deterministic reasons were not recorded for this historical run.</p>
+            <p>{missingBoundaryCount} missing boundary path{missingBoundaryCount === 1 ? '' : 's'}.</p>
             <p>{unselectedSources.length} unselected boundary source{unselectedSources.length === 1 ? '' : 's'}.</p>
             <p>{manualChecks.length} manual visual check{manualChecks.length === 1 ? '' : 's'}.</p>
             <p>{unresolvedObligations.length} unresolved isolation obligation{unresolvedObligations.length === 1 ? '' : 's'}.</p>
             <p>{unresolvedEvidence.length} unresolved evidence check{unresolvedEvidence.length === 1 ? '' : 's'}.</p>
-            <p>{missingEvidence.length} missing evidence item{missingEvidence.length === 1 ? '' : 's'}.</p>
-            {validation.terminal === false && <p className="border-l-2 border-amber-500 bg-amber-50 px-2 py-1 text-amber-900">Validation is non-terminal; unresolved evidence remains.</p>}
+            <p>{missingEvidence.length} legacy evidence note{missingEvidence.length === 1 ? '' : 's'}.</p>
           </div>
-        </details>
+        </details>}
 
         <details className="py-3">
           <summary className="cursor-pointer font-mono text-[10px] font-semibold tracking-[0.1em] text-slate-700">DOWNSTREAM IMPACT · {downstreamWarnings.length}</summary>

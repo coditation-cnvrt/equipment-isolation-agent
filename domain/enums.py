@@ -42,6 +42,22 @@ class AssuranceStatus(StringEnum):
     INSUFFICIENT_DATA = "insufficient_data"
 
 
+class AssuranceReasonCode(StringEnum):
+    NO_ISOLATION_CANDIDATES = "no_isolation_candidates"
+    NO_DETERMINISTIC_BARRIER = "no_deterministic_barrier"
+    BOUNDARY_PATH_WITHOUT_BARRIER = "boundary_path_without_barrier"
+    CONDITIONAL_DEVICE_MANUAL_REVIEW = "conditional_device_manual_review"
+    EVIDENCE_CHECK_INCOMPLETE = "evidence_check_incomplete"
+    ZERO_ENERGY_VERIFICATION_MISSING = "zero_energy_verification_missing"
+
+
+class AssuranceTerminalReason(StringEnum):
+    UNRESOLVED_OFF_PAGE_CONNECTOR = "unresolved_off_page_connector"
+    TOPOLOGY_SEARCH_LIMIT_REACHED = "topology_search_limit_reached"
+    PATH_ENDED_WITHOUT_BARRIER = "path_ended_without_barrier"
+    UNKNOWN = "unknown"
+
+
 class ImpactSeverity(StringEnum):
     LIKELY = "likely"
     POSSIBLE = "possible"

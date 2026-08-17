@@ -233,13 +233,36 @@ def _valve_summary(valve_id: str, node_by_id: dict, hop_distance: int, path, y_f
 
 
 def _unresolved_branch(path, context_devices, reason, node_by_id):
+    terminal_id = str(path[-1]) if path else ""
     return {
         "status": "unresolved",
         "valve": None,
         "path_node_ids": list(path),
         "path_node_classes": [_node_class(node_id, node_by_id) for node_id in path],
         "context_devices": context_devices,
+        "terminal_node": _terminal_node_summary(terminal_id, node_by_id),
         "basis": reason,
+    }
+
+
+def _terminal_node_summary(node_id, node_by_id):
+    payload = (node_by_id.get(str(node_id)) or {}).get("payload") or {}
+    partner = payload.get("partner_opc") if isinstance(payload.get("partner_opc"), dict) else {}
+    return {
+        "entity_id": str(payload.get("id") or node_id or ""),
+        "entity_type": payload.get("entity_type"),
+        "entity_class": payload.get("entity_class"),
+        "tag": _attr(payload.get("attributes"), "tag"),
+        # Text is display context only. It is never used to establish an OPC edge.
+        "display_text": [
+            str(item.get("value"))
+            for item in payload.get("text") or []
+            if isinstance(item, dict) and item.get("value") not in (None, "")
+        ],
+        "partner_opc": {
+            key: str(partner.get(key) or "").strip()
+            for key in ("id", "job_id", "job_name", "opc_name")
+        },
     }
 
 

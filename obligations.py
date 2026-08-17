@@ -56,6 +56,7 @@ def analyze_isolation_obligations(candidate_data, config):
                     "branch_path_node_ids": branch.get("path_node_ids") or [],
                     "branch_path_node_classes": branch.get("path_node_classes") or [],
                     "branch_context_devices": branch.get("context_devices") or [],
+                    **({"terminal_node": branch["terminal_node"]} if branch.get("terminal_node") else {}),
                     "basis": branch.get("basis") or "HILT branch-level process isolation obligation",
                 }
             )

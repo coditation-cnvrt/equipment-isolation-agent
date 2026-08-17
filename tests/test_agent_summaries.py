@@ -149,6 +149,9 @@ class SummarizeValidationTests(unittest.TestCase):
                 "expected_boundary_count",
                 "missing_boundary_count",
                 "missing_evidence",
+                "outstanding_requirement_count",
+                "primary_reason_codes",
+                "primary_reason_count",
                 "rationale",
                 "terminal",
                 "unresolved_evidence_checks",
@@ -165,6 +168,21 @@ class SummarizeValidationTests(unittest.TestCase):
             {"isolation_validation": {"unresolved_evidence_checks": [{"check_name": "a"}, {"check_name": "b"}]}}
         )
         self.assertEqual(summary["unresolved_evidence_checks"], ["a", "b"])
+
+    def test_structured_assurance_reason_counts_are_exposed(self):
+        summary = _summarize_validation(
+            {
+                "isolation_validation": {
+                    "assurance_explanation": {
+                        "primary_reasons": [{"code": "boundary_path_without_barrier"}],
+                        "outstanding_requirements": [{"code": "evidence_check_incomplete"}],
+                    }
+                }
+            }
+        )
+        self.assertEqual(summary["primary_reason_codes"], ["boundary_path_without_barrier"])
+        self.assertEqual(summary["primary_reason_count"], 1)
+        self.assertEqual(summary["outstanding_requirement_count"], 1)
 
     def test_assurance_status_is_read_from_the_top_level_not_the_nested_block(self):
         summary = _summarize_validation(

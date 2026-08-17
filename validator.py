@@ -1,3 +1,4 @@
+from domain.assurance import build_assurance_explanation
 from domain.enums import AssuranceStatus
 
 
@@ -29,33 +30,49 @@ def validate(planner_data):
 
     if not candidates:
         status = AssuranceStatus.NOT_ISOLATED
+        decisive_rule = "no_candidates"
         rationale = "No isolation candidates were found."
     elif not barrier_ids:
         status = AssuranceStatus.NOT_ISOLATED
+        decisive_rule = "no_barriers"
         rationale = "No selected candidate has deterministic isolation barrier evidence."
     elif missing_boundary_count and missing_boundary_count > 0:
         status = AssuranceStatus.NOT_ISOLATED
+        decisive_rule = "missing_boundary"
         rationale = "At least one equipment boundary path has no selected isolation barrier."
     elif manual_review_ids:
         status = AssuranceStatus.PROVISIONAL_UNPROVEN_ISOLATION
+        decisive_rule = "manual_review"
         rationale = "Selected barriers include conditional isolation devices that require manual review before acceptance."
     elif unresolved:
         status = AssuranceStatus.PROVISIONAL_UNPROVEN_ISOLATION
+        decisive_rule = "unresolved_checks"
         rationale = "Selected barriers exist, but safety-critical evidence checks remain unresolved."
     elif positive_ids and verification_ids:
         status = AssuranceStatus.COMPLETE_POSITIVE_ISOLATION
+        decisive_rule = "complete_positive"
         rationale = "Every known boundary path has a selected barrier, positive isolation evidence exists, and verification evidence exists."
     elif verification_ids:
         status = AssuranceStatus.COMPLETE_PROVEN_ISOLATION
+        decisive_rule = "complete_proven"
         rationale = "Every known boundary path has a selected barrier and verification evidence exists, but positive isolation evidence was not found."
     else:
         status = AssuranceStatus.PROVISIONAL_UNPROVEN_ISOLATION
+        decisive_rule = "verification_missing"
         rationale = "Selected barriers exist for known boundary paths, but proof of zero or safe energy was not found."
 
+    assurance_explanation = build_assurance_explanation(
+        assurance_status=status.value,
+        decisive_rule=decisive_rule,
+        candidates=candidates,
+        evidence=evidence,
+        unresolved_checks=unresolved,
+    )
     validation = {
-        "code_version": "local_validator_2026-06-29_v1",
+        "code_version": "local_validator_2026-08-17_v2",
         "assurance_status": status.value,
         "rationale": rationale,
+        "assurance_explanation": assurance_explanation,
         "terminal": status in {
             AssuranceStatus.COMPLETE_POSITIVE_ISOLATION,
             AssuranceStatus.COMPLETE_PROVEN_ISOLATION,
@@ -88,6 +105,8 @@ def validate(planner_data):
             "validator_unresolved_evidence_check_count": len(unresolved),
             "validator_manual_review_candidate_count": len(manual_review_ids),
             "validator_missing_evidence_count": len(missing),
+            "validator_primary_reason_count": assurance_explanation["summary"]["primary_reason_count"],
+            "validator_outstanding_requirement_count": assurance_explanation["summary"]["outstanding_requirement_count"],
         }
     )
     debug["assurance_status"] = status.value

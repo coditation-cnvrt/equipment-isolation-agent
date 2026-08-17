@@ -154,6 +154,9 @@ def _summarize_evidence(data: dict) -> dict:
 
 def _summarize_validation(data: dict) -> dict:
     validation = data.get("isolation_validation") or {}
+    explanation = validation.get("assurance_explanation") or {}
+    primary_reasons = explanation.get("primary_reasons") or []
+    outstanding = explanation.get("outstanding_requirements") or []
     return {
         "assurance_status": data.get("assurance_status"),
         "rationale": validation.get("rationale"),
@@ -163,6 +166,9 @@ def _summarize_validation(data: dict) -> dict:
         "expected_boundary_count": validation.get("expected_boundary_count"),
         "covered_boundary_source_count": validation.get("covered_boundary_source_count"),
         "missing_boundary_count": validation.get("missing_boundary_count"),
+        "primary_reason_codes": [reason.get("code") for reason in primary_reasons],
+        "primary_reason_count": len(primary_reasons),
+        "outstanding_requirement_count": len(outstanding),
         "missing_evidence": validation.get("missing_evidence") or [],
         "unresolved_evidence_checks": [
             check.get("check_name") for check in (validation.get("unresolved_evidence_checks") or [])

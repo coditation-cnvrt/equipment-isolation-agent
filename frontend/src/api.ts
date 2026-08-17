@@ -39,10 +39,46 @@ export type IsolationPoint = {
   validation_state?: 'barrier' | 'positive' | 'manual' | 'rejected'
 }
 
+export type AssuranceReason = {
+  reason_id: string
+  code: string
+  boundary_id?: string | null
+  boundary_component_id?: string | null
+  boundary_label?: string | null
+  boundary_count?: number
+  candidate_id?: string
+  check_name?: string
+  basis?: string | null
+  path_node_ids?: string[]
+  path_node_classes?: string[]
+  required_action?: string
+  terminal?: {
+    entity_id?: string | null
+    entity_type?: string | null
+    entity_class?: string | null
+    tag?: string | null
+    display_text?: string[]
+    partner_mapping_status?: 'resolved' | 'missing' | 'invalid' | 'not_applicable' | string
+    terminal_reason?: string
+  } | null
+}
+
+export type AssuranceExplanation = {
+  schema_version: '1.0' | string
+  determination: string
+  primary_reasons: AssuranceReason[]
+  outstanding_requirements: AssuranceReason[]
+  summary: {
+    primary_reason_count: number
+    outstanding_requirement_count: number
+  }
+}
+
 export type IsolationValidation = {
   assurance_status?: string
   rationale?: string
   terminal?: boolean
+  assurance_explanation?: AssuranceExplanation
   expected_boundary_count?: number
   covered_boundary_source_count?: number
   missing_boundary_count?: number

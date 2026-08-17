@@ -233,6 +233,39 @@ class IsolationPolicyTests(unittest.TestCase):
         self.assertEqual(branch["status"], "unresolved")
         self.assertEqual(branch["context_devices"][0]["valve_id"], "C1")
 
+    def test_unresolved_hilt_branch_preserves_terminal_connector_facts(self):
+        connector = _hilt_node("OPC1", "off_or_on_page_connector", "")
+        connector["payload"].update(
+            {
+                "entity_type": "reference",
+                "text": [{"value": "PID-0133"}, {"value": "CO2 PRE-CONDITIONING"}],
+                "partner_opc": {"id": "", "job_id": "", "job_name": "", "opc_name": ""},
+            }
+        )
+        payload = {
+            "hilt_graph": {
+                "nodes": [
+                    _hilt_node("S1", "equipment_nozzle", ""),
+                    _hilt_node("F1", "flange", ""),
+                    connector,
+                ],
+                "links": [_hilt_link("S1", "F1"), _hilt_link("F1", "OPC1")],
+            }
+        }
+
+        result = resolve_source_branch_isolation(
+            payload,
+            [{"equipment_tag": "T-1", "source_component_id": "SRC1", "source_visual_id": "S1"}],
+            policy=IsolationPolicy(),
+        )
+
+        branch = result[0]["branches"][0]
+        self.assertEqual(branch["status"], "unresolved")
+        self.assertEqual(branch["terminal_node"]["entity_id"], "OPC1")
+        self.assertEqual(branch["terminal_node"]["entity_class"], "off_or_on_page_connector")
+        self.assertEqual(branch["terminal_node"]["display_text"], ["PID-0133", "CO2 PRE-CONDITIONING"])
+        self.assertEqual(branch["terminal_node"]["partner_opc"]["id"], "")
+
     def test_hilt_branch_topology_skips_context_sources(self):
         payload = {
             "hilt_graph": {
