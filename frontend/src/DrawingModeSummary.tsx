@@ -2,7 +2,6 @@ import type { IsolationPlan } from './api'
 
 type DrawingModeSummaryProps = {
   plan: IsolationPlan
-  runId: string
   onOpenMap: () => void
   onNewRun: () => void
 }
@@ -11,7 +10,7 @@ function statusLabel(status: string): string {
   return status === 'not_isolated' ? 'Isolation not demonstrated' : status.replaceAll('_', ' ')
 }
 
-export default function DrawingModeSummary({ plan, runId, onOpenMap, onNewRun }: DrawingModeSummaryProps) {
+export default function DrawingModeSummary({ plan, onOpenMap, onNewRun }: DrawingModeSummaryProps) {
   const validation = plan.isolation_validation ?? {}
   const points = plan.isolation_points?.length ?? 0
   const covered = Number(validation.covered_boundary_source_count ?? 0)
@@ -37,6 +36,5 @@ export default function DrawingModeSummary({ plan, runId, onOpenMap, onNewRun }:
 
     <button className="mt-5 w-full bg-blue-700 px-4 py-3 font-mono text-xs font-semibold tracking-[0.08em] text-white hover:bg-blue-800" onClick={onOpenMap} type="button">OPEN ISOLATION MAP</button>
     <button className="mt-2 w-full border border-slate-300 px-4 py-2.5 font-mono text-xs hover:bg-slate-50" onClick={onNewRun} type="button">NEW RUN</button>
-    <p className="mt-4 break-all font-mono text-[9px] text-slate-400">RUN {runId}</p>
   </div>
 }

@@ -32,49 +32,53 @@ body {
 
 /* Keep every locatable isolation point visible without competing with the active point. */
 .p360-hilt-bbox-highlight.isolation-point-highlight--muted rect {
-  fill: color-mix(in srgb, var(--p360-hilt-highlight) 8%, transparent);
-  stroke-width: 1.25px !important;
-  stroke-dasharray: 3px 4px !important;
+  fill: color-mix(in srgb, var(--p360-hilt-highlight) 14%, transparent);
+  stroke-width: 1.75px !important;
+  stroke-dasharray: 3px 3px !important;
   stroke-linecap: butt;
-  stroke-opacity: 0.82;
+  stroke-opacity: 0.95;
 }
 
 .p360-hilt-bbox-highlight.isolation-point-highlight--muted .p360-hilt-bbox-highlight__badge {
-  opacity: 0.78;
+  opacity: 0.9;
 }
 
 .p360-hilt-bbox-highlight.isolation-point-highlight--selected rect {
-  fill: color-mix(in srgb, var(--p360-hilt-highlight) 20%, transparent);
-  stroke-width: 2.5px !important;
-  stroke-dasharray: 5px 3px !important;
+  fill: color-mix(in srgb, var(--p360-hilt-highlight) 34%, transparent);
+  stroke-width: 3.5px !important;
+  stroke-dasharray: none !important;
   stroke-linecap: butt;
   stroke-opacity: 1;
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--p360-hilt-highlight) 55%, transparent));
 }
 
 .p360-hilt-bbox-highlight.isolation-point-highlight--selected .p360-hilt-bbox-highlight__badge {
-  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--p360-hilt-highlight) 65%, transparent));
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--p360-hilt-highlight) 80%, transparent));
 }
 
 .p360-hilt-node.isolation-point-highlight--muted .p360-hilt-node__outline {
-  stroke-width: 1.25px !important;
-  stroke-dasharray: 3px 4px !important;
+  fill: color-mix(in srgb, var(--p360-hilt-highlight) 14%, transparent);
+  stroke-width: 1.75px !important;
+  stroke-dasharray: 3px 3px !important;
   stroke-linecap: butt;
-  stroke-opacity: 0.82;
+  stroke-opacity: 0.95;
 }
 
 .p360-hilt-node.isolation-point-highlight--muted .p360-hilt-node__badge {
-  opacity: 0.78;
+  opacity: 0.9;
 }
 
 .p360-hilt-node.isolation-point-highlight--selected .p360-hilt-node__outline {
-  stroke-width: 2.5px !important;
-  stroke-dasharray: 5px 3px !important;
+  fill: color-mix(in srgb, var(--p360-hilt-highlight) 34%, transparent);
+  stroke-width: 3.5px !important;
+  stroke-dasharray: none !important;
   stroke-linecap: butt;
   stroke-opacity: 1;
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--p360-hilt-highlight) 55%, transparent));
 }
 
 .p360-hilt-node.isolation-point-highlight--selected .p360-hilt-node__badge {
-  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--p360-hilt-highlight) 65%, transparent));
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--p360-hilt-highlight) 80%, transparent));
 }
 
 /* Downstream targets remain visible in orange/red and become solid when selected. */

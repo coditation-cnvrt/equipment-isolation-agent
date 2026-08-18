@@ -1,5 +1,10 @@
 import type { IsolationRunStatus, SavedIsolationPlan } from './api'
 
+function formatRunTime(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return 'Time unavailable'
+  return new Date(value * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
+}
+
 type PlanningSidebarProps = {
   projectLabel: string
   collectionLabel: string
@@ -71,7 +76,7 @@ export default function PlanningSidebar({
       {runsError && <p className="mt-2 border-l-2 border-red-500 bg-red-50 px-2 py-1 text-[10px] text-red-900">{runsError}</p>}
       {!runsLoading && !runsError && !pastRuns.length && <p className="mt-2 text-xs text-slate-500">No matching previous runs.</p>}
       <ol className="mt-2 space-y-1.5">
-        {pastRuns.slice(0, 8).map((run) => <li key={run.run_id}><button className="w-full border border-slate-200 bg-white p-2 text-left hover:border-blue-400 disabled:cursor-not-allowed disabled:text-slate-400" disabled={run.status !== 'succeeded'} onClick={() => onOpenRun(run)} type="button"><span className="flex items-center justify-between gap-2"><span className="truncate text-xs font-medium">{run.equipment_tag}</span><span className="font-mono text-[8px] uppercase">{run.status}</span></span><span className="mt-1 block font-mono text-[9px] text-slate-400">{run.run_id.slice(0, 12)}</span></button></li>)}
+        {pastRuns.slice(0, 8).map((run) => <li key={run.run_id}><button className="w-full border border-slate-200 bg-white p-2 text-left hover:border-blue-400 disabled:cursor-not-allowed disabled:text-slate-400" disabled={run.status !== 'succeeded'} onClick={() => onOpenRun(run)} type="button"><span className="flex items-center justify-between gap-2"><span className="truncate text-xs font-medium">{run.equipment_tag}</span><span className="font-mono text-[8px] uppercase">{run.status}</span></span><span className="mt-1 block text-[9px] text-slate-400">{formatRunTime(run.created_at)}</span></button></li>)}
       </ol>
     </section>
   </div>

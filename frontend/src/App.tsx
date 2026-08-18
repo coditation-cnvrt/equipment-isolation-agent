@@ -37,8 +37,46 @@ import { DEFAULT_ISOLATION_MAP_LAYERS, type IsolationMapLayer, type IsolationVie
 import PlanningSidebar from './PlanningSidebar'
 import Skeleton from './Skeleton'
 import { useUser } from './auth-context'
+import p360Logo from './assets/p360logo.png'
 
 const Workspace = lazy(() => import('./Workspace'))
+
+const RUN_STAGE_LABELS: Record<string, string> = {
+  fetch_boundary: 'Reading the equipment boundary',
+  find_candidates: 'Finding isolation candidates',
+  resolve_bboxes: 'Locating points on the drawing',
+  analyze_isolation_obligations: 'Checking isolation obligations',
+  analyze_isolation_schemes_and_relief: 'Analysing schemes and relief paths',
+  build_evidence: 'Building assurance evidence',
+  analyze_instrument_context: 'Reviewing instrument context',
+  validate: 'Running authoritative validation',
+  analyze_downstream_impact: 'Checking downstream impact',
+  build_loto_procedure: 'Building the regulatory LOTO sequence',
+  finalize_plan: 'Finalising the advisory plan',
+}
+
+function IsolationRunOverlay({ submitting, run }: { submitting: boolean; run: IsolationRunStatus | null }) {
+  const status = submitting ? 'Starting isolation analysis' : run?.status === 'queued' ? 'Waiting for an agent worker' : 'Isolation analysis in progress'
+  const tool = run?.agent?.progress?.tool || ''
+  const stage = submitting
+    ? 'Submitting the selected equipment and work scope.'
+    : run?.status === 'queued'
+      ? 'The request will begin as soon as a worker is available.'
+      : `${RUN_STAGE_LABELS[tool] || 'Gathering graph evidence and running deterministic checks'}.`
+  return <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/40 p-5 backdrop-blur-[2px]" role="status" aria-live="polite">
+    <div className="w-full max-w-md border border-slate-300 bg-white p-6 shadow-2xl">
+      <div className="flex items-center gap-4">
+        <span aria-hidden="true" className="size-7 shrink-0 animate-spin rounded-full border-[3px] border-blue-200 border-t-blue-700 motion-reduce:animate-none" />
+        <div><p className="font-mono text-[10px] uppercase tracking-[0.14em] text-blue-700">Advisory isolation plan</p><h2 className="mt-1 text-lg font-medium text-slate-950">{status}</h2></div>
+      </div>
+      <p className="mt-4 text-sm leading-6 text-slate-600">{stage}</p>
+      <div aria-label="Agent run in progress" className="mt-5 h-1.5 overflow-hidden bg-blue-100" role="progressbar">
+        <div className="agent-progress-indeterminate h-full w-1/3 bg-blue-700" />
+      </div>
+      <p className="mt-4 text-xs leading-5 text-slate-500">This may take a few minutes. Keep this page open while the deterministic checks and agent stages complete.</p>
+    </div>
+  </div>
+}
 
 function equipmentFromHiltGraph(graphInput: HiltGraphInput | null, jobId: string, jobName: string): Equipment[] {
   if (!graphInput) return []
@@ -602,7 +640,7 @@ function App() {
     if (historicalNavigationLock.current || runInProgress || Boolean(loading) || drawingLoading) return
     const waitForContext = Boolean(run.request?.cnvrt_project_id && run.request.collection_id && run.request.job_id && run.request.unigraph_project_id)
     historicalNavigationLock.current = true
-    setHistoricalNavigation({ kind: 'run', label: `${run.equipment_tag} · ${run.run_id.slice(0, 12)}`, runId: run.run_id, waitForContext })
+    setHistoricalNavigation({ kind: 'run', label: `${run.equipment_tag} isolation result`, runId: run.run_id, waitForContext })
     try {
       setSelectedSavedPlan(null)
       await restorePersistedRun(run)
@@ -756,16 +794,17 @@ function App() {
   }
 
   return (
-    <div aria-busy={Boolean(historicalNavigation)} className="h-screen overflow-hidden bg-[#f7f8fa] text-slate-950">
-      {historicalNavigation && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/20 backdrop-blur-[1px]" role="status">
+    <div aria-busy={Boolean(historicalNavigation || isolationSubmitting || runInProgress)} className="h-screen overflow-hidden bg-[#f7f8fa] text-slate-950">
+      {!historicalNavigation && (isolationSubmitting || runInProgress) && <IsolationRunOverlay run={isolationRun} submitting={isolationSubmitting} />}
+      {historicalNavigation && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/30 backdrop-blur-[2px]" role="status">
         <div className="w-80 border border-slate-300 bg-white p-5 shadow-2xl">
           <div className="flex items-center gap-3"><span aria-hidden="true" className="size-5 shrink-0 animate-spin rounded-full border-2 border-blue-200 border-t-blue-700" /><div><p className="font-mono text-[10px] uppercase tracking-[0.12em] text-blue-700">Opening saved {historicalNavigation.kind}</p><p className="mt-1 truncate text-sm font-medium text-slate-900">{historicalNavigation.label}</p></div></div>
           <p className="mt-3 text-xs leading-5 text-slate-600">Restoring its project, drawing, UniGraph, equipment, and immutable result. Other navigation is temporarily unavailable.</p>
         </div>
       </div>}
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-300 bg-white px-4 sm:px-6">
-        <div className="flex items-center gap-4"><span className="text-sm font-semibold">Plant360</span><span className="font-mono text-xs text-slate-600">ISOLATION PLANNING</span></div>
-        <div className="flex items-center gap-3"><span className="hidden max-w-52 truncate text-xs text-slate-600 sm:inline">{user?.profile?.email}</span><button className="font-mono text-[10px] font-semibold tracking-wide text-slate-600 hover:text-blue-700" onClick={logout} type="button">LOGOUT</button></div>
+      <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-800 bg-slate-950 px-4 sm:px-6">
+        <div className="flex min-w-0 items-center gap-4"><img alt="Plant360.ai" className="h-5 w-auto shrink-0" src={p360Logo} /><span className="hidden h-5 w-px bg-slate-700 sm:block" /><span className="truncate font-mono text-xs text-slate-300">ISOLATION PLANNING</span></div>
+        <div className="flex items-center gap-3"><span className="hidden max-w-52 truncate text-xs text-slate-300 sm:inline">{user?.profile?.email}</span><button className="font-mono text-[10px] font-semibold tracking-wide text-slate-300 hover:text-white" onClick={logout} type="button">LOGOUT</button></div>
       </header>
       <ContextBreadcrumbs items={contextBreadcrumbItems} />
       <main className="grid h-[calc(100vh-6.5rem)] min-h-0 grid-cols-1 overflow-hidden xl:grid-cols-[20rem_minmax(0,1fr)_26rem]">
@@ -815,11 +854,10 @@ function App() {
               {selectedEquipment && <p className="mt-1 text-sm text-slate-600">{selectedEquipment.entity_class.replaceAll('_', ' ')}</p>}
             </div>
 
-            {isolationRun ? displayedIsolationPlan && viewMode === 'drawing' ? <DrawingModeSummary
+            {isolationRun ? runInProgress && !displayedIsolationPlan ? null : displayedIsolationPlan && viewMode === 'drawing' ? <DrawingModeSummary
               onNewRun={resetIsolationRun}
               onOpenMap={() => setViewMode('isolation')}
               plan={displayedIsolationPlan}
-              runId={isolationRun.run_id}
             /> : <IsolationPlanPanel
               error={isolationError}
               onImpactSelect={selectDownstreamImpact}

@@ -158,6 +158,7 @@ function Workspace({
         entityId: drawingEntityId,
         color: rejected || point.validation_state === 'manual' || point.requires_manual_review ? '#b45309' : '#6d28d9',
         label: `${rejected ? 'C' : 'P'}-${String(index + 1).padStart(2, '0')}`,
+        badgeVariant: selected ? 'flag' as const : undefined,
         className: selected ? 'isolation-point-highlight--selected' : 'isolation-point-highlight--muted',
         selected,
       }
@@ -224,6 +225,7 @@ function Workspace({
           bbox: point.bbox as [number, number, number, number],
           color: point.validation_state === 'rejected' || point.validation_state === 'manual' || point.requires_manual_review ? '#b45309' : '#6d28d9',
           label: `${point.validation_state === 'rejected' ? 'C' : 'P'}-${String(index + 1).padStart(2, '0')}`,
+          badgeVariant: selected ? 'flag' as const : undefined,
           className: selected ? 'isolation-point-highlight--selected' : 'isolation-point-highlight--muted',
           selected,
         }
@@ -326,6 +328,7 @@ function Workspace({
           graph={graph}
           bboxHighlights={bboxHighlights}
           highlights={highlights}
+          panButton="left"
           selectedId={activeId}
           symbols={symbols}
           onEntityContextMenu={(nextSelection, pointer) => {

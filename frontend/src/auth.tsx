@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { UserContext, useUser } from './auth-context'
 import { authenticationRequiredEvent, storedUser, storeUser } from './auth-storage'
+import p360Logo from './assets/p360logo.png'
 
 const serverBaseUrl = String(import.meta.env.VITE_APP_SERVER_BASE_URL || 'https://api.plant360.ai:8080').replace(/\/$/, '')
 const clientId = String(import.meta.env.VITE_APP_OAUTH_CLIENT_ID || '')
@@ -104,9 +105,9 @@ export function SignIn() {
   }
 
   return <main className="flex min-h-screen items-center justify-center bg-slate-950 p-6 text-slate-950">
-    <section className="w-full max-w-md border border-slate-700 bg-white p-8 shadow-2xl">
-      <p className="font-mono text-[10px] tracking-[0.16em] text-blue-700">PLANT360</p>
-      <h1 className="mt-3 text-2xl font-semibold">Isolation Planning</h1>
+    <section className="w-full max-w-md overflow-hidden border border-slate-700 bg-white p-8 shadow-2xl">
+      <div className="-mx-8 -mt-8 mb-7 border-b border-slate-700 bg-slate-950 px-8 py-6"><img alt="Plant360.ai" className="h-7 w-auto" src={p360Logo} /></div>
+      <h1 className="text-2xl font-semibold">Isolation Planning</h1>
       <p className="mt-2 text-sm leading-6 text-slate-600">Sign in with your CNVRT account.</p>
       <form className="mt-7 space-y-5" onSubmit={(event) => void submit(event)}>
         <label className="block text-xs font-medium text-slate-700">Email
