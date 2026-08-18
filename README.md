@@ -19,8 +19,16 @@ Two runners share the same deterministic domain modules:
 uv sync  # installs dependencies to .venv/
 ```
 
-Copy `.env.example` → `.env` and set `PLANT360_AUTH_TOKEN` (for bboxes/P&ID
-images) and, for the agentic runner, `GEMINI_API_KEY`.
+Copy `.env.example` → `.env`.
+
+```bash
+cp .env.example .env
+```
+
+For CLI runs, set `PLANT360_AUTH_TOKEN` when drawing images/bboxes are needed and
+set `GEMINI_API_KEY` for the agentic runner. The deterministic runner does not
+need Gemini or PostgreSQL. The HTTP API and React application additionally
+require PostgreSQL as described below.
 
 ## Run
 
@@ -93,8 +101,8 @@ domain/           Shared domain types: enums, models, classification, serializat
 
 The `agent/` package adds a runner where a Gemini LLM is the **orchestrator**. It
 runs a tool-calling loop and decides which deterministic stage to call next. The
-deterministic modules above are preserved **unchanged** and exposed to the agent
-as tools; the deterministic `validate()` remains the **authoritative** source of
+deterministic modules above are shared with the agent and exposed as tools; the
+deterministic `validate()` remains the **authoritative** source of
 `assurance_status` (the agent can gather more evidence but cannot declare
 isolation on its own).
 
@@ -103,7 +111,7 @@ uv run python -m agent --equipment BT-11 --job-name pnid_2_bio_final --job-id 21
 ```
 
 Agent tools: `fetch_boundary`, `find_candidates`, `resolve_bboxes`,
-`analyze_isolation_obligations`, `analyze_schemes_and_relief`,
+`analyze_isolation_obligations`, `analyze_isolation_schemes_and_relief`,
 `list_unselected_sources`, `investigate_source`, `build_evidence`,
 `analyze_instrument_context`, `validate`, `get_osha_guidance`,
 `build_loto_procedure`, `set_isolation_order`, `analyze_downstream_impact`,
@@ -130,14 +138,45 @@ procedure.
 
 ## HTTP API Server
 
-Run the FastAPI service for CNVRT integration:
+### PostgreSQL setup
+
+PostgreSQL is mandatory for the API. Create a database and apply the repository
+schema before starting the service:
+
+```bash
+createdb eqiso
+psql -d eqiso -f schema.sql
+```
+
+Configure `.env` for that database:
+
+```dotenv
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_DB=eqiso
+POSTGRES_USER=<postgres-user>
+POSTGRES_PASSWORD=<postgres-password>
+POSTGRES_SSLMODE=prefer
+```
+
+For a remote or differently named database, pass the equivalent `-h`, `-p`,
+`-U`, and `-d` arguments to `psql`. `schema.sql` is the development/bootstrap
+schema source. Set `EIA_AUTO_INIT_SCHEMA_ON_STARTUP=true` only when this process
+is explicitly responsible for applying it; the recommended default is `false`.
+Production schema changes should be applied in a controlled deployment step.
+
+Optional connection-pool settings are `POSTGRES_POOL_MAX_SIZE` (default `8`) and
+`POSTGRES_POOL_TIMEOUT_SECONDS` (default `5`).
+
+### Start the API
 
 ```bash
 uv run python -m api
 ```
 
 By default, the server listens on `0.0.0.0:8088`. Override with `EIA_HOST` and
-`EIA_PORT`.
+`EIA_PORT`. Startup fails if PostgreSQL is unconfigured, unreachable, or does
+not contain the complete schema.
 
 API runs use the agentic runner, so `GEMINI_API_KEY` is required. Requests that
 need Plant360 data must send `Authorization: Bearer <token>`; for local/dev only,
@@ -168,13 +207,37 @@ to an immutable advisory draft (`isolation_plan` + version 1 + run link). The
 latest draft is not active or authorised, and reopening it does not invoke the
 agent.
 
-PostgreSQL is mandatory for the API and is the sole persistence layer for run
-requests, status, events, results, traces, plans, and versions. The API fails to
-start when PostgreSQL is unconfigured, unreachable, or missing the required
-schema. It does not create run files. Set `EIA_AUTO_INIT_SCHEMA_ON_STARTUP=true`
-only when this process should initialize `schema.sql`; otherwise apply the schema
-explicitly before startup. Drawing images and HILT content are served through the
-authenticated CNVRT proxy endpoints rather than retained as run artifacts.
+PostgreSQL is the API's sole persistence layer for run requests, status, events,
+results, traces, plans, and versions. The API writes no local run files. Drawing
+images and HILT content are served through authenticated CNVRT proxy endpoints
+rather than retained as run artifacts.
+
+### Start the frontend
+
+The frontend requires Node.js, `pnpm`, and a `GITHUB_PACKAGES_TOKEN` with
+`read:packages` access to the private `@coditation-cnvrt/p360-hitl-viewer`
+package.
+
+```bash
+cd frontend
+cp .env.example .env.local
+pnpm install
+pnpm dev
+```
+
+Populate `frontend/.env.local` with the approved CNVRT password-grant client
+configuration and API URL:
+
+```dotenv
+VITE_API_BASE_URL=http://localhost:8088
+VITE_APP_SERVER_BASE_URL=https://api.plant360.ai:8080
+VITE_APP_OAUTH_CLIENT_ID=<approved-client-id>
+VITE_APP_OAUTH_CLIENT_SECRET=<approved-client-secret>
+```
+
+Never commit tokens or populated credential files. Browser requests authenticate
+through CNVRT and send the resulting bearer token to this API. See
+[`frontend/README.md`](frontend/README.md) for frontend-specific details.
 
 ## Tests
 
