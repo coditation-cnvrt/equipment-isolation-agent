@@ -328,7 +328,7 @@ function Workspace({
           graph={graph}
           bboxHighlights={bboxHighlights}
           highlights={highlights}
-          panButton="left"
+          panButton="both"
           selectedId={activeId}
           symbols={symbols}
           onEntityContextMenu={(nextSelection, pointer) => {
