@@ -140,8 +140,33 @@ procedure.
 
 ### PostgreSQL setup
 
-PostgreSQL is mandatory for the API. Create a database and apply the repository
-schema before starting the service:
+PostgreSQL is mandatory for the API. On Debian/Ubuntu, install and start it with:
+
+```bash
+sudo apt update
+sudo apt install -y postgresql postgresql-client
+sudo systemctl enable --now postgresql
+```
+
+Create a dedicated application role and database. Replace the example password
+before running these commands:
+
+```bash
+sudo -u postgres psql -c "CREATE ROLE eqiso_app WITH LOGIN PASSWORD 'replace-with-a-strong-password';"
+sudo -u postgres createdb --owner=eqiso_app eqiso
+```
+
+Apply the repository schema and verify the required tables:
+
+```bash
+PGPASSWORD='replace-with-a-strong-password' \
+  psql -h localhost -U eqiso_app -d eqiso -f schema.sql
+
+PGPASSWORD='replace-with-a-strong-password' \
+  psql -h localhost -U eqiso_app -d eqiso -c '\\dt'
+```
+
+If PostgreSQL and an authorized role already exist, the shorter setup is:
 
 ```bash
 createdb eqiso
@@ -154,8 +179,8 @@ Configure `.env` for that database:
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
 POSTGRES_DB=eqiso
-POSTGRES_USER=<postgres-user>
-POSTGRES_PASSWORD=<postgres-password>
+POSTGRES_USER=eqiso_app
+POSTGRES_PASSWORD=<the-strong-password-created-above>
 POSTGRES_SSLMODE=prefer
 ```
 
