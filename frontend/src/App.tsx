@@ -16,7 +16,9 @@ import {
   getProjects,
   getUniGraphProjects,
   streamIsolationRunEvents,
+  type AssuranceReason,
   type Collection,
+  type DownstreamImpactWarning,
   type Drawing,
   type Equipment,
   type IsolationPoint,
@@ -27,10 +29,13 @@ import {
   type UniGraphProject,
 } from './api'
 import { getHiltEntityId, normalizeHiltGraph, type HiltGraphInput, type HiltSelection, type HiltSymbol } from '@coditation-cnvrt/p360-hitl-viewer'
-import DrawingSelectionInspector from './DrawingSelectionInspector'
+import ContextBreadcrumbs from './ContextBreadcrumbs'
+import DrawingModeSummary from './DrawingModeSummary'
+import IsolationMapSidebar from './IsolationMapSidebar'
 import IsolationPlanPanel from './IsolationPlanPanel'
+import { DEFAULT_ISOLATION_MAP_LAYERS, type IsolationMapLayer, type IsolationViewMode } from './isolation-map'
+import PlanningSidebar from './PlanningSidebar'
 import Skeleton from './Skeleton'
-import SearchableSelect from './SearchableSelect'
 import { useUser } from './auth-context'
 
 const Workspace = lazy(() => import('./Workspace'))
@@ -104,6 +109,10 @@ function App() {
   const [isolationError, setIsolationError] = useState('')
   const [isolationSubmitting, setIsolationSubmitting] = useState(false)
   const [selectedIsolationPointId, setSelectedIsolationPointId] = useState<string | null>(null)
+  const [selectedDownstreamImpactId, setSelectedDownstreamImpactId] = useState<string | null>(null)
+  const [selectedAssuranceReasonId, setSelectedAssuranceReasonId] = useState<string | null>(null)
+  const [viewMode, setViewMode] = useState<IsolationViewMode>('drawing')
+  const [mapLayers, setMapLayers] = useState({ ...DEFAULT_ISOLATION_MAP_LAYERS })
   const [pastRuns, setPastRuns] = useState<IsolationRunStatus[]>([])
   const [pastRunsLoading, setPastRunsLoading] = useState(false)
   const [pastRunsError, setPastRunsError] = useState('')
@@ -114,9 +123,11 @@ function App() {
   const [planSaving, setPlanSaving] = useState(false)
   const [planSaveError, setPlanSaveError] = useState('')
   const [pendingHistoricalEquipmentTag, setPendingHistoricalEquipmentTag] = useState('')
+  const [historicalNavigation, setHistoricalNavigation] = useState<{ kind: 'plan' | 'run'; label: string; runId: string; waitForContext: boolean } | null>(null)
   const [loading, setLoading] = useState('projects')
   const [error, setError] = useState('')
   const didLoadProjects = useRef(false)
+  const historicalNavigationLock = useRef(false)
 
   const selectedProject = projects.find((item) => item.id === projectId)
   const selectedCollection = collections.find((item) => item.id === collectionId)
@@ -149,6 +160,10 @@ function App() {
     () => isolationPlan ? { ...isolationPlan, isolation_points: isolationPoints } : null,
     [isolationPlan, isolationPoints],
   )
+  const downstreamImpacts = (displayedIsolationPlan?.downstream_impact?.warnings ?? [])
+    .filter((warning): warning is DownstreamImpactWarning => typeof warning !== 'string')
+  const assuranceReasons = displayedIsolationPlan?.isolation_validation?.assurance_explanation?.primary_reasons ?? []
+  const selectedAssuranceReason = assuranceReasons.find((reason) => reason.reason_id === selectedAssuranceReasonId) ?? null
   const runInProgress = isolationRun?.status === 'queued' || isolationRun?.status === 'running'
   const ready = Boolean(selectedProject && selectedCollection && selectedDrawing && selectedUniGraph)
   const projectOptions = projects.map((item) => ({ value: item.id, label: `${item.name} (${item.id})`, searchText: `${item.name} ${item.id}` }))
@@ -158,6 +173,13 @@ function App() {
   const equipmentOptions = equipment
     .filter((item) => item.job_id === drawingId)
     .map((item) => ({ value: item.id, label: `${item.tag || item.name} (${item.entity_class})`, searchText: `${item.tag} ${item.name} ${item.entity_class}` }))
+  const contextBreadcrumbItems = [
+    { key: 'project', label: 'Project', value: projectId, placeholder: 'Choose project', options: projectOptions, onChange: (value: string) => { void selectProject(value) } },
+    { key: 'collection', label: 'Collection', value: collectionId, placeholder: 'Choose collection', options: collectionOptions, disabled: !projectId, onChange: (value: string) => { void selectCollection(value) } },
+    { key: 'drawing', label: 'Drawing', value: drawingId, placeholder: 'Choose drawing', options: drawingOptions, disabled: !collectionId, onChange: (value: string) => { void selectDrawing(value) } },
+    { key: 'graph', label: 'UniGraph', value: unigraphProjectId, placeholder: 'Choose graph', options: unigraphOptions, disabled: !drawingId, onChange: selectUniGraph },
+    { key: 'equipment', label: 'Equipment', value: equipmentId, placeholder: drawingLoading ? 'Loading equipment' : 'Choose equipment', options: equipmentOptions, disabled: !unigraphProjectId || drawingLoading, onChange: selectEquipment, onClear: clearEquipmentSelection },
+  ]
 
   useEffect(() => {
     if (didLoadProjects.current) return
@@ -264,13 +286,13 @@ function App() {
   }, [collectionId, drawingId, projectId, selectedEquipment, unigraphProjectId])
 
   useEffect(() => {
-    if (!pendingHistoricalEquipmentTag || !equipment.length) return
+    if (!pendingHistoricalEquipmentTag || drawingLoading || !hiltGraph) return
     const wanted = pendingHistoricalEquipmentTag.trim().toLowerCase()
     const match = equipment.find((item) => [item.tag, item.name].some((value) => value.trim().toLowerCase() === wanted))
-    if (!match) return
-    setEquipmentId(match.id)
+    if (match) setEquipmentId(match.id)
+    else setIsolationError(`The saved equipment “${pendingHistoricalEquipmentTag}” is not present in the restored drawing.`)
     setPendingHistoricalEquipmentTag('')
-  }, [equipment, pendingHistoricalEquipmentTag])
+  }, [drawingLoading, equipment, hiltGraph, pendingHistoricalEquipmentTag])
 
   useEffect(() => {
     const runId = isolationRun?.run_id
@@ -334,6 +356,10 @@ function App() {
   }, [isolationRun])
 
   useEffect(() => {
+    if (displayedIsolationPlan) setViewMode('isolation')
+  }, [displayedIsolationPlan])
+
+  useEffect(() => {
     if (!isolationRun?.run_id || isolationRun.status !== 'succeeded' || isolationResult) return
     let active = true
     void getIsolationResult(isolationRun.run_id).then((result) => {
@@ -343,9 +369,18 @@ function App() {
     }).catch((reason: unknown) => {
       if (!active) return
       setIsolationError(reason instanceof Error ? reason.message : 'The run succeeded, but its result could not be loaded.')
+      historicalNavigationLock.current = false
+      setHistoricalNavigation((current) => current?.runId === isolationRun.run_id ? null : current)
     })
     return () => { active = false }
   }, [isolationResult, isolationRun?.run_id, isolationRun?.status])
+
+  useEffect(() => {
+    if (!historicalNavigation || isolationRun?.run_id !== historicalNavigation.runId || !isolationResult) return
+    if (historicalNavigation.waitForContext && (drawingLoading || (pendingHistoricalEquipmentTag && !drawingError))) return
+    historicalNavigationLock.current = false
+    setHistoricalNavigation(null)
+  }, [drawingError, drawingLoading, historicalNavigation, isolationResult, isolationRun?.run_id, pendingHistoricalEquipmentTag])
 
   async function loadProjects() {
     setLoading('projects')
@@ -413,7 +448,9 @@ function App() {
     if (!projectId || !collectionId || !nextDrawingId) return
     setLoading('unigraph')
     try {
-      setUnigraphProjects(await getUniGraphProjects(projectId, collectionId))
+      const nextUniGraphProjects = await getUniGraphProjects(projectId, collectionId)
+      setUnigraphProjects(nextUniGraphProjects)
+      if (nextUniGraphProjects.length === 1) setUnigraphProjectId(nextUniGraphProjects[0].id)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to load UniGraph projects.')
     } finally {
@@ -434,6 +471,10 @@ function App() {
     setIsolationError('')
     setIsolationSubmitting(false)
     setSelectedIsolationPointId(null)
+    setSelectedDownstreamImpactId(null)
+    setSelectedAssuranceReasonId(null)
+    setViewMode('drawing')
+    setMapLayers({ ...DEFAULT_ISOLATION_MAP_LAYERS })
     setSelectedSavedPlan(null)
     setPlanSaving(false)
     setPlanSaveError('')
@@ -444,6 +485,7 @@ function App() {
     setEquipmentId('')
     setEquipmentBBox([])
     setBBoxLoading(false)
+    setDrawingSelection(null)
     setIntrusiveWork(true)
     setHighRiskService(true)
     setScopeNote('')
@@ -508,6 +550,8 @@ function App() {
       setIsolationResult(null)
       setIsolationError('')
       setSelectedIsolationPointId(null)
+      setSelectedDownstreamImpactId(null)
+      setSelectedAssuranceReasonId(null)
       setIsolationRun(run)
       setSelectedSavedPlan(savedPlan)
       return
@@ -523,6 +567,11 @@ function App() {
       setCollections(nextCollections)
       setDrawings(nextDrawings)
       setUnigraphProjects(nextUniGraphProjects)
+      if (projectId !== context.cnvrt_project_id || drawingId !== context.job_id) {
+        setHiltGraph(null)
+        setHiltSymbols([])
+        setDrawingLoading(true)
+      }
       setProjectId(context.cnvrt_project_id)
       setCollectionId(context.collection_id)
       setDrawingId(context.job_id)
@@ -535,32 +584,51 @@ function App() {
       setIsolationResult(null)
       setIsolationError('')
       setSelectedIsolationPointId(null)
+      setSelectedDownstreamImpactId(null)
+      setSelectedAssuranceReasonId(null)
       setIsolationRun(run)
       setSelectedSavedPlan(savedPlan)
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : 'Unable to restore the historical run context.'
       if (savedPlan) setSavedPlansError(message)
       else setPastRunsError(message)
+      throw reason
     } finally {
       setPastRunsLoading(false)
     }
   }
 
   async function openPastRun(run: IsolationRunStatus) {
-    setSelectedSavedPlan(null)
-    await restorePersistedRun(run)
+    if (historicalNavigationLock.current || runInProgress || Boolean(loading) || drawingLoading) return
+    const waitForContext = Boolean(run.request?.cnvrt_project_id && run.request.collection_id && run.request.job_id && run.request.unigraph_project_id)
+    historicalNavigationLock.current = true
+    setHistoricalNavigation({ kind: 'run', label: `${run.equipment_tag} · ${run.run_id.slice(0, 12)}`, runId: run.run_id, waitForContext })
+    try {
+      setSelectedSavedPlan(null)
+      await restorePersistedRun(run)
+    } catch {
+      historicalNavigationLock.current = false
+      setHistoricalNavigation(null)
+    }
   }
 
   async function openSavedPlan(plan: SavedIsolationPlan) {
-    if (runInProgress) return
+    if (historicalNavigationLock.current || runInProgress || Boolean(loading) || drawingLoading) return
+    const sourceRunId = plan.latest_version.source_run.run_id
+    historicalNavigationLock.current = true
+    setHistoricalNavigation({ kind: 'plan', label: `${plan.plan_number} · v${plan.latest_version.version_no}`, runId: sourceRunId, waitForContext: true })
     setSavedPlansLoading(true)
     setSavedPlansError('')
     try {
       const detail = await getIsolationPlan(plan.plan_id)
       const run = await getIsolationRun(detail.latest_version.source_run.run_id)
+      const waitForContext = Boolean(run.request?.cnvrt_project_id && run.request.collection_id && run.request.job_id && run.request.unigraph_project_id)
+      setHistoricalNavigation({ kind: 'plan', label: `${plan.plan_number} · v${plan.latest_version.version_no}`, runId: run.run_id, waitForContext })
       await restorePersistedRun(run, detail)
     } catch (reason) {
       setSavedPlansError(reason instanceof Error ? reason.message : 'Unable to open the saved plan.')
+      historicalNavigationLock.current = false
+      setHistoricalNavigation(null)
     } finally {
       setSavedPlansLoading(false)
     }
@@ -587,7 +655,36 @@ function App() {
     const selectionId = point.selection_id
     if (!selectionId) return
     setDrawingSelection(null)
+    setViewMode('isolation')
+    setMapLayers((current) => ({ ...current, points: true }))
+    setSelectedDownstreamImpactId(null)
+    setSelectedAssuranceReasonId(null)
     setSelectedIsolationPointId(selectionId)
+  }
+
+  function selectDownstreamImpact(warning: DownstreamImpactWarning) {
+    const impactId = String(warning.affected_id || '').trim()
+    if (!impactId) return
+    setDrawingSelection(null)
+    setViewMode('isolation')
+    setMapLayers((current) => ({ ...current, downstream: true }))
+    setSelectedIsolationPointId(null)
+    setSelectedAssuranceReasonId(null)
+    setSelectedDownstreamImpactId(impactId)
+  }
+
+  function selectAssuranceReason(reason: AssuranceReason) {
+    if (!reason.reason_id) return
+    setDrawingSelection(null)
+    setViewMode('isolation')
+    setMapLayers((current) => ({ ...current, blockers: true }))
+    setSelectedIsolationPointId(null)
+    setSelectedDownstreamImpactId(null)
+    setSelectedAssuranceReasonId(reason.reason_id)
+  }
+
+  function changeMapLayer(layer: IsolationMapLayer, visible: boolean) {
+    setMapLayers((current) => ({ ...current, [layer]: visible }))
   }
 
   function selectDrawingEntity(nextSelection: HiltSelection | null) {
@@ -597,6 +694,25 @@ function App() {
     )
     if (resultPoint) {
       selectIsolationPoint(resultPoint)
+      setDrawingSelection(nextSelection)
+      return
+    }
+    const resultImpact = nextSelection && downstreamImpacts.find((impact) => impact.affected_id === nextSelection.id)
+    if (resultImpact) {
+      selectDownstreamImpact(resultImpact)
+      setDrawingSelection(nextSelection)
+      return
+    }
+    const resultReason = nextSelection && assuranceReasons.find((reason) =>
+      reason.terminal?.entity_id === nextSelection.id || reason.path_node_ids?.includes(nextSelection.id),
+    )
+    if (resultReason) {
+      selectAssuranceReason(resultReason)
+      setDrawingSelection(nextSelection)
+      return
+    }
+    if (isolationRun) {
+      setDrawingSelection(nextSelection)
       return
     }
     if (!nextSelection || nextSelection.kind !== 'node') {
@@ -640,68 +756,75 @@ function App() {
   }
 
   return (
-    <div className="h-screen overflow-hidden bg-[#f7f8fa] text-slate-950">
+    <div aria-busy={Boolean(historicalNavigation)} className="h-screen overflow-hidden bg-[#f7f8fa] text-slate-950">
+      {historicalNavigation && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/20 backdrop-blur-[1px]" role="status">
+        <div className="w-80 border border-slate-300 bg-white p-5 shadow-2xl">
+          <div className="flex items-center gap-3"><span aria-hidden="true" className="size-5 shrink-0 animate-spin rounded-full border-2 border-blue-200 border-t-blue-700" /><div><p className="font-mono text-[10px] uppercase tracking-[0.12em] text-blue-700">Opening saved {historicalNavigation.kind}</p><p className="mt-1 truncate text-sm font-medium text-slate-900">{historicalNavigation.label}</p></div></div>
+          <p className="mt-3 text-xs leading-5 text-slate-600">Restoring its project, drawing, UniGraph, equipment, and immutable result. Other navigation is temporarily unavailable.</p>
+        </div>
+      </div>}
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-300 bg-white px-4 sm:px-6">
         <div className="flex items-center gap-4"><span className="text-sm font-semibold">Plant360</span><span className="font-mono text-xs text-slate-600">ISOLATION PLANNING</span></div>
-        <div className="flex items-center gap-3"><span className="hidden max-w-52 truncate text-xs text-slate-600 sm:inline">{user?.profile?.email}</span><span className="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 font-mono text-[10px] text-amber-900">ADVISORY ONLY</span><button className="font-mono text-[10px] font-semibold tracking-wide text-slate-600 hover:text-blue-700" onClick={logout} type="button">LOGOUT</button></div>
+        <div className="flex items-center gap-3"><span className="hidden max-w-52 truncate text-xs text-slate-600 sm:inline">{user?.profile?.email}</span><button className="font-mono text-[10px] font-semibold tracking-wide text-slate-600 hover:text-blue-700" onClick={logout} type="button">LOGOUT</button></div>
       </header>
-      <main className="grid h-[calc(100vh-3.5rem)] min-h-0 grid-cols-1 overflow-hidden xl:grid-cols-[20rem_minmax(0,1fr)_26rem]">
+      <ContextBreadcrumbs items={contextBreadcrumbItems} />
+      <main className="grid h-[calc(100vh-6.5rem)] min-h-0 grid-cols-1 overflow-hidden xl:grid-cols-[20rem_minmax(0,1fr)_26rem]">
         <aside className="overflow-y-auto border-b border-slate-300 bg-slate-50 xl:border-b-0 xl:border-r">
-          <div className="border-b border-slate-300 p-5"><p className="font-mono text-[10px] tracking-[0.12em] text-slate-500">PLANNING CONTEXT</p><h1 className="mt-3 text-xl font-medium">Select a drawing</h1><p className="mt-2 text-sm leading-5 text-slate-600">A CNVRT project, collection, drawing, and UniGraph project are required.</p></div>
-          <div className="space-y-4 p-5">
-            {loading === 'projects' ? <div><span className="text-xs font-medium text-slate-700">CNVRT project</span><Skeleton className="mt-1.5 h-10 w-full" /></div> : <SearchableSelect label="CNVRT project" onChange={(value) => void selectProject(value)} options={projectOptions} placeholder="Select project" searchPlaceholder="Filter by name or ID, e.g. 277" value={projectId} />}
-            {projectId && (loading === 'collections' ? <div><span className="text-xs font-medium text-slate-700">Collection</span><Skeleton className="mt-1.5 h-10 w-full" /></div> : <SearchableSelect label="Collection" onChange={(value) => void selectCollection(value)} options={collectionOptions} placeholder="Select collection" searchPlaceholder="Filter by collection name or ID" value={collectionId} />)}
-            {collectionId && (loading === 'drawings' ? <div><span className="text-xs font-medium text-slate-700">Drawing</span><Skeleton className="mt-1.5 h-10 w-full" /></div> : <SearchableSelect label="Drawing" onChange={(value) => void selectDrawing(value)} options={drawingOptions} placeholder="Select drawing" searchPlaceholder="Filter by drawing name or ID" value={drawingId} />)}
-            {drawingId && (loading === 'unigraph' ? <div><span className="text-xs font-medium text-slate-700">UniGraph project</span><Skeleton className="mt-1.5 h-10 w-full" /></div> : <SearchableSelect disabled={!unigraphOptions.length} emptyLabel="No graph project available" label="UniGraph project" onChange={(value) => void selectUniGraph(value)} options={unigraphOptions} placeholder="Select graph project" searchPlaceholder="Filter by graph name or ID" value={unigraphProjectId} />)}
-            {unigraphProjectId && <SearchableSelect disabled={drawingLoading || !equipmentOptions.length} emptyLabel={drawingLoading ? 'Reading drawing equipment' : 'No drawing equipment available'} label="Equipment" onChange={selectEquipment} options={equipmentOptions} placeholder="Select equipment" searchPlaceholder="Filter by tag, name, or class" value={equipmentId} />}
-            {error && <div className="border-l-2 border-red-500 bg-red-50 p-3 text-xs text-red-900" role="alert"><p>{error}</p>{!projects.length && <button className="mt-2 underline" onClick={() => void loadProjects()} type="button">Retry project load</button>}</div>}
-          </div>
-          <section className="border-t border-slate-300 p-5" aria-label="Saved isolation plans">
-            <div className="flex items-baseline justify-between gap-3"><h2 className="font-mono text-[10px] tracking-[0.12em] text-slate-500">{selectedEquipment ? 'MATCHING PLANS' : 'SAVED PLANS'}</h2>{savedPlansLoading && <span className="text-[10px] text-slate-500">Loading…</span>}</div>
-            {savedPlansError && <p className="mt-2 border-l-2 border-amber-500 bg-amber-50 px-2 py-1 text-xs text-amber-900">{savedPlansError}</p>}
-            {!savedPlansLoading && !savedPlansError && !savedPlans.length && <p className="mt-2 text-xs text-slate-500">No saved advisory plans are available.</p>}
-            {savedPlans.length > 0 && <ol className="mt-2 space-y-2">{savedPlans.map((plan) => <li key={plan.plan_id}><button className={`w-full border bg-white p-2 text-left hover:border-blue-500 disabled:cursor-not-allowed ${selectedSavedPlan?.plan_id === plan.plan_id ? 'border-purple-600' : 'border-slate-200'}`} disabled={savedPlansLoading || runInProgress} onClick={() => void openSavedPlan(plan)} type="button">
-              <span className="flex items-center justify-between gap-2"><span className="truncate font-mono text-[10px] font-semibold text-slate-900">{plan.plan_number} · v{plan.latest_version.version_no}</span><span className="font-mono text-[9px] uppercase text-purple-700">{plan.lifecycle_state}</span></span>
-              <span className="mt-1 flex items-center justify-between gap-2 text-[10px] text-slate-600"><span className="truncate">{plan.latest_version.source_run.equipment_tag}</span><span className="uppercase">{String(plan.latest_version.source_run.assurance_status ?? 'unknown').replaceAll('_', ' ')}</span></span>
-              <span className="mt-1 block text-[9px] text-slate-500">{plan.area_code || 'No area'} · No active version</span>
-            </button></li>)}</ol>}
-            <p className="mt-2 text-[10px] leading-4 text-slate-500">Draft plans are immutable advisory records. Latest does not mean active or authorised.</p>
-          </section>
-          <section className="border-t border-slate-300 p-5" aria-label="Previous isolation runs">
-            <div className="flex items-baseline justify-between gap-3">
-              <h2 className="font-mono text-[10px] tracking-[0.12em] text-slate-500">{selectedEquipment ? 'MATCHING RUNS' : 'RECENT RUNS'}</h2>
-              {pastRunsLoading && <span className="text-[10px] text-slate-500">Loading…</span>}
-            </div>
-            {pastRunsError && <p className="mt-2 border-l-2 border-red-500 bg-red-50 px-2 py-1 text-xs text-red-900">{pastRunsError}</p>}
-            {!pastRunsLoading && !pastRunsError && !pastRuns.length && <p className="mt-2 text-xs text-slate-500">No persisted runs are available.</p>}
-            {pastRuns.length > 0 && <ol className="mt-2 space-y-2">
-              {pastRuns.map((run) => <li key={run.run_id}>
-                <button className="w-full border border-slate-200 bg-white p-2 text-left hover:border-blue-500 disabled:cursor-not-allowed disabled:bg-slate-50" disabled={run.status !== 'succeeded' || pastRunsLoading} onClick={() => void openPastRun(run)} type="button">
-                  <span className="flex items-center justify-between gap-2"><span className="truncate text-xs font-medium text-slate-900">{run.equipment_tag}</span><span className="font-mono text-[9px] uppercase text-slate-600">{run.status}</span></span>
-                  <span className="mt-1 flex items-center justify-between gap-2 text-[9px] text-slate-500"><span className="font-mono">{run.run_id.slice(0, 12)}</span><span>{new Date(run.created_at * 1000).toLocaleString()}</span></span>
-                </button>
-              </li>)}
-            </ol>}
-            <p className="mt-2 text-[10px] leading-4 text-slate-500">Opening a persisted result does not call Gemini.</p>
-          </section>
+          {displayedIsolationPlan && viewMode === 'isolation' ? <IsolationMapSidebar
+            assuranceStatus={displayedIsolationPlan.assurance_status}
+            impacts={downstreamImpacts}
+            layers={mapLayers}
+            onImpactSelect={selectDownstreamImpact}
+            onLayerChange={changeMapLayer}
+            onOpenPlan={(plan) => { void openSavedPlan(plan) }}
+            onOpenRun={(run) => { void openPastRun(run) }}
+            onPointSelect={selectIsolationPoint}
+            onReasonSelect={selectAssuranceReason}
+            pastRuns={pastRuns}
+            points={isolationPoints}
+            reasons={assuranceReasons}
+            savedPlans={savedPlans}
+            selectedImpactId={selectedDownstreamImpactId}
+            selectedPointId={selectedIsolationPointId}
+            selectedReasonId={selectedAssuranceReasonId}
+          /> : <PlanningSidebar
+            collectionLabel={selectedCollection?.name ?? ''}
+            drawingLabel={selectedDrawing?.name ?? ''}
+            equipmentLabel={selectedEquipment ? selectedEquipment.tag || selectedEquipment.name : ''}
+            graphLabel={selectedUniGraph?.name ?? ''}
+            onOpenPlan={(plan) => { void openSavedPlan(plan) }}
+            onOpenRun={(run) => { void openPastRun(run) }}
+            pastRuns={pastRuns}
+            plansError={savedPlansError || error}
+            plansLoading={savedPlansLoading || loading === 'projects' || loading === 'collections' || loading === 'drawings' || loading === 'unigraph'}
+            projectLabel={selectedProject?.name ?? ''}
+            runsError={pastRunsError}
+            runsLoading={pastRunsLoading}
+            savedPlans={savedPlans}
+          />}
         </aside>
-        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden border-b border-slate-300 bg-slate-200 xl:border-b-0"><div className="border-b border-slate-300 bg-white px-5 py-3"><p className="font-mono text-[10px] tracking-[0.12em] text-slate-500">DRAWING WORKSPACE</p></div><div className="min-h-0 flex-1">{ready ? <Suspense fallback={<div className="h-full bg-white p-8"><Skeleton className="h-5 w-48" /><Skeleton className="mt-8 h-full w-full" /></div>}><Workspace drawingError={drawingError} drawingLoading={drawingLoading} drawingName={selectedDrawing?.name ?? ''} drawingSelection={drawingSelection} graph={hiltGraph} graphName={selectedUniGraph?.name ?? ''} isolationPoints={isolationPoints} onDrawingSelectionChange={selectDrawingEntity} selectedEntityId={selectedEquipment?.node_id ?? null} selectedIsolationPointId={selectedIsolationPointId} symbols={hiltSymbols} /></Suspense> : <div className="flex h-full items-center justify-center bg-white p-8 text-center"><div><h2 className="text-lg font-medium">Complete context selection</h2><p className="mt-2 max-w-sm text-sm leading-5 text-slate-600">No CNVRT drawing content is loaded until all required selections are complete.</p></div></div>}</div></section>
+        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden border-b border-slate-300 bg-slate-200 xl:border-b-0"><div className="border-b border-slate-300 bg-white px-5 py-3"><p className="font-mono text-[10px] tracking-[0.12em] text-slate-500">DRAWING WORKSPACE</p></div><div className="min-h-0 flex-1">{ready ? <Suspense fallback={<div className="h-full bg-white p-8"><Skeleton className="h-5 w-48" /><Skeleton className="mt-8 h-full w-full" /></div>}><Workspace assuranceReasons={assuranceReasons} downstreamImpacts={downstreamImpacts} drawingError={drawingError} drawingLoading={drawingLoading} drawingName={selectedDrawing?.name ?? ''} drawingSelection={drawingSelection} graph={hiltGraph} graphName={selectedUniGraph?.name ?? ''} isolationPoints={isolationPoints} mapLayers={mapLayers} onDrawingSelectionChange={selectDrawingEntity} onViewModeChange={setViewMode} selectedAssuranceReason={selectedAssuranceReason} selectedDownstreamImpactId={selectedDownstreamImpactId} selectedEntityId={selectedEquipment?.node_id ?? null} selectedIsolationPointId={selectedIsolationPointId} symbols={hiltSymbols} viewMode={viewMode} /></Suspense> : <div className="flex h-full items-center justify-center bg-white p-8 text-center"><div><h2 className="text-lg font-medium">Complete context selection</h2><p className="mt-2 max-w-sm text-sm leading-5 text-slate-600">No CNVRT drawing content is loaded until all required selections are complete.</p></div></div>}</div></section>
         <aside className="flex min-h-0 flex-col overflow-hidden bg-white xl:border-l xl:border-slate-300">
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="border-b border-slate-300 p-5">
               <p className="font-mono text-[10px] tracking-[0.12em] text-slate-500">REVIEW STATUS</p>
               <div className="mt-3 flex items-start justify-between gap-3">
                 <h2 className="text-xl font-medium">{selectedEquipment ? selectedEquipment.tag || selectedEquipment.name : ready ? 'Select equipment' : 'Context required'}</h2>
-                {selectedEquipment && !isolationRun && <button className="border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100" onClick={clearEquipmentSelection} type="button">Clear</button>}
+                {selectedEquipment && <button className="shrink-0 border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100" onClick={clearEquipmentSelection} type="button">View drawing only</button>}
               </div>
               {selectedEquipment && <p className="mt-1 text-sm text-slate-600">{selectedEquipment.entity_class.replaceAll('_', ' ')}</p>}
             </div>
 
-            {drawingSelection && !isolationRun && <DrawingSelectionInspector onClear={() => setDrawingSelection(null)} selection={drawingSelection} />}
-
-            {isolationRun ? <IsolationPlanPanel
+            {isolationRun ? displayedIsolationPlan && viewMode === 'drawing' ? <DrawingModeSummary
+              onNewRun={resetIsolationRun}
+              onOpenMap={() => setViewMode('isolation')}
+              plan={displayedIsolationPlan}
+              runId={isolationRun.run_id}
+            /> : <IsolationPlanPanel
               error={isolationError}
+              onImpactSelect={selectDownstreamImpact}
               onPointSelect={selectIsolationPoint}
+              onReasonSelect={selectAssuranceReason}
               onReset={resetIsolationRun}
               onSavePlan={saveCurrentRunAsPlan}
               plan={displayedIsolationPlan}
@@ -709,7 +832,9 @@ function App() {
               planSaving={planSaving}
               run={isolationRun}
               savedPlan={selectedSavedPlan}
+              selectedImpactId={selectedDownstreamImpactId}
               selectedPointId={selectedIsolationPointId}
+              selectedReasonId={selectedAssuranceReasonId}
             /> : <div className="p-5 text-sm leading-6 text-slate-600">
               {selectedEquipment ? <>
                 <dl className="grid grid-cols-2 gap-px bg-slate-200">

@@ -69,7 +69,7 @@ def validate(planner_data):
         unresolved_checks=unresolved,
     )
     validation = {
-        "code_version": "local_validator_2026-08-17_v2",
+        "code_version": "local_validator_2026-08-18_v4",
         "assurance_status": status.value,
         "rationale": rationale,
         "assurance_explanation": assurance_explanation,
@@ -88,6 +88,7 @@ def validate(planner_data):
         "context_instruments": evidence.get("context_instruments") or [],
         "isolation_obligations": evidence.get("isolation_obligations") or {},
         "unresolved_isolation_obligations": evidence.get("unresolved_isolation_obligations") or [],
+        "relief_context_obligations": evidence.get("relief_context_obligations") or [],
         "barrier_candidate_ids": barrier_ids,
         "positive_candidate_ids": positive_ids,
         "verification_candidate_ids": verification_ids,

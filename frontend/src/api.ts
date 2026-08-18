@@ -39,6 +39,18 @@ export type IsolationPoint = {
   validation_state?: 'barrier' | 'positive' | 'manual' | 'rejected'
 }
 
+export type EvidenceTarget = {
+  entity_id: string
+  entity_type?: string | null
+  entity_class?: string | null
+  tag?: string | null
+  bbox?: number[]
+  role?: string
+  basis?: string | null
+  acceptance?: string
+  path_node_ids?: string[]
+}
+
 export type AssuranceReason = {
   reason_id: string
   code: string
@@ -48,9 +60,20 @@ export type AssuranceReason = {
   boundary_count?: number
   candidate_id?: string
   check_name?: string
+  drawing_binding_status?: string
+  evidence_targets?: EvidenceTarget[]
   basis?: string | null
   path_node_ids?: string[]
   path_node_classes?: string[]
+  encountered_devices?: Array<{
+    entity_id: string
+    entity_type?: string | null
+    entity_class?: string | null
+    tag?: string | null
+    bbox?: number[]
+    acceptance: 'context_only' | string
+    reason: string
+  }>
   required_action?: string
   terminal?: {
     entity_id?: string | null
@@ -84,11 +107,52 @@ export type IsolationValidation = {
   missing_boundary_count?: number
   unselected_boundary_sources?: unknown[]
   unresolved_isolation_obligations?: unknown[]
+  relief_context_obligations?: unknown[]
   unresolved_evidence_checks?: unknown[]
   missing_evidence?: unknown[]
   barrier_candidate_ids?: Array<string | number>
   positive_candidate_ids?: Array<string | number>
   manual_review_candidate_ids?: Array<string | number>
+}
+
+export type DownstreamImpactWarning = {
+  severity: 'likely' | 'possible' | string
+  source_candidate_id?: string
+  source_tag?: string
+  source_candidate_tag?: string | null
+  affected_id: string
+  affected_tag?: string
+  affected_class?: string
+  affected_type?: string
+  impact_type?: string
+  basis?: string
+  path_hops?: number
+  affected_bbox?: number[]
+}
+
+export type DownstreamImpact = {
+  status?: string
+  warnings?: Array<DownstreamImpactWarning | string>
+  error?: string | null
+  debug?: {
+    start_count?: number
+    warning_count?: number
+    unknown_flow_path_count?: number
+    closed_barrier_count?: number
+    max_hops?: number
+  }
+}
+
+export type ReliefCandidate = {
+  id: string
+  tag?: string | null
+  entity_class?: string | null
+  entity_type?: string | null
+  bbox?: number[]
+  relief_type?: string
+  basis?: string
+  requires_safe_discharge_verification?: boolean
+  accepted_as_isolation_barrier?: boolean
 }
 
 export type IsolationPlan = {
@@ -97,7 +161,12 @@ export type IsolationPlan = {
   isolation_points?: IsolationPoint[]
   unselected_boundary_sources?: unknown[]
   manual_visual_isolation_checks?: unknown[]
-  downstream_impact?: { status?: string; warnings?: unknown[] } | null
+  downstream_impact?: DownstreamImpact | null
+  relief_candidates?: {
+    status?: string
+    items?: ReliefCandidate[]
+    summary?: { candidate_count?: number; counts_by_type?: Record<string, number> }
+  } | null
   loto_procedure?: {
     phases?: Array<{
       phase?: number

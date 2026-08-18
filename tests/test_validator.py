@@ -29,8 +29,17 @@ class ValidatorTests(unittest.TestCase):
             "source_component": "450664",
             "source_component_tag": "N1_N7",
             "basis": "no_required_isolation_device_found",
-            "branch_path_node_ids": ["nozzle", "connector"],
-            "branch_path_node_classes": ["equipment_nozzle", "off_or_on_page_connector"],
+            "branch_path_node_ids": ["nozzle", "check-1", "connector"],
+            "branch_path_node_classes": ["equipment_nozzle", "check_valve", "off_or_on_page_connector"],
+            "branch_context_devices": [
+                {
+                    "valve_id": "check-1",
+                    "entity_type": "piping_component",
+                    "entity_class": "check_valve",
+                    "tag": "CV-101",
+                    "bbox": [10, 20, 30, 40],
+                }
+            ],
             "terminal_node": {
                 "entity_id": "connector",
                 "entity_type": "reference",
@@ -63,6 +72,20 @@ class ValidatorTests(unittest.TestCase):
         self.assertEqual(reason["boundary_label"], "N1_N7")
         self.assertEqual(reason["terminal"]["partner_mapping_status"], "missing")
         self.assertEqual(reason["terminal"]["terminal_reason"], "unresolved_off_page_connector")
+        self.assertEqual(
+            reason["encountered_devices"],
+            [
+                {
+                    "entity_id": "check-1",
+                    "entity_type": "piping_component",
+                    "entity_class": "check_valve",
+                    "tag": "CV-101",
+                    "bbox": [10, 20, 30, 40],
+                    "acceptance": "context_only",
+                    "reason": "not_accepted_by_configured_isolation_policy",
+                }
+            ],
+        )
         self.assertEqual(reason["required_action"], "resolve_connector_mapping_and_rerun_validation")
         self.assertEqual(explanation["outstanding_requirements"][0]["check_name"], "find_bypass_paths")
 

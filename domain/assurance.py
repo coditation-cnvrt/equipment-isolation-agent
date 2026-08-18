@@ -92,6 +92,7 @@ def _boundary_reasons(evidence: dict) -> list[dict[str, Any]]:
                 basis=str(obligation.get("basis") or "").strip() or None,
                 path_node_ids=[str(value) for value in obligation.get("branch_path_node_ids") or []],
                 path_node_classes=[str(value or "") for value in obligation.get("branch_path_node_classes") or []],
+                encountered_devices=_encountered_devices(obligation),
                 terminal=terminal,
                 required_action=_boundary_action(terminal),
             )
@@ -108,6 +109,28 @@ def _boundary_reasons(evidence: dict) -> list[dict[str, Any]]:
             )
         )
     return reasons
+
+
+def _encountered_devices(obligation: dict) -> list[dict[str, Any]]:
+    devices = []
+    for raw in obligation.get("branch_context_devices") or []:
+        if not isinstance(raw, dict):
+            continue
+        entity_id = str(raw.get("valve_id") or raw.get("entity_id") or "").strip()
+        if not entity_id:
+            continue
+        devices.append(
+            {
+                "entity_id": entity_id,
+                "entity_type": str(raw.get("entity_type") or "").strip() or None,
+                "entity_class": normalize_class(raw.get("entity_class")) or None,
+                "tag": str(raw.get("tag") or "").strip() or None,
+                "bbox": list(raw.get("bbox") or []),
+                "acceptance": "context_only",
+                "reason": "not_accepted_by_configured_isolation_policy",
+            }
+        )
+    return sorted(devices, key=lambda item: (str(item.get("tag") or ""), item["entity_id"]))
 
 
 def _terminal_summary(obligation: dict) -> dict[str, Any] | None:
@@ -170,6 +193,8 @@ def _check_reasons(checks: list[dict]) -> list[dict[str, Any]]:
                 f"check:{name}",
                 check_name=name,
                 priority=str(check.get("priority") or "").strip() or None,
+                drawing_binding_status=str(check.get("drawing_binding_status") or "").strip() or None,
+                evidence_targets=[target for target in check.get("evidence_targets") or [] if isinstance(target, dict)],
                 required_action="complete_required_evidence_check",
             )
         )

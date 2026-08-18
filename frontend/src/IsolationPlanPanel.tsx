@@ -1,13 +1,17 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
-import type { AssuranceReason, IsolationPlan, IsolationPoint, IsolationRunStatus, SavedIsolationPlan } from './api'
+import type { AssuranceReason, DownstreamImpactWarning, IsolationPlan, IsolationPoint, IsolationRunStatus, SavedIsolationPlan } from './api'
 
 type IsolationPlanPanelProps = {
   run: IsolationRunStatus | null
   plan: IsolationPlan | null
   error: string
   selectedPointId: string | null
+  selectedImpactId: string | null
+  selectedReasonId: string | null
   onPointSelect: (point: IsolationPoint) => void
+  onImpactSelect: (warning: DownstreamImpactWarning) => void
+  onReasonSelect: (reason: AssuranceReason) => void
   onReset: () => void
   savedPlan: SavedIsolationPlan | null
   planSaving: boolean
@@ -41,7 +45,14 @@ const CHECK_LABELS: Record<string, string> = {
 }
 
 function reasonTitle(reason: AssuranceReason): string {
-  if (reason.code === 'boundary_path_without_barrier') return reason.boundary_label || 'Unidentified boundary path'
+  if (reason.code === 'boundary_path_without_barrier') {
+    const label = String(reason.boundary_label || '').trim()
+    if (label && label !== String(reason.boundary_component_id || '')) return label
+    const drawingReference = reason.terminal?.display_text?.find((value) => /^PID[-_ ]/i.test(value.trim()))
+    if (drawingReference) return `Off-page path to ${drawingReference}`
+    if (label) return `Boundary path from component ${label}`
+    return 'Unidentified boundary path'
+  }
   if (reason.code === 'no_isolation_candidates') return 'No isolation candidates found'
   if (reason.code === 'no_deterministic_barrier') return 'No accepted isolation barrier'
   if (reason.code === 'conditional_device_manual_review') return 'Conditional device requires review'
@@ -78,6 +89,48 @@ function requiredAction(reason: AssuranceReason): string | null {
   if (reason.required_action === 'confirm_conditional_device_in_field') return 'Confirm the device type and isolation function in the field.'
   if (reason.required_action === 'provide_zero_energy_verification_evidence') return 'Provide an approved zero-energy verification method.'
   return null
+}
+
+type DownstreamImpactGroup = {
+  id: string
+  warning: DownstreamImpactWarning
+  routeCount: number
+  sourceTags: string[]
+  shortestPathHops: number | null
+}
+
+function groupDownstreamImpacts(warnings: Array<DownstreamImpactWarning | string>): DownstreamImpactGroup[] {
+  const grouped = new Map<string, DownstreamImpactWarning[]>()
+  warnings.forEach((item, index) => {
+    const warning = typeof item === 'string'
+      ? { severity: 'possible', affected_id: '', affected_tag: item, affected_type: 'legacy impact record' }
+      : item
+    const key = String(warning.affected_id || `${warning.affected_tag || 'unknown'}:${warning.affected_class || ''}:${index}`)
+    grouped.set(key, [...(grouped.get(key) ?? []), warning])
+  })
+  return [...grouped.entries()].map(([id, routes]) => {
+    const warning = routes.find((route) => route.severity === 'likely') ?? routes[0]
+    const sourceTags = [...new Set(routes.map((route) => String(route.source_tag || route.source_candidate_tag || '').trim()).filter(Boolean))].sort()
+    const hops = routes.map((route) => Number(route.path_hops)).filter(Number.isFinite)
+    return {
+      id,
+      warning,
+      routeCount: routes.length,
+      sourceTags,
+      shortestPathHops: hops.length ? Math.min(...hops) : null,
+    }
+  }).sort((left, right) => {
+    const severity = Number(left.warning.severity !== 'likely') - Number(right.warning.severity !== 'likely')
+    return severity || String(left.warning.affected_tag || left.id).localeCompare(String(right.warning.affected_tag || right.id))
+  })
+}
+
+function impactDescription(warning: DownstreamImpactWarning): string {
+  if (warning.impact_type === 'loss_of_feed_or_pressure') return 'Potential loss of feed or pressure'
+  if (warning.impact_type === 'instrument_reading_or_control_affected') return 'Instrument reading or control may be affected'
+  if (warning.impact_type === 'off_page_or_terminal_path_affected') return 'Connected off-page or terminal path may be affected'
+  if (warning.impact_type === 'relief_or_vent_context_affected') return 'Relief or vent context may be affected'
+  return humanize(warning.impact_type || 'Potential downstream effect')
 }
 
 const TOOL_STAGE: Record<string, string> = {
@@ -125,9 +178,17 @@ function RunProgress({ run, error, onReset }: Pick<IsolationPlanPanelProps, 'run
   )
 }
 
-export default function IsolationPlanPanel({ run, plan, error, selectedPointId, onPointSelect, onReset, savedPlan, planSaving, planSaveError, onSavePlan }: IsolationPlanPanelProps) {
+export default function IsolationPlanPanel({ run, plan, error, selectedPointId, selectedImpactId, selectedReasonId, onPointSelect, onImpactSelect, onReasonSelect, onReset, savedPlan, planSaving, planSaveError, onSavePlan }: IsolationPlanPanelProps) {
   const [saveOpen, setSaveOpen] = useState(false)
   const [areaCode, setAreaCode] = useState('')
+  const selectedReasonElementRef = useRef<HTMLElement>(null)
+
+  useEffect(() => {
+    if (!selectedReasonId) return
+    const frame = window.requestAnimationFrame(() => selectedReasonElementRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }))
+    return () => window.cancelAnimationFrame(frame)
+  }, [selectedReasonId])
+
   if (!plan) return <RunProgress error={error} onReset={onReset} run={run} />
 
   const validation = plan.isolation_validation ?? {}
@@ -151,7 +212,10 @@ export default function IsolationPlanPanel({ run, plan, error, selectedPointId, 
   const primaryReasonTone = notIsolated
     ? { label: 'text-red-700', border: 'border-red-500', background: 'bg-red-50', heading: 'text-red-950', body: 'text-red-900', detail: 'text-red-800' }
     : { label: 'text-amber-700', border: 'border-amber-500', background: 'bg-amber-50', heading: 'text-amber-950', body: 'text-amber-900', detail: 'text-amber-800' }
+  const reliefCandidates = plan.relief_candidates?.items ?? []
   const downstreamWarnings = plan.downstream_impact?.warnings ?? []
+  const downstreamGroups = groupDownstreamImpacts(downstreamWarnings)
+  const likelyImpactCount = downstreamGroups.filter((group) => group.warning.severity === 'likely').length
   const phases = plan.loto_procedure?.phases ?? []
   const acceptedPointCount = points.filter((point) => point.validation_state === 'barrier' || point.validation_state === 'positive').length
   const allRejected = points.length > 0 && acceptedPointCount === 0
@@ -189,18 +253,36 @@ export default function IsolationPlanPanel({ run, plan, error, selectedPointId, 
         <h3 className="font-mono text-[10px] font-semibold tracking-[0.12em] text-slate-700">WHY THIS STATUS</h3>
         {primaryReasons.length > 0 && <div className="mt-3 space-y-3">
           <p className={`font-mono text-[9px] ${primaryReasonTone.label}`}>{primaryReasonLabel}{primaryReasons.length === 1 ? '' : 'S'} · {primaryReasons.length}</p>
-          {primaryReasons.map((reason) => <article className={`border-l-2 px-3 py-2 ${primaryReasonTone.border} ${primaryReasonTone.background}`} key={reason.reason_id}>
-            <h4 className={`text-xs font-semibold ${primaryReasonTone.heading}`}>{reasonTitle(reason)}</h4>
-            <p className={`mt-1 text-xs leading-5 ${primaryReasonTone.body}`}>{reasonDescription(reason)}</p>
-            {reason.terminal?.display_text?.length ? <p className={`mt-1 text-[10px] leading-4 ${primaryReasonTone.detail}`}>Drawing label: {reason.terminal.display_text.join(' · ')}. Label shown for context only; it is not connectivity proof.</p> : null}
-            {requiredAction(reason) && <p className={`mt-2 text-[10px] font-medium leading-4 ${primaryReasonTone.heading}`}>Required resolution: {requiredAction(reason)}</p>}
-            <details className={`mt-2 text-[9px] ${primaryReasonTone.detail}`}><summary className="cursor-pointer">Technical details</summary><dl className="mt-1 space-y-0.5 font-mono"><div><dt className="inline">Reason: </dt><dd className="inline">{reason.code}</dd></div>{reason.boundary_id && <div><dt className="inline">Boundary: </dt><dd className="inline break-all">{reason.boundary_id}</dd></div>}{reason.terminal?.entity_id && <div><dt className="inline">Terminal entity: </dt><dd className="inline break-all">{reason.terminal.entity_id}</dd></div>}</dl></details>
-          </article>)}
+          {primaryReasons.map((reason) => {
+            const evidenceTargets = reason.evidence_targets ?? []
+            const locatable = Boolean(reason.terminal?.entity_id || reason.path_node_ids?.length || evidenceTargets.some((target) => target.entity_id || target.bbox?.length === 4 || target.path_node_ids?.length))
+            const selected = selectedReasonId === reason.reason_id
+            const selectedTone = notIsolated ? 'bg-red-100 ring-red-300' : 'bg-amber-100 ring-amber-300'
+            return <article className={`border-l-2 px-3 py-2 ${primaryReasonTone.border} ${selected ? `${selectedTone} ring-1 ring-inset` : primaryReasonTone.background}`} key={reason.reason_id} ref={selected ? selectedReasonElementRef : undefined}>
+              <h4 className={`text-xs font-semibold ${primaryReasonTone.heading}`}>{reasonTitle(reason)}</h4>
+              {reason.boundary_component_id && <p className={`mt-0.5 font-mono text-[9px] ${primaryReasonTone.detail}`}>BOUNDARY SOURCE {reason.boundary_component_id}</p>}
+              <p className={`mt-1 text-xs leading-5 ${primaryReasonTone.body}`}>{reasonDescription(reason)}</p>
+              {evidenceTargets.length > 0 && <div className="mt-2 border border-amber-200 bg-white/70 p-2"><p className="font-mono text-[9px] font-semibold text-amber-900">DRAWING EVIDENCE CANDIDATES · {evidenceTargets.length}</p><ul className="mt-1 space-y-1 text-[10px] leading-4 text-amber-950">{evidenceTargets.slice(0, 6).map((target, index) => <li key={`${target.entity_id}-${index}`}>• {target.tag || humanize(target.role || target.entity_class || target.entity_id)} · {humanize(target.acceptance || 'review required')}</li>)}</ul>{evidenceTargets.length > 6 && <p className="mt-1 text-[9px] text-amber-800">+ {evidenceTargets.length - 6} additional topology paths</p>}</div>}
+              {reason.path_node_classes?.length ? <p className={`mt-2 text-[10px] leading-4 ${primaryReasonTone.detail}`}><span className="font-semibold">Known path:</span> {reason.path_node_classes.map(humanize).join(' → ')}</p> : null}
+              {(reason.encountered_devices?.length ?? 0) > 0 && <div className="mt-2 border border-red-200 bg-white/70 p-2"><p className="font-mono text-[9px] font-semibold text-red-800">ENCOUNTERED · NOT ACCEPTED AS ISOLATION</p><ul className="mt-1 space-y-1 text-[10px] leading-4 text-red-900">{reason.encountered_devices?.map((device) => <li key={device.entity_id}>• {device.tag || device.entity_id} · {humanize(device.entity_class || device.entity_type)} · context only under the configured isolation policy</li>)}</ul></div>}
+              {reason.terminal?.display_text?.length ? <p className={`mt-1 text-[10px] leading-4 ${primaryReasonTone.detail}`}>Drawing label: {reason.terminal.display_text.join(' · ')}. Label shown for context only; it is not connectivity proof.</p> : null}
+              {requiredAction(reason) && <p className={`mt-2 text-[10px] font-medium leading-4 ${primaryReasonTone.heading}`}>Required resolution: {requiredAction(reason)}</p>}
+              {locatable && <button className={`mt-2 border bg-white px-2 py-1 font-mono text-[9px] font-semibold ${notIsolated ? 'border-red-400 text-red-800 hover:bg-red-50' : 'border-amber-400 text-amber-900 hover:bg-amber-50'}`} onClick={() => onReasonSelect(reason)} type="button">{selected ? 'SHOWN ON DRAWING' : reason.code === 'evidence_check_incomplete' ? 'REVIEW EVIDENCE ON DRAWING' : 'VIEW PATH ON DRAWING'}</button>}
+              {!locatable && <p className="mt-2 font-mono text-[9px] text-amber-800">No exact drawing evidence candidate is recorded. A field method or corrected drawing evidence is required.</p>}
+              <details className={`mt-2 text-[9px] ${primaryReasonTone.detail}`}><summary className="cursor-pointer">Technical details</summary><dl className="mt-1 space-y-0.5 font-mono"><div><dt className="inline">Reason: </dt><dd className="inline">{reason.code}</dd></div>{reason.boundary_id && <div><dt className="inline">Boundary: </dt><dd className="inline break-all">{reason.boundary_id}</dd></div>}{reason.terminal?.entity_id && <div><dt className="inline">Terminal entity: </dt><dd className="inline break-all">{reason.terminal.entity_id}</dd></div>}</dl></details>
+            </article>
+          })}
         </div>}
         {outstandingRequirements.length > 0 && <details className="mt-4">
           <summary className="cursor-pointer font-mono text-[9px] font-semibold text-amber-800">OUTSTANDING REQUIREMENTS · {outstandingRequirements.length}</summary>
           <ul className="mt-2 list-disc space-y-1 pl-4 text-xs leading-5 text-slate-600">{outstandingRequirements.map((reason) => <li key={reason.reason_id}>{reasonDescription(reason)}</li>)}</ul>
         </details>}
+      </section>}
+
+      {reliefCandidates.length > 0 && <section className="mt-6 border-l-2 border-cyan-600 bg-cyan-50 p-3" aria-label="Relief and energy-release context">
+        <div className="flex items-baseline justify-between gap-3"><h3 className="font-mono text-[10px] font-semibold tracking-[0.12em] text-cyan-950">RELIEF / ENERGY-RELEASE CONTEXT</h3><span className="font-mono text-[9px] text-cyan-800">{reliefCandidates.length}</span></div>
+        <p className="mt-2 text-xs leading-5 text-cyan-950">These devices are not accepted as isolation barriers. Safe discharge, operability, and an approved zero-energy verification method must still be confirmed.</p>
+        <ul className="mt-2 space-y-2">{reliefCandidates.map((candidate) => <li className="border border-cyan-200 bg-white/70 p-2" key={candidate.id}><p className="text-xs font-medium text-cyan-950">{candidate.tag || candidate.id}</p><p className="mt-0.5 text-[10px] text-cyan-800">{humanize(candidate.entity_class || candidate.relief_type)} · context only</p></li>)}</ul>
       </section>}
 
       <section className="mt-6">
@@ -255,11 +337,48 @@ export default function IsolationPlanPanel({ run, plan, error, selectedPointId, 
           </div>
         </details>}
 
-        <details className="py-3">
-          <summary className="cursor-pointer font-mono text-[10px] font-semibold tracking-[0.1em] text-slate-700">DOWNSTREAM IMPACT · {downstreamWarnings.length}</summary>
+        <details className="py-3" open={downstreamGroups.length > 0}>
+          <summary className="cursor-pointer font-mono text-[10px] font-semibold tracking-[0.1em] text-slate-700">DOWNSTREAM IMPACT · {downstreamGroups.length} TARGET{downstreamGroups.length === 1 ? '' : 'S'}</summary>
           <div className="mt-3 text-xs leading-5 text-slate-600">
-            <p>Status: <span className="capitalize text-slate-900">{humanize(plan.downstream_impact?.status)}</span></p>
-            {downstreamWarnings.length ? <ul className="mt-2 list-disc space-y-1 pl-4">{downstreamWarnings.map((warning, index) => <li key={index}>{typeof warning === 'string' ? warning : JSON.stringify(warning)}</li>)}</ul> : <p className="mt-2">No downstream warnings were returned by this run.</p>}
+            {plan.downstream_impact?.status === 'unavailable' && <p className="border-l-2 border-amber-500 bg-amber-50 px-2 py-1 text-amber-900">Downstream analysis was unavailable{plan.downstream_impact.error ? `: ${plan.downstream_impact.error}` : '.'}</p>}
+            {downstreamGroups.length > 0 ? <>
+              <div className="grid grid-cols-3 gap-px bg-slate-200 text-center">
+                <div className="bg-slate-50 p-2"><p className="font-mono text-[8px] text-slate-500">TARGETS</p><p className="mt-0.5 text-sm font-medium text-slate-900">{downstreamGroups.length}</p></div>
+                <div className="bg-slate-50 p-2"><p className="font-mono text-[8px] text-slate-500">PATHS</p><p className="mt-0.5 text-sm font-medium text-slate-900">{downstreamWarnings.length}</p></div>
+                <div className="bg-slate-50 p-2"><p className="font-mono text-[8px] text-slate-500">LIKELY</p><p className="mt-0.5 text-sm font-medium text-slate-900">{likelyImpactCount}</p></div>
+              </div>
+              <p className="mt-3 text-[10px] leading-4">Affected targets are derived from HILT connectivity. “Possible” means the path is connected but flow direction is unknown or weak.</p>
+              <ol className="mt-3 space-y-2">
+                {downstreamGroups.map((group, index) => {
+                  const warning = group.warning
+                  const selected = selectedImpactId === group.id
+                  const locatable = Boolean(warning.affected_id || warning.affected_bbox?.length === 4)
+                  return <li key={group.id}>
+                    <button
+                      className={`w-full border-l-2 p-3 text-left transition-colors ${selected ? 'border-orange-600 bg-orange-100' : warning.severity === 'likely' ? 'border-red-500 bg-red-50 hover:bg-red-100' : 'border-orange-400 bg-orange-50 hover:bg-orange-100'} disabled:cursor-default`}
+                      disabled={!locatable}
+                      onClick={() => onImpactSelect(warning)}
+                      type="button"
+                    >
+                      <span className="flex items-start justify-between gap-2">
+                        <span className="min-w-0">
+                          <span className="block break-words text-xs font-semibold text-slate-950">{warning.affected_tag || warning.affected_id || `Affected target ${index + 1}`}</span>
+                          <span className="mt-0.5 block text-[10px] capitalize text-slate-600">{humanize(warning.affected_type || warning.affected_class || 'downstream target')}</span>
+                        </span>
+                        <span className={`shrink-0 px-1.5 py-0.5 font-mono text-[8px] font-semibold uppercase ${warning.severity === 'likely' ? 'bg-red-100 text-red-800' : 'bg-orange-100 text-orange-800'}`}>{warning.severity || 'possible'}</span>
+                      </span>
+                      <span className="mt-2 block text-[11px] font-medium text-slate-800">{impactDescription(warning)}</span>
+                      <span className="mt-1 block text-[10px] leading-4 text-slate-600">
+                        {group.sourceTags.length ? `From ${group.sourceTags.join(', ')}` : 'Source isolation point not labelled'}
+                        {group.shortestPathHops !== null ? ` · ${group.shortestPathHops} hop${group.shortestPathHops === 1 ? '' : 's'}` : ''}
+                        {group.routeCount > 1 ? ` · ${group.routeCount} paths` : ''}
+                      </span>
+                      {locatable && <span className="mt-2 block font-mono text-[9px] font-semibold text-orange-800">{selected ? 'SHOWN ON DRAWING' : 'VIEW ON DRAWING'}</span>}
+                    </button>
+                  </li>
+                })}
+              </ol>
+            </> : plan.downstream_impact?.status !== 'unavailable' && <p>No downstream targets were identified by this run.</p>}
           </div>
         </details>
 

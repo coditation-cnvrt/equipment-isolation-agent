@@ -77,6 +77,47 @@ body {
   filter: drop-shadow(0 0 3px color-mix(in srgb, var(--p360-hilt-highlight) 65%, transparent));
 }
 
+/* Downstream targets remain visible in orange/red and become solid when selected. */
+.p360-hilt-node.downstream-impact-highlight--muted .p360-hilt-node__outline,
+.p360-hilt-bbox-highlight.downstream-impact-highlight--muted rect {
+  fill: color-mix(in srgb, var(--p360-hilt-highlight) 10%, transparent);
+  stroke-width: 1.5px !important;
+  stroke-dasharray: 2px 3px !important;
+  stroke-opacity: 0.9;
+}
+
+.p360-hilt-node.downstream-impact-highlight--selected .p360-hilt-node__outline,
+.p360-hilt-bbox-highlight.downstream-impact-highlight--selected rect {
+  fill: color-mix(in srgb, var(--p360-hilt-highlight) 22%, transparent);
+  stroke-width: 3px !important;
+  stroke-dasharray: none !important;
+  stroke-opacity: 1;
+}
+
+.p360-hilt-node.downstream-impact-highlight--selected .p360-hilt-node__badge,
+.p360-hilt-bbox-highlight.downstream-impact-highlight--selected .p360-hilt-bbox-highlight__badge {
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--p360-hilt-highlight) 70%, transparent));
+}
+
+/* A selected assurance blocker shows only the exact recorded HILT path nodes. */
+.p360-hilt-node.assurance-blocker-path-highlight .p360-hilt-node__outline {
+  fill: color-mix(in srgb, var(--p360-hilt-highlight) 12%, transparent);
+  stroke-width: 2px !important;
+  stroke-dasharray: 3px 3px !important;
+  stroke-opacity: 1;
+}
+
+.p360-hilt-node.assurance-blocker-terminal-highlight .p360-hilt-node__outline {
+  fill: color-mix(in srgb, var(--p360-hilt-highlight) 24%, transparent);
+  stroke-width: 3px !important;
+  stroke-dasharray: none !important;
+  stroke-opacity: 1;
+}
+
+.p360-hilt-node.assurance-blocker-terminal-highlight .p360-hilt-node__badge {
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--p360-hilt-highlight) 75%, transparent));
+}
+
 /* The selected equipment target uses the same dashed visual language. */
 .p360-hilt-node.equipment-target-highlight .p360-hilt-node__outline {
   stroke-width: 2px !important;
