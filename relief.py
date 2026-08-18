@@ -26,20 +26,24 @@ def analyze_isolation_schemes_and_relief(data: dict, config) -> dict:
     node_by_id, adj, link_by_pair = _hilt_index(graph)
     y_flip = debug.get("hilt_y_flip_calibrated")
     selected = _selected_barriers(data.get("candidates") or [])
+    obligation_relief = _obligation_relief_candidates(data.get("isolation_obligations") or {}, node_by_id, y_flip=y_flip)
     if not selected:
-        result = _completed([], [], node_by_id, [], reason="no_selected_barriers")
-        return {**data, **result, "debug": {**debug, "relief_analysis_status": "completed"}}
+        result = _completed([], [], node_by_id, obligation_relief, reason="no_selected_barriers")
+        return {**data, **result, "debug": {**debug, "relief_analysis_status": "completed", "relief_candidate_count": len(obligation_relief)}}
 
     envelope = _isolated_envelope(selected, adj, link_by_pair)
     schemes, scheme_relief_ids = _detect_schemes(selected, node_by_id, adj, config.policy, y_flip=y_flip)
-    relief_candidates = _discover_relief_candidates(
-        envelope,
-        schemes,
-        node_by_id,
-        selected_barrier_ids={item["barrier_id"] for item in selected},
-        scheme_relief_ids=scheme_relief_ids,
-        policy=config.policy,
-        y_flip=y_flip,
+    relief_candidates = _merge_relief_candidates(
+        _discover_relief_candidates(
+            envelope,
+            schemes,
+            node_by_id,
+            selected_barrier_ids={item["barrier_id"] for item in selected},
+            scheme_relief_ids=scheme_relief_ids,
+            policy=config.policy,
+            y_flip=y_flip,
+        ),
+        obligation_relief,
     )
     result = _completed(envelope, schemes, node_by_id, relief_candidates)
     debug.update(
@@ -376,6 +380,51 @@ def _discover_relief_candidates(envelope, schemes, node_by_id, selected_barrier_
     return list(candidates.values())
 
 
+def _obligation_relief_candidates(obligations, node_by_id, y_flip=None):
+    candidates = []
+    seen = set()
+    for obligation in (obligations or {}).get("items") or []:
+        if obligation.get("source_type") != "relief_context":
+            continue
+        branch_id = obligation.get("branch_id") or obligation.get("source_component")
+        for node_id in obligation.get("relief_device_ids") or []:
+            node_id = str(node_id)
+            if not node_id or node_id in seen:
+                continue
+            seen.add(node_id)
+            node = _node_summary(node_id, node_by_id, y_flip=y_flip)
+            relief_type = _relief_type(node)
+            candidates.append(
+                {
+                    "id": node_id,
+                    "tag": node.get("tag"),
+                    "entity_class": node.get("entity_class"),
+                    "entity_type": node.get("entity_type"),
+                    "bbox": node.get("bbox") or [],
+                    "inside_envelope": False,
+                    "relief_type": relief_type if relief_type != "not_relief" else "protective_relief",
+                    "classification_confidence": "high",
+                    "classified_by": "deterministic",
+                    "basis": "Explicit pressure/vacuum relief device on a HILT relief-context obligation; safe discharge and zero-energy use still require verification.",
+                    "source_branch_id": branch_id,
+                    "requires_safe_discharge_verification": True,
+                    "accepted_as_isolation_barrier": False,
+                }
+            )
+    return candidates
+
+
+def _merge_relief_candidates(*groups):
+    merged = {}
+    for group in groups:
+        for candidate in group or []:
+            candidate_id = str(candidate.get("id") or "")
+            if not candidate_id:
+                continue
+            merged[candidate_id] = {**merged.get(candidate_id, {}), **candidate}
+    return [merged[key] for key in sorted(merged)]
+
+
 def _scheme_summary(schemes):
     counts = {}
     for item in schemes:
@@ -419,6 +468,8 @@ def _node_summary(node_id, node_by_id, y_flip=None):
 
 def _relief_type(node):
     text = _node_text(node)
+    if any(token in text for token in ("pressure_or_vacuum_relief", "pressure_relief", "vacuum_relief", "safety_relief")):
+        return "protective_relief"
     if "bleed" in text:
         return "bleed"
     if "drain" in text:

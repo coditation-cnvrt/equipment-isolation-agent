@@ -109,6 +109,8 @@ def _summarize_isolation_obligations(result: dict) -> dict:
         "isolated_count": summary.get("isolated_count"),
         "unresolved_count": summary.get("unresolved_count"),
         "context_count": summary.get("context_count"),
+        "relief_context_count": summary.get("relief_context_count"),
+        "relief_source_count": summary.get("relief_source_count"),
         "manual_candidate_count": summary.get("manual_candidate_count"),
         "unresolved_sources": [
             {

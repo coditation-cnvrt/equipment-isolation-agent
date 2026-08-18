@@ -141,6 +141,79 @@ class ObligationTests(unittest.TestCase):
         self.assertEqual(item["manual_candidates"], [])
         self.assertEqual(data["isolation_obligations"]["summary"]["unresolved_count"], 0)
 
+    def test_connected_relief_network_is_context_not_five_process_blockers(self):
+        data = analyze_isolation_obligations(
+            {
+                "hilt_branch_obligations": [
+                    {
+                        "equipment_tag": "OLAA10 BB001",
+                        "source_component": "check-source",
+                        "branches": [
+                            {
+                                "status": "unresolved",
+                                "branch_id": "check:1",
+                                "path_node_ids": ["N-C", "CV", "OPC"],
+                                "path_node_classes": ["equipment_nozzle", "check_valve", "off_or_on_page_connector"],
+                            }
+                        ],
+                    },
+                    {
+                        "equipment_tag": "OLAA10 BB001",
+                        "source_component": "57512",
+                        "branches": [
+                            {
+                                "status": "unresolved",
+                                "branch_id": "57512:1",
+                                "path_node_ids": ["N1", "RV", "T1", "J1", "S1", "END"],
+                                "path_node_classes": ["equipment_nozzle", "pressure_or_vacuum_relief_valve", "tee", "junction", "silencer", "null_node"],
+                            },
+                            {
+                                "status": "unresolved",
+                                "branch_id": "57512:2",
+                                "path_node_ids": ["N1", "RV", "T1", "J2", "T2", "N2"],
+                                "path_node_classes": ["equipment_nozzle", "pressure_or_vacuum_relief_valve", "tee", "junction", "tee", "equipment_nozzle"],
+                            },
+                        ],
+                    },
+                    {
+                        "equipment_tag": "OLAA10 BB001",
+                        "source_component": "77880",
+                        "branches": [
+                            {
+                                "status": "unresolved",
+                                "branch_id": "77880:1",
+                                "path_node_ids": ["N2", "T2", "S1", "J1"],
+                                "path_node_classes": ["equipment_nozzle", "tee", "silencer", "junction"],
+                            },
+                            {
+                                "status": "unresolved",
+                                "branch_id": "77880:2",
+                                "path_node_ids": ["N2", "T2", "S1", "END"],
+                                "path_node_classes": ["equipment_nozzle", "tee", "silencer", "null_node"],
+                            },
+                            {
+                                "status": "unresolved",
+                                "branch_id": "77880:3",
+                                "path_node_ids": ["N2", "T2", "J2", "T1", "RV", "N1"],
+                                "path_node_classes": ["equipment_nozzle", "tee", "junction", "tee", "pressure_or_vacuum_relief_valve", "equipment_nozzle"],
+                            },
+                        ],
+                    },
+                ],
+                "debug": {},
+            },
+            config=None,
+        )
+
+        obligations = data["isolation_obligations"]
+        self.assertEqual(obligations["summary"]["process_obligation_count"], 1)
+        self.assertEqual(obligations["summary"]["unresolved_count"], 1)
+        self.assertEqual(obligations["summary"]["relief_context_count"], 5)
+        self.assertEqual(obligations["summary"]["relief_source_count"], 2)
+        relief_items = [item for item in obligations["items"] if item["source_type"] == "relief_context"]
+        self.assertTrue(all(item["status"] == "context" for item in relief_items))
+        self.assertEqual({device for item in relief_items for device in item["relief_device_ids"]}, {"RV"})
+
     def test_electrical_signal_line_is_context(self):
         data = analyze_isolation_obligations(
             {

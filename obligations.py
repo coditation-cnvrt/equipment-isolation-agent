@@ -5,6 +5,10 @@ from domain.topology import PROCESS_LINE_CLASSES as HILT_PROCESS_LINE_CLASSES
 from domain.topology import normalize_tag
 
 
+RELIEF_DEVICE_CLASS_TOKENS = ("pressure_or_vacuum_relief", "pressure_relief", "vacuum_relief", "safety_relief")
+OFF_PAGE_CONNECTOR_CLASS = "off_or_on_page_connector"
+
+
 def analyze_isolation_obligations(candidate_data, config):
     """Build deterministic isolation obligations for each process boundary source.
 
@@ -24,8 +28,10 @@ def analyze_isolation_obligations(candidate_data, config):
     pool_by_source = _pool_by_source(candidate_pool)
     items = []
     seen_sources = set()
+    hilt_branch_obligations = candidate_data.get("hilt_branch_obligations") or []
+    relief_context_branches = _relief_context_branch_keys(hilt_branch_obligations)
 
-    for source in candidate_data.get("hilt_branch_obligations") or []:
+    for source in hilt_branch_obligations:
         source_key = _source_key_from_item(
             {
                 "equipment_tag": source.get("equipment_tag"),
@@ -36,28 +42,46 @@ def analyze_isolation_obligations(candidate_data, config):
         if not source_key:
             continue
         seen_sources.add(source_key)
-        for branch in source.get("branches") or []:
+        for branch_index, branch in enumerate(source.get("branches") or []):
             valve = branch.get("valve") or {}
             selected_for_branch = [str(valve.get("valve_id"))] if branch.get("status") == ObligationStatus.ISOLATED.value and valve.get("valve_id") else []
             manual_candidates = []
+            relief_context = _branch_key(source, branch, branch_index) in relief_context_branches
+            source_type = SourceType.RELIEF_CONTEXT if relief_context else SourceType.PROCESS
+            status = ObligationStatus.CONTEXT.value if relief_context else (branch.get("status") or ObligationStatus.UNRESOLVED.value)
+            path_ids = branch.get("path_node_ids") or []
+            path_classes = branch.get("path_node_classes") or []
             items.append(
                 {
                     "equipment_tag": source_key[0],
                     "source_component": source_key[1],
                     "source_component_tag": source.get("source_component_tag") or source_key[1],
                     "source_visual_id": source.get("source_visual_id"),
-                    "source_type": SourceType.PROCESS.value,
-                    "status": branch.get("status") or ObligationStatus.UNRESOLVED.value,
+                    "source_type": source_type.value,
+                    "status": status,
                     "selected_candidate_ids": selected_for_branch,
                     "manual_candidates": manual_candidates,
                     "manual_candidate_count": len(manual_candidates),
                     "branch_id": branch.get("branch_id"),
                     "branch_index": branch.get("branch_index"),
-                    "branch_path_node_ids": branch.get("path_node_ids") or [],
-                    "branch_path_node_classes": branch.get("path_node_classes") or [],
+                    "branch_path_node_ids": path_ids,
+                    "branch_path_node_classes": path_classes,
                     "branch_context_devices": branch.get("context_devices") or [],
                     **({"terminal_node": branch["terminal_node"]} if branch.get("terminal_node") else {}),
-                    "basis": branch.get("basis") or "HILT branch-level process isolation obligation",
+                    **(
+                        {
+                            "relief_role": "protective_relief_or_discharge_context",
+                            "relief_device_ids": _relief_device_ids(path_ids, path_classes),
+                            "requires_relief_verification": True,
+                        }
+                        if relief_context
+                        else {}
+                    ),
+                    "basis": (
+                        "connected HILT branch network contains an explicit pressure/vacuum relief device and no off-page process connector; treat as relief context pending safe-discharge and zero-energy verification"
+                        if relief_context
+                        else branch.get("basis") or "HILT branch-level process isolation obligation"
+                    ),
                 }
             )
 
@@ -134,6 +158,7 @@ def analyze_isolation_obligations(candidate_data, config):
         )
 
     process_items = [item for item in items if item.get("source_type") == SourceType.PROCESS.value]
+    relief_items = [item for item in items if item.get("source_type") == SourceType.RELIEF_CONTEXT.value]
     unresolved_items = [item for item in process_items if item.get("status") == ObligationStatus.UNRESOLVED.value]
     manual_candidate_count = sum(len(item.get("manual_candidates") or []) for item in items)
     result = {
@@ -145,6 +170,8 @@ def analyze_isolation_obligations(candidate_data, config):
             "isolated_count": sum(1 for item in process_items if item.get("status") == ObligationStatus.ISOLATED.value),
             "unresolved_count": len(unresolved_items),
             "context_count": sum(1 for item in items if item.get("status") == ObligationStatus.CONTEXT.value),
+            "relief_context_count": len(relief_items),
+            "relief_source_count": len({item.get("source_component") for item in relief_items if item.get("source_component")}),
             "manual_candidate_count": manual_candidate_count,
         },
         "debug": {
@@ -154,6 +181,70 @@ def analyze_isolation_obligations(candidate_data, config):
         },
     }
     return {**candidate_data, "isolation_obligations": result}
+
+
+def _relief_context_branch_keys(sources):
+    """Return unresolved branch keys belonging to a connected relief-only network.
+
+    Connectivity is established only from exact HILT node IDs. A component must
+    contain an explicitly classified relief device and must not reach an off-page
+    connector. Visual labels such as "vent to atmosphere" are not used as proof.
+    """
+    rows = []
+    for source in sources or []:
+        for branch_index, branch in enumerate(source.get("branches") or []):
+            if branch.get("status") != ObligationStatus.UNRESOLVED.value:
+                continue
+            ids = {str(value) for value in branch.get("path_node_ids") or [] if value}
+            classes = {_norm(value) for value in branch.get("path_node_classes") or [] if value}
+            if ids:
+                rows.append({"key": _branch_key(source, branch, branch_index), "ids": ids, "classes": classes})
+
+    components = []
+    remaining = list(rows)
+    while remaining:
+        component = [remaining.pop(0)]
+        node_ids = set(component[0]["ids"])
+        changed = True
+        while changed:
+            changed = False
+            for row in list(remaining):
+                if node_ids & row["ids"]:
+                    remaining.remove(row)
+                    component.append(row)
+                    node_ids.update(row["ids"])
+                    changed = True
+        components.append(component)
+
+    result = set()
+    for component in components:
+        classes = set().union(*(row["classes"] for row in component))
+        has_relief = any(_is_relief_device_class(value) for value in classes)
+        reaches_off_page = OFF_PAGE_CONNECTOR_CLASS in classes
+        if has_relief and not reaches_off_page:
+            result.update(row["key"] for row in component)
+    return result
+
+
+def _branch_key(source, branch, branch_index):
+    return (
+        str(source.get("equipment_tag") or ""),
+        str(source.get("source_component") or source.get("source_component_tag") or ""),
+        str(branch.get("branch_id") or branch_index),
+    )
+
+
+def _is_relief_device_class(value):
+    normalized = _norm(value)
+    return any(token in normalized for token in RELIEF_DEVICE_CLASS_TOKENS)
+
+
+def _relief_device_ids(path_ids, path_classes):
+    return [
+        str(node_id)
+        for node_id, entity_class in zip(path_ids or [], path_classes or [])
+        if node_id and _is_relief_device_class(entity_class)
+    ]
 
 
 def _pool_by_source(candidate_pool):

@@ -25,6 +25,7 @@ class FlowRole(StringEnum):
 
 class SourceType(StringEnum):
     PROCESS = "process"
+    RELIEF_CONTEXT = "relief_context"
     INSTRUMENT_CONTEXT = "instrument_context"
 
 

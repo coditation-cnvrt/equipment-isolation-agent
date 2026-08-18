@@ -470,6 +470,28 @@ class IsolationPolicyTests(unittest.TestCase):
         self.assertEqual([item["candidate_id"] for item in selected], ["manual"])
         self.assertEqual(debug["bbox_unselected_source_component_count"], 0)
 
+    def test_relief_context_is_excluded_from_process_boundary_coverage(self):
+        data = build_evidence(
+            {
+                "candidates": [],
+                "debug": {},
+                "isolation_obligations": {
+                    "status": "completed",
+                    "items": [
+                        {"source_type": "process", "status": "unresolved", "source_component": "P1"},
+                        {"source_type": "relief_context", "status": "context", "source_component": "R1", "relief_device_ids": ["RV1"]},
+                    ],
+                },
+            },
+            RunConfig(equipment_tag="T-1"),
+        )
+
+        evidence = data["evidence_state"]
+        self.assertEqual(evidence["expected_boundary_count"], 1)
+        self.assertEqual(evidence["missing_boundary_count"], 1)
+        self.assertEqual(len(evidence["unresolved_isolation_obligations"]), 1)
+        self.assertEqual([item["source_component"] for item in evidence["relief_context_obligations"]], ["R1"])
+
     def test_selected_conditional_candidate_without_barrier_is_not_isolated(self):
         candidate = find_candidates(_boundary_with_candidate("undefined_valve"), IsolationPolicy())["candidates"][0]
         data = build_evidence({"candidates": [candidate], "debug": {}}, RunConfig(equipment_tag="T-1"))

@@ -111,6 +111,33 @@ class ReliefAndSchemeTests(unittest.TestCase):
         self.assertEqual(scheme["barrier_ids"], ["V1", "V2"])
         self.assertNotIn("unverified_additional_blocks", scheme)
 
+    def test_pressure_vacuum_relief_on_uncovered_obligation_is_detected(self):
+        source = data(
+            nodes=[node("N1", "equipment_nozzle"), node("RV1", "pressure_or_vacuum_relief_valve", tag="OLAA10 AA605")],
+            links=[link("N1", "RV1")],
+            candidates=[],
+        )
+        source["isolation_obligations"] = {
+            "status": "completed",
+            "items": [
+                {
+                    "source_type": "relief_context",
+                    "branch_id": "57512:branch:1",
+                    "relief_device_ids": ["RV1"],
+                }
+            ],
+        }
+
+        result = analyze_isolation_schemes_and_relief(source, RunConfig(equipment_tag="OLAA10 BB001"))
+
+        relief = result["relief_candidates"]["items"]
+        self.assertEqual(len(relief), 1)
+        self.assertEqual(relief[0]["id"], "RV1")
+        self.assertEqual(relief[0]["tag"], "OLAA10 AA605")
+        self.assertEqual(relief[0]["relief_type"], "protective_relief")
+        self.assertFalse(relief[0]["accepted_as_isolation_barrier"])
+        self.assertTrue(relief[0]["requires_safe_discharge_verification"])
+
     def test_instrument_inside_envelope_is_not_relief_candidate(self):
         result = analyze_isolation_schemes_and_relief(
             data(

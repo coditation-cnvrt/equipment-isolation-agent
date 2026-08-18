@@ -84,6 +84,7 @@ def build_evidence(candidate_data, config):
         missing.append(f"{missing_boundary_count} equipment boundary path(s) do not have a selected isolation candidate.")
     unselected_sources = (candidate_data.get("debug") or {}).get("bbox_unselected_source_components") or []
     unresolved_obligations = _unresolved_obligations(obligations)
+    relief_context_obligations = _relief_context_obligations(obligations)
     context_instruments = candidate_data.get("context_instruments") or (candidate_data.get("debug") or {}).get("context_instruments") or []
     boundary_context_sources = candidate_data.get("boundary_context_sources") or context_instruments
     if unselected_sources and (obligations.get("status") != "completed"):
@@ -94,7 +95,7 @@ def build_evidence(candidate_data, config):
         missing.append(f"Unresolved process isolation obligation(s): {labels}. Field/UI resolution is required.")
 
     evidence_state = {
-        "code_version": "local_evidence_state_2026-06-29_v1",
+        "code_version": "local_evidence_state_2026-08-18_v2",
         "context": candidate_data.get("context") or config.context,
         "work_scope": config.work_scope.__dict__,
         "candidate_count": len(candidates),
@@ -106,6 +107,7 @@ def build_evidence(candidate_data, config):
         "context_instruments": context_instruments,
         "isolation_obligations": obligations,
         "unresolved_isolation_obligations": unresolved_obligations,
+        "relief_context_obligations": relief_context_obligations,
         "candidate_summaries": summaries,
         "barrier_candidate_ids": barrier_ids,
         "positive_candidate_ids": positive_ids,
@@ -152,6 +154,16 @@ def _obligation_counts(obligations):
         "covered": sum(1 for item in process_items if item.get("status") == ObligationStatus.ISOLATED.value),
         "missing": sum(1 for item in process_items if item.get("status") == ObligationStatus.UNRESOLVED.value),
     }
+
+
+def _relief_context_obligations(obligations):
+    if (obligations or {}).get("status") != "completed":
+        return []
+    return [
+        item
+        for item in obligations.get("items") or []
+        if item.get("source_type") == SourceType.RELIEF_CONTEXT.value
+    ]
 
 
 def _unresolved_obligations(obligations):
