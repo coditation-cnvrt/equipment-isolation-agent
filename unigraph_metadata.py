@@ -43,10 +43,11 @@ def enrich_config_from_unigraph(config):
 
     debug["project"] = _project_summary(project)
     if config.cnvrt_project_id:
-        mapped_projects = _safe_get_json(
-            client,
-            f"/api/projects/by-cnvrt?cnvrt_project_id={config.cnvrt_project_id}",
-        )
+        mapping_path = f"/api/projects/by-cnvrt?cnvrt_project_id={config.cnvrt_project_id}"
+        if config.collection_id:
+            mapping_path += f"&cnvrt_collection_id={config.collection_id}"
+        debug["cnvrt_mapping_path"] = mapping_path
+        mapped_projects = _safe_get_json(client, mapping_path)
         if isinstance(mapped_projects, list):
             debug["cnvrt_project_matches"] = [_project_summary(item) for item in mapped_projects]
             if mapped_projects and project_id not in {str(item.get("id")) for item in mapped_projects}:

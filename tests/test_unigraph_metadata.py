@@ -29,6 +29,9 @@ class UnigraphMetadataTests(unittest.TestCase):
                 {"id": 13, "name": "Project 13", "cnvrt_project_id": 277},
                 {"id": 15, "name": "Project 15", "cnvrt_project_id": 277},
             ],
+            "/api/projects/by-cnvrt?cnvrt_project_id=277&cnvrt_collection_id=206": [
+                {"id": 15, "name": "Project 15", "cnvrt_project_id": 277},
+            ],
             "/api/projects/15/collections": [
                 {"id": 57, "name": "Test", "cnvrt_collection_id": 206, "export_type": "project_export"}
             ],
@@ -63,7 +66,28 @@ class UnigraphMetadataTests(unittest.TestCase):
         self.assertEqual(debug["status"], "completed")
         self.assertEqual(config.job_ids_by_name["PID-0134-1"], "2152")
         self.assertEqual(config.job_ids_by_name["Dadon-2"], "2483")
+        self.assertIn("/api/projects/by-cnvrt?cnvrt_project_id=277&cnvrt_collection_id=206", FakePlant360Client.paths)
         self.assertIn("/api/projects/15/pnids/223/direction-review", FakePlant360Client.paths)
+
+    def test_collection_export_project_is_validated_with_collection_scope(self):
+        FakePlant360Client.responses.update(
+            {
+                "/api/projects/20": {"id": 20, "name": "277-Aker"},
+                "/api/projects/by-cnvrt?cnvrt_project_id=277&cnvrt_collection_id=206": [
+                    {"id": 20, "name": "277-Aker", "cnvrt_project_id": 277}
+                ],
+                "/api/projects/20/collections": [
+                    {"id": 74, "name": "Test", "cnvrt_collection_id": 206, "export_type": "collection_export"}
+                ],
+                "/api/projects/20/collections/74/pnids": [],
+            }
+        )
+
+        with patch("unigraph_metadata.Plant360Client", FakePlant360Client):
+            _config, debug = enrich_config_from_unigraph(self.config(project_id="20"))
+
+        self.assertEqual(debug["status"], "completed")
+        self.assertEqual(debug["selected_collection"]["id"], "74")
 
     def test_wrong_unigraph_project_for_cnvrt_project_is_fatal(self):
         with patch("unigraph_metadata.Plant360Client", FakePlant360Client):
