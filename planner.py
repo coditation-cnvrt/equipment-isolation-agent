@@ -3,6 +3,7 @@ SAFETY_CRITICAL_CHECKS = {
     "find_blinds_spades_flanges",
     "find_bleeds_vents_drains",
     "find_pressure_indicators",
+    "confirm_zero_pressure",
 }
 
 
@@ -18,7 +19,11 @@ def plan_requests(evidence_data, config):
     }
     if not evidence.get("verification_candidate_ids"):
         checks.append(_check("find_bleeds_vents_drains", "Find stored-energy release points for proving zero or safe energy.", args, "high", _relief_targets(evidence_data)))
-        checks.append(_check("find_pressure_indicators", "Find pressure gauges, pressure indicators, or approved test points near isolated sections.", args, "high", _pressure_targets(evidence_data)))
+        pressure_targets = _pressure_targets(evidence_data)
+        if pressure_targets:
+            checks.append(_check("confirm_zero_pressure", "Use the located pressure indicator to confirm zero gauge pressure (or the site-approved safe threshold), a stable hold, and no pressure reaccumulation.", args, "high", pressure_targets))
+        else:
+            checks.append(_check("find_pressure_indicators", "Find pressure gauges, pressure indicators, or approved test points near isolated sections.", args, "high"))
     if config.work_scope.requires_positive_isolation and not evidence.get("positive_candidate_ids"):
         checks.append(_check("find_blinds_spades_flanges", "Work scope requires positive isolation evidence.", args, "high"))
     checks.append(_check("find_bypass_paths", "Check for bypasses or alternate routes around selected barriers.", args, "medium", _topology_review_targets(evidence_data)))
@@ -176,9 +181,10 @@ def _pressure_targets(data):
                 "entity_class": item.get("entity_class"),
                 "tag": item.get("tag"),
                 "bbox": item.get("bbox") or [],
-                "role": "zero_energy_verification_support",
+                "role": "zero_pressure_verification_point",
                 "basis": item.get("verification_note") or item.get("relevance_basis"),
-                "acceptance": "approved_method_confirmation_required",
+                "verification_instruction": f"Use {item.get('tag') or entity_id} to confirm pressure reaches zero gauge (or the site-approved safe threshold), remains stable for the required hold period, and does not reaccumulate.",
+                "acceptance": "zero_reading_and_instrument_suitability_confirmation_required",
                 "path_node_ids": [],
             }
         )

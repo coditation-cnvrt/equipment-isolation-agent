@@ -28,7 +28,8 @@ function reasonLabel(reason: AssuranceReason): string {
   if (reason.code === 'evidence_check_incomplete') {
     const labels: Record<string, string> = {
       find_bleeds_vents_drains: 'Stored-energy release',
-      find_pressure_indicators: 'Zero-energy verification',
+      find_pressure_indicators: 'Locate pressure verification point',
+      confirm_zero_pressure: 'Confirm zero pressure',
       find_bypass_paths: 'Bypass and alternate routes',
       find_blinds_spades_flanges: 'Positive-isolation evidence',
     }

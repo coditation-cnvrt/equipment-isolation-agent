@@ -93,7 +93,7 @@ def build_loto_procedure(validation_data: dict, config, isolation_order: list | 
         "secondary_energy_context": secondary_context,
         "detected_isolation_schemes": detected_schemes,
         "relief_candidates": relief_candidates,
-        "open_gaps": _open_gaps(missing_evidence, relief_devices, verify_devices),
+        "open_gaps": _open_gaps(missing_evidence, relief_devices, verify_devices, instrument_checks),
     }
     return procedure
 
@@ -157,7 +157,7 @@ def _ordered_steps(phases: list) -> list:
                 for device in verifies:
                     n += 1
                     steps.append(_step(n, phase_num, ref, title, f"Verify zero energy at {device.get('tag') or device.get('uuid')} (gauge/indicator/test point).", device))
-            else:
+            elif not (phase.get("instrument_checks") or []):
                 n += 1
                 steps.append(_step(n, phase_num, ref, title, "Verify isolation & de-energization. FIELD GAP: no gauge/test point on P&ID -- field-verify zero energy.", field_gap=True))
             for check in phase.get("instrument_checks") or []:
@@ -453,7 +453,8 @@ def _phase_5_stored_energy(relief_devices, evidence, instrument_checks):
 
 
 def _phase_6_verification(verify_devices, evidence, instrument_checks):
-    has_verify = bool(verify_devices)
+    instrument_verification = _zero_pressure_instrument_checks(instrument_checks)
+    has_verify = bool(verify_devices or instrument_verification)
     return {
         "phase": 6,
         "ref": "1910.147(d)(6)",
@@ -464,7 +465,7 @@ def _phase_6_verification(verify_devices, evidence, instrument_checks):
             "NO pressure gauge / indicator / test point was found on the P&ID near the isolated section. "
             "Field-verify zero energy by an approved method before starting work.",
         ],
-        "instrument_checks": instrument_checks.get("verification_before_work") or [],
+        "instrument_checks": instrument_verification,
     }
 
 
@@ -483,11 +484,24 @@ def _release_note(instrument_checks):
     )
 
 
-def _open_gaps(missing_evidence, relief_devices, verify_devices):
+def _zero_pressure_instrument_checks(instrument_checks):
+    checks = (instrument_checks or {}).get("verification_before_work") or []
+    result = []
+    for check in checks:
+        variable = str(check.get("measured_variable") or "").lower()
+        tag = str(check.get("tag") or "").upper().replace("-", "")
+        instrument_type = str(check.get("instrument_type") or "").lower()
+        if variable == "pressure" or tag.startswith(("PI", "PG")) or "pressure" in instrument_type:
+            result.append(check)
+    return result
+
+
+def _open_gaps(missing_evidence, relief_devices, verify_devices, instrument_checks=None):
     gaps = []
     if not relief_devices:
         gaps.append("stored_energy_relief_unknown")
-    if not verify_devices:
+    instrument_verification = _zero_pressure_instrument_checks(instrument_checks)
+    if not verify_devices and not instrument_verification:
         gaps.append("verification_method_unknown")
     if missing_evidence:
         gaps.append("deterministic_missing_evidence")

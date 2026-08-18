@@ -7,6 +7,7 @@ MISSING_BY_CHECK = {
     "find_blinds_spades_flanges": "Positive isolation evidence check is required but has not been completed by this local deterministic runner.",
     "find_bleeds_vents_drains": "Bleed, vent, or drain evidence check is required but has not been completed by this local deterministic runner.",
     "find_pressure_indicators": "Pressure gauge, pressure indicator, or test-point evidence check is required but has not been completed by this local deterministic runner.",
+    "confirm_zero_pressure": "A located pressure indicator must record zero gauge pressure (or the site-approved safe threshold), remain stable for the required hold period, and show no reaccumulation.",
 }
 
 

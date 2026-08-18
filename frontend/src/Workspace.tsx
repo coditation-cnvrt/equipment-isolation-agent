@@ -303,8 +303,7 @@ function Workspace({
     <div className="flex h-full min-h-0 w-full flex-col bg-white">
       <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-3">
         <div className="min-w-0">
-          <p className="font-mono text-[10px] tracking-[0.12em] text-slate-500">SELECTED HILT DRAWING</p>
-          <h2 className="mt-1 truncate text-base font-medium">{drawingName}</h2>
+          <h2 className="truncate text-base font-medium">{drawingName}</h2>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <span className="hidden font-mono text-[10px] text-slate-500 2xl:inline">UNIGRAPH {graphName}</span>

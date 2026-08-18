@@ -218,7 +218,7 @@ def _build_checks(instruments):
                 _check(
                     instrument,
                     "verification_support",
-                    f"Use {tag} as supporting indication only; field-verify zero energy by an approved method.",
+                    f"Use {tag} to verify pressure reaches zero gauge (or the site-approved safe threshold), remains stable for the required hold period, and does not reaccumulate; confirm the instrument is approved and fit for this verification.",
                 )
             )
         if "restoration_monitoring" in uses:

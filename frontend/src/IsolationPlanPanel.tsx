@@ -41,7 +41,8 @@ const CHECK_LABELS: Record<string, string> = {
   find_bypass_paths: 'Check for bypasses or alternate routes around the selected barriers.',
   find_blinds_spades_flanges: 'Confirm the positive-isolation devices required by the work scope.',
   find_bleeds_vents_drains: 'Confirm a bleed, vent, or drain for stored-energy release.',
-  find_pressure_indicators: 'Confirm a pressure indicator or approved zero-energy test point.',
+  find_pressure_indicators: 'Locate a pressure indicator or approved zero-energy test point.',
+  confirm_zero_pressure: 'Use the located pressure indicator to confirm zero pressure, a stable hold, and no reaccumulation.',
 }
 
 function reasonTitle(reason: AssuranceReason): string {
@@ -262,7 +263,7 @@ export default function IsolationPlanPanel({ run, plan, error, selectedPointId, 
               <h4 className={`text-xs font-semibold ${primaryReasonTone.heading}`}>{reasonTitle(reason)}</h4>
               {reason.boundary_component_id && <p className={`mt-0.5 font-mono text-[9px] ${primaryReasonTone.detail}`}>BOUNDARY SOURCE {reason.boundary_component_id}</p>}
               <p className={`mt-1 text-xs leading-5 ${primaryReasonTone.body}`}>{reasonDescription(reason)}</p>
-              {evidenceTargets.length > 0 && <div className="mt-2 border border-amber-200 bg-white/70 p-2"><p className="font-mono text-[9px] font-semibold text-amber-900">DRAWING EVIDENCE CANDIDATES · {evidenceTargets.length}</p><ul className="mt-1 space-y-1 text-[10px] leading-4 text-amber-950">{evidenceTargets.slice(0, 6).map((target, index) => <li key={`${target.entity_id}-${index}`}>• {target.tag || humanize(target.role || target.entity_class || target.entity_id)} · {humanize(target.acceptance || 'review required')}</li>)}</ul>{evidenceTargets.length > 6 && <p className="mt-1 text-[9px] text-amber-800">+ {evidenceTargets.length - 6} additional topology paths</p>}</div>}
+              {evidenceTargets.length > 0 && <div className="mt-2 border border-amber-200 bg-white/70 p-2"><p className="font-mono text-[9px] font-semibold text-amber-900">DRAWING EVIDENCE CANDIDATES · {evidenceTargets.length}</p><ul className="mt-1 space-y-1 text-[10px] leading-4 text-amber-950">{evidenceTargets.slice(0, 6).map((target, index) => <li key={`${target.entity_id}-${index}`}><span>• {target.tag || humanize(target.role || target.entity_class || target.entity_id)} · {humanize(target.acceptance || 'review required')}</span>{target.verification_instruction && <span className="mt-0.5 block pl-2 text-amber-800">{target.verification_instruction}</span>}</li>)}</ul>{evidenceTargets.length > 6 && <p className="mt-1 text-[9px] text-amber-800">+ {evidenceTargets.length - 6} additional topology paths</p>}</div>}
               {reason.path_node_classes?.length ? <p className={`mt-2 text-[10px] leading-4 ${primaryReasonTone.detail}`}><span className="font-semibold">Known path:</span> {reason.path_node_classes.map(humanize).join(' → ')}</p> : null}
               {(reason.encountered_devices?.length ?? 0) > 0 && <div className="mt-2 border border-red-200 bg-white/70 p-2"><p className="font-mono text-[9px] font-semibold text-red-800">ENCOUNTERED · NOT ACCEPTED AS ISOLATION</p><ul className="mt-1 space-y-1 text-[10px] leading-4 text-red-900">{reason.encountered_devices?.map((device) => <li key={device.entity_id}>• {device.tag || device.entity_id} · {humanize(device.entity_class || device.entity_type)} · context only under the configured isolation policy</li>)}</ul></div>}
               {reason.terminal?.display_text?.length ? <p className={`mt-1 text-[10px] leading-4 ${primaryReasonTone.detail}`}>Drawing label: {reason.terminal.display_text.join(' · ')}. Label shown for context only; it is not connectivity proof.</p> : null}

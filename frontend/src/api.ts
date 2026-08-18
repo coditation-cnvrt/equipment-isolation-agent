@@ -47,6 +47,7 @@ export type EvidenceTarget = {
   bbox?: number[]
   role?: string
   basis?: string | null
+  verification_instruction?: string
   acceptance?: string
   path_node_ids?: string[]
 }

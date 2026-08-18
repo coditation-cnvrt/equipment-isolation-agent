@@ -59,7 +59,8 @@ class PlannerDrawingEvidenceTests(unittest.TestCase):
 
         checks = {item["check_name"]: item for item in result["required_evidence_checks"]}
         self.assertEqual(checks["find_bleeds_vents_drains"]["evidence_targets"][0]["entity_id"], "drain-1")
-        self.assertEqual(checks["find_pressure_indicators"]["evidence_targets"][0]["entity_id"], "pi-1")
+        self.assertNotIn("find_pressure_indicators", checks)
+        self.assertEqual(checks["confirm_zero_pressure"]["evidence_targets"][0]["entity_id"], "pi-1")
         self.assertEqual(checks["find_bypass_paths"]["evidence_targets"][0]["path_node_ids"], ["nozzle-1", "valve-1"])
         self.assertTrue(all(check["status"] == "required" for check in checks.values()))
 
