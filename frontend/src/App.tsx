@@ -139,6 +139,8 @@ function App() {
   const [error, setError] = useState('')
   const didLoadProjects = useRef(false)
   const historicalNavigationLock = useRef(false)
+  const preloadedDrawingKey = useRef('')
+  const preloadedBBoxKey = useRef('')
 
   const selectedProject = projects.find((item) => item.id === projectId)
   const selectedCollection = collections.find((item) => item.id === collectionId)
@@ -201,6 +203,12 @@ function App() {
   }, [])
 
   useEffect(() => {
+    const bboxKey = selectedEquipment && drawingId ? `${drawingId}:${selectedEquipment.node_id}` : ''
+    if (bboxKey && preloadedBBoxKey.current === bboxKey) {
+      preloadedBBoxKey.current = ''
+      setBBoxLoading(false)
+      return
+    }
     if (!selectedEquipment || !drawingId) {
       setEquipmentBBox([])
       setBBoxLoading(false)
@@ -219,6 +227,12 @@ function App() {
 
   useEffect(() => {
     setDrawingSelection(null)
+    const drawingKey = projectId && drawingId ? `${projectId}:${drawingId}` : ''
+    if (drawingKey && preloadedDrawingKey.current === drawingKey) {
+      preloadedDrawingKey.current = ''
+      setDrawingLoading(false)
+      return
+    }
     if (!projectId || !drawingId) {
       setHiltGraph(null)
       setHiltSymbols([])
@@ -249,6 +263,7 @@ function App() {
   }, [drawingId, projectId])
 
   useEffect(() => {
+    if (historicalNavigationLock.current) return
     let active = true
     setSavedPlansLoading(true)
     setSavedPlansError('')
@@ -274,6 +289,7 @@ function App() {
   }, [collectionId, drawingId, projectId, selectedEquipment, unigraphProjectId])
 
   useEffect(() => {
+    if (historicalNavigationLock.current) return
     let active = true
     setPastRunsLoading(true)
     setPastRunsError('')
@@ -608,35 +624,62 @@ function App() {
     }
     setPastRunsLoading(true)
     setPastRunsError('')
+    setEquipmentLoading(true)
+    setDrawingLoading(true)
+    const selectedAssetId = String(context.selected_asset?.hilt_entity_id ?? '').trim()
+    const collectionName = String(context.collection_name ?? '')
+    const graphBundlePromise = getHiltGraph(context.job_id).then(async (graph) => {
+      try {
+        const symbols = await getHiltSymbols(getSymbolProjectId(graph, context.cnvrt_project_id!))
+        return { graph, symbols, error: '' }
+      } catch (reason) {
+        return {
+          graph,
+          symbols: [] as HiltSymbol[],
+          error: reason instanceof Error ? reason.message : 'The drawing loaded, but its symbol library did not.',
+        }
+      }
+    }).catch((reason: unknown) => ({
+      graph: null as HiltGraphInput | null,
+      symbols: [] as HiltSymbol[],
+      error: reason instanceof Error ? reason.message : 'Unable to load the HILT drawing.',
+    }))
     try {
-      const [nextCollections, nextDrawings, nextUniGraphProjects] = await Promise.all([
+      const [nextCollections, nextDrawings, nextUniGraphProjects, nextEquipment, graphBundle, result, bbox] = await Promise.all([
         getCollections(context.cnvrt_project_id),
         getDrawings(context.cnvrt_project_id, context.collection_id),
         getUniGraphProjects(context.cnvrt_project_id, context.collection_id),
+        getEquipment(context.cnvrt_project_id, context.collection_id, context.unigraph_project_id, collectionName),
+        graphBundlePromise,
+        getIsolationResult(run.run_id),
+        selectedAssetId ? getEquipmentBBox(context.job_id, selectedAssetId).catch(() => []) : Promise.resolve([]),
       ])
-      const collectionName = nextCollections.find((item) => item.id === context.collection_id)?.name ?? ''
-      setEquipmentLoading(true)
-      const nextEquipment = await getEquipment(context.cnvrt_project_id, context.collection_id, context.unigraph_project_id, collectionName)
+      const wantedTag = run.equipment_tag.trim().toLowerCase()
+      const nextSelectedEquipment = nextEquipment.find((item) => item.node_id === selectedAssetId)
+        ?? nextEquipment.find((item) => [item.tag, item.name].some((value) => value.trim().toLowerCase() === wantedTag))
+      preloadedDrawingKey.current = projectId !== context.cnvrt_project_id || drawingId !== context.job_id
+        ? `${context.cnvrt_project_id}:${context.job_id}`
+        : ''
+      preloadedBBoxKey.current = nextSelectedEquipment && selectedAssetId ? `${context.job_id}:${nextSelectedEquipment.node_id}` : ''
       setCollections(nextCollections)
       setDrawings(nextDrawings)
       setUnigraphProjects(nextUniGraphProjects)
       setEquipment(nextEquipment)
-      if (projectId !== context.cnvrt_project_id || drawingId !== context.job_id) {
-        setHiltGraph(null)
-        setHiltSymbols([])
-        setDrawingLoading(true)
-      }
+      setHiltGraph(graphBundle.graph)
+      setHiltSymbols(graphBundle.symbols)
+      setDrawingError(graphBundle.error)
+      setEquipmentBBox(bbox)
       setProjectId(context.cnvrt_project_id)
       setCollectionId(context.collection_id)
       setDrawingId(context.job_id)
       setUnigraphProjectId(context.unigraph_project_id)
-      setEquipmentId('')
-      setPendingHistoricalEquipmentTag(run.equipment_tag)
+      setEquipmentId(nextSelectedEquipment?.id ?? '')
+      setPendingHistoricalEquipmentTag('')
       setIntrusiveWork(context.work_scope?.intrusive_work ?? true)
       setHighRiskService(context.work_scope?.high_risk_service ?? true)
       setDrawingSelection(null)
-      setIsolationResult(null)
-      setIsolationError('')
+      setIsolationResult(result)
+      setIsolationError(nextSelectedEquipment ? '' : `The saved equipment “${run.equipment_tag}” is not present in the restored UniGraph.`)
       setSelectedIsolationPointId(null)
       setSelectedDownstreamImpactId(null)
       setSelectedAssuranceReasonId(null)
@@ -649,6 +692,8 @@ function App() {
       throw reason
     } finally {
       setEquipmentLoading(false)
+      setDrawingLoading(false)
+      setBBoxLoading(false)
       setPastRunsLoading(false)
     }
   }
@@ -675,8 +720,10 @@ function App() {
     setSavedPlansLoading(true)
     setSavedPlansError('')
     try {
-      const detail = await getIsolationPlan(plan.plan_id)
-      const run = await getIsolationRun(detail.latest_version.source_run.run_id)
+      const [detail, run] = await Promise.all([
+        getIsolationPlan(plan.plan_id),
+        getIsolationRun(sourceRunId),
+      ])
       const waitForContext = Boolean(run.request?.cnvrt_project_id && run.request.collection_id && run.request.job_id && run.request.unigraph_project_id)
       setHistoricalNavigation({ kind: 'plan', label: `${plan.plan_number} · v${plan.latest_version.version_no}`, runId: run.run_id, waitForContext })
       await restorePersistedRun(run, detail)

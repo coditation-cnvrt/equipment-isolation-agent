@@ -209,6 +209,7 @@ export type IsolationRunStatus = {
     job_name?: string
     cnvrt_project_id?: string
     collection_id?: string
+    collection_name?: string
     unigraph_project_id?: string
     selected_asset?: {
       hilt_entity_id: string
