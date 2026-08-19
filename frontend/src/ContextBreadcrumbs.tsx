@@ -9,6 +9,7 @@ type BreadcrumbItem = {
   placeholder: string
   options: SearchableSelectOption[]
   disabled?: boolean
+  loading?: boolean
   onChange: (value: string) => void
   onClear?: () => void
 }
@@ -23,6 +24,13 @@ function BreadcrumbPicker({ item, first }: { item: BreadcrumbItem; first: boolea
   const rootRef = useRef<HTMLDivElement>(null)
   const selected = item.options.find((option) => option.value === item.value)
   const filtered = item.options.filter((option) => option.searchText.toLowerCase().includes(query.trim().toLowerCase()))
+
+  useEffect(() => {
+    if (item.loading) {
+      setOpen(false)
+      setQuery('')
+    }
+  }, [item.loading])
 
   useEffect(() => {
     function closeOnOutsidePointer(event: PointerEvent) {
@@ -40,16 +48,20 @@ function BreadcrumbPicker({ item, first }: { item: BreadcrumbItem; first: boolea
 
   return <div className={`relative ${first ? '' : '-ml-2'}`} ref={rootRef}>
     <button
+      aria-busy={item.loading || undefined}
       aria-expanded={open}
-      className={`flex h-10 max-w-64 items-center bg-slate-100 text-left transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:text-slate-400 ${item.onClear && selected ? 'pr-11' : 'pr-7'} ${first ? 'pl-3' : 'pl-6'}`}
-      disabled={item.disabled}
+      className={`flex h-10 max-w-64 items-center bg-slate-100 text-left transition hover:bg-blue-50 disabled:text-slate-400 ${item.loading ? 'disabled:cursor-wait' : 'disabled:cursor-not-allowed'} ${item.onClear && selected ? 'pr-11' : 'pr-7'} ${first ? 'pl-3' : 'pl-6'}`}
+      disabled={item.disabled || item.loading}
       onClick={() => setOpen((current) => !current)}
       style={{ clipPath: first ? 'polygon(0 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 0 100%)' : 'polygon(0 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 0 100%, 12px 50%)' }}
       type="button"
     >
       <span className="min-w-0">
         <span className="block font-mono text-[8px] uppercase tracking-wide text-slate-400">{item.label}</span>
-        <span className={`block truncate text-xs ${selected ? 'font-medium text-slate-800' : 'font-medium text-blue-700'}`}>{selected?.label ?? item.placeholder}</span>
+        <span className={`flex items-center gap-1.5 truncate text-xs ${selected && !item.loading ? 'font-medium text-slate-800' : 'font-medium text-blue-700'}`}>
+          {item.loading && <span aria-hidden="true" className="inline-block size-3 shrink-0 animate-spin rounded-full border-2 border-blue-200 border-t-blue-700" />}
+          <span className="truncate">{item.loading ? `Loading ${item.label.toLowerCase()}…` : selected?.label ?? item.placeholder}</span>
+        </span>
       </span>
     </button>
     {item.onClear && selected && <button
@@ -81,7 +93,7 @@ function BreadcrumbPicker({ item, first }: { item: BreadcrumbItem; first: boolea
           key={option.value}
           onClick={() => choose(option.value)}
           type="button"
-        >{option.label}</button>) : <p className="px-2.5 py-3 text-xs text-slate-500">No matching options</p>}
+        >{option.label}</button>) : <p className="px-2.5 py-3 text-xs text-slate-500">{query.trim() ? 'No matching options' : `No ${item.label.toLowerCase()} options available`}</p>}
       </div>
     </div>}
   </div>
