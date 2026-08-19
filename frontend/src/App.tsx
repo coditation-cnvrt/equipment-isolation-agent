@@ -122,7 +122,7 @@ function IsolationRunOverlay({ submitting, run, completedTools }: { submitting: 
                 {index < RUN_TIMELINE.length - 1 && <span aria-hidden="true" className={`absolute left-1/2 top-2.5 h-0.5 w-full ${done ? 'bg-emerald-500' : 'bg-slate-200'}`} />}
                 <span className={`relative z-10 mx-auto flex size-5 items-center justify-center rounded-full border font-mono text-[9px] font-semibold ${done ? 'border-emerald-600 bg-emerald-600 text-white' : active ? 'border-blue-700 bg-blue-700 text-white ring-4 ring-blue-100' : 'border-slate-200 bg-white text-slate-400'}`}>{done ? '✓' : index + 1}</span>
                 <span className={`mx-auto mt-2 block max-w-24 text-[10px] leading-4 ${done ? 'font-medium text-slate-700' : active ? 'font-semibold text-blue-900' : 'text-slate-400'}`}>{item.label}</span>
-                {active && <span className="mt-1 block font-mono text-[8px] font-semibold text-blue-700">IN PROGRESS</span>}
+                <span aria-hidden={!active} className={`mt-1 block h-3 font-mono text-[8px] font-semibold ${active ? 'text-blue-700' : 'invisible'}`}>{active ? 'IN PROGRESS' : 'STATUS'}</span>
               </li>
             })}
           </ol>
