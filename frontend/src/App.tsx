@@ -65,6 +65,22 @@ const RUN_TIMELINE = [
   { label: 'LOTO sequence and final plan', tools: ['get_osha_guidance', 'build_loto_procedure', 'set_isolation_order', 'finalize_plan'], milestones: ['build_loto_procedure', 'finalize_plan'] },
 ]
 
+function ContextLoadingOverlay({ stage }: { stage: string }) {
+  return <div className="fixed inset-0 z-[105] flex items-center justify-center bg-slate-950/35 p-5 backdrop-blur-[2px]" role="status" aria-live="polite">
+    <div className="w-full max-w-sm border border-slate-300 bg-white p-6 shadow-2xl">
+      <div className="flex items-center gap-4">
+        <span aria-hidden="true" className="size-7 shrink-0 animate-spin rounded-full border-[3px] border-blue-200 border-t-blue-700 motion-reduce:animate-none" />
+        <div><p className="font-mono text-[10px] uppercase tracking-[0.14em] text-blue-700">Planning context</p><h2 className="mt-1 text-lg font-medium text-slate-950">Preparing workspace</h2></div>
+      </div>
+      <p className="mt-4 text-sm leading-6 text-slate-600">{stage}</p>
+      <div aria-label="Planning context loading" className="mt-5 h-1.5 overflow-hidden bg-blue-100" role="progressbar">
+        <div className="agent-progress-indeterminate h-full w-1/3 bg-blue-700" />
+      </div>
+      <p className="mt-4 text-xs leading-5 text-slate-500">Context actions will become available when the required authenticated data is ready.</p>
+    </div>
+  </div>
+}
+
 function IsolationRunOverlay({ submitting, run, completedTools }: { submitting: boolean; run: IsolationRunStatus | null; completedTools: string[] }) {
   const status = submitting ? 'Starting isolation analysis' : run?.status === 'queued' ? 'Waiting for an agent worker' : 'Isolation analysis in progress'
   const tool = run?.agent?.progress?.tool || ''
@@ -164,6 +180,7 @@ function App() {
   const [planSaveError, setPlanSaveError] = useState('')
   const [pendingHistoricalEquipmentTag, setPendingHistoricalEquipmentTag] = useState('')
   const [historicalNavigation, setHistoricalNavigation] = useState<{ kind: 'plan' | 'run'; label: string; runId: string; waitForContext: boolean } | null>(null)
+  const [initialBootstrapPending, setInitialBootstrapPending] = useState(true)
   const [loading, setLoading] = useState('projects')
   const [error, setError] = useState('')
   const didLoadProjects = useRef(false)
@@ -208,6 +225,19 @@ function App() {
   const selectedAssuranceReason = assuranceReasons.find((reason) => reason.reason_id === selectedAssuranceReasonId) ?? null
   const runInProgress = isolationRun?.status === 'queued' || isolationRun?.status === 'running'
   const historyDisabled = Boolean(historicalNavigation || runInProgress || loading || equipmentLoading || drawingLoading)
+  const contextLoadingStage = loading === 'projects'
+    ? 'Loading the projects available to your CNVRT account.'
+    : loading === 'collections'
+      ? 'Loading collections for the selected project.'
+      : loading === 'unigraph'
+        ? 'Loading drawings and UniGraph exports for the selected collection.'
+        : equipmentLoading
+          ? 'Loading equipment from the selected UniGraph.'
+          : drawingLoading
+            ? 'Loading the selected equipment’s authoritative source drawing.'
+            : initialBootstrapPending
+              ? 'Loading saved plans and recent isolation runs.'
+              : ''
   const historyDisabledReason = historicalNavigation
     ? `Opening ${historicalNavigation.label}…`
     : runInProgress
@@ -234,6 +264,11 @@ function App() {
     didLoadProjects.current = true
     void loadProjects()
   }, [])
+
+  useEffect(() => {
+    if (!initialBootstrapPending || loading || savedPlansLoading || pastRunsLoading) return
+    setInitialBootstrapPending(false)
+  }, [initialBootstrapPending, loading, pastRunsLoading, savedPlansLoading])
 
   useEffect(() => {
     const bboxKey = selectedEquipment && drawingId ? `${drawingId}:${selectedEquipment.node_id}` : ''
@@ -457,6 +492,22 @@ function App() {
     } finally {
       setLoading('')
     }
+  }
+
+  function retryPlanningContext() {
+    if (!projectId) {
+      void loadProjects()
+      return
+    }
+    if (!collectionId) {
+      void selectProject(projectId)
+      return
+    }
+    if (!unigraphProjectId) {
+      void selectCollection(collectionId)
+      return
+    }
+    void selectUniGraph(unigraphProjectId)
   }
 
   async function selectProject(nextProjectId: string) {
@@ -895,7 +946,8 @@ function App() {
   }
 
   return (
-    <div aria-busy={Boolean(historicalNavigation || isolationSubmitting || runInProgress)} className="h-screen overflow-hidden bg-[#f7f8fa] text-slate-950">
+    <div aria-busy={Boolean(historicalNavigation || isolationSubmitting || runInProgress || contextLoadingStage)} className="h-screen overflow-hidden bg-[#f7f8fa] text-slate-950">
+      {!historicalNavigation && !isolationSubmitting && !runInProgress && contextLoadingStage && <ContextLoadingOverlay stage={contextLoadingStage} />}
       {!historicalNavigation && (isolationSubmitting || runInProgress) && <IsolationRunOverlay completedTools={completedRunTools} run={isolationRun} submitting={isolationSubmitting} />}
       {historicalNavigation && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/30 backdrop-blur-[2px]" role="status">
         <div className="w-80 border border-slate-300 bg-white p-5 shadow-2xl">
@@ -933,8 +985,10 @@ function App() {
             graphLabel={selectedUniGraph?.name ?? ''}
             onOpenPlan={(plan) => { void openSavedPlan(plan) }}
             onOpenRun={(run) => { void openPastRun(run) }}
+            onRetryContext={retryPlanningContext}
             pastRuns={pastRuns}
-            plansError={savedPlansError || error}
+            contextError={error}
+            plansError={savedPlansError}
             plansLoading={savedPlansLoading}
             projectLabel={selectedProject?.name ?? ''}
             runsError={pastRunsError}

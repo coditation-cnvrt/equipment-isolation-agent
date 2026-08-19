@@ -14,12 +14,14 @@ type PlanningSidebarProps = {
   pastRuns: IsolationRunStatus[]
   plansLoading: boolean
   runsLoading: boolean
+  contextError: string
   plansError: string
   runsError: string
   historyDisabled: boolean
   historyDisabledReason: string
   onOpenPlan: (plan: SavedIsolationPlan) => void
   onOpenRun: (run: IsolationRunStatus) => void
+  onRetryContext: () => void
 }
 
 export default function PlanningSidebar({
@@ -31,12 +33,14 @@ export default function PlanningSidebar({
   pastRuns,
   plansLoading,
   runsLoading,
+  contextError,
   plansError,
   runsError,
   historyDisabled,
   historyDisabledReason,
   onOpenPlan,
   onOpenRun,
+  onRetryContext,
 }: PlanningSidebarProps) {
   const steps = [
     { label: 'Project', value: projectLabel },
@@ -51,6 +55,7 @@ export default function PlanningSidebar({
       <p className="font-mono text-[10px] tracking-[0.12em] text-slate-500">PLANNING CONTEXT</p>
       <h1 className="mt-2 text-lg font-medium">{nextStep ? `Choose ${nextStep.label.toLowerCase()}` : 'Context ready'}</h1>
       <p className="mt-2 text-xs leading-5 text-slate-600">Choose a UniGraph and then select equipment. Its exact source P&amp;ID will load automatically.</p>
+      {contextError && <div className="mt-3 border-l-2 border-red-500 bg-red-50 p-2 text-[10px] leading-4 text-red-900" role="alert"><p>{contextError}</p><button className="mt-2 border border-red-400 bg-white px-2 py-1 font-mono text-[9px] font-semibold hover:bg-red-100" onClick={onRetryContext} type="button">RETRY CONTEXT</button></div>}
     </div>
 
     <section className="border-b border-slate-300 p-5">
