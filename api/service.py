@@ -14,12 +14,11 @@ from urllib.parse import urlparse
 from agent.loop import DEFAULT_MODEL
 from agent.runner import AgentRunResult, run_agent_pipeline
 from api_client import Plant360Client
-from config import ApiConfig, DEFAULT_UNIGRAPH_API_BASE_URL, JOB_IDS_BY_NAME
+from config import ApiConfig, DEFAULT_UNIGRAPH_API_BASE_URL
 from domain.hilt_geometry import extract_symbols, symbol_bbox
 from domain.identity import PlanningContext, SelectedAsset, SelectionSource
 from pipeline.config_builder import build_run_config
-from pipeline.equipment import add_equipment_jobs, add_equipment_jobs_from_metadata, list_equipment
-from pipeline.stages import resolve_project_metadata
+from pipeline.equipment import list_equipment
 
 
 _STLM_BBOX_CACHE_TTL_SECONDS = 300
@@ -96,11 +95,26 @@ def config_from_equipment_request(request, auth_token: str):
 
 def list_project_equipment(request, auth_token: str):
     config = config_from_equipment_request(request, auth_token)
-    config, _metadata_debug = resolve_project_metadata(config)
-    items = list_equipment(config.graph, request.limit)
-    add_equipment_jobs_from_metadata(items, config.job_ids_by_name)
-    add_equipment_jobs(items, config.api, config.job_ids_by_name or JOB_IDS_BY_NAME)
-    return items
+    # Equipment vertices already carry authoritative ``pnid:job:<id>`` references.
+    # Validate the explicit project/collection mapping with one indexed lookup;
+    # loading every P&ID direction-review record here made this selector an N+1
+    # request and was unrelated to listing equipment.
+    client = Plant360Client(
+        ApiConfig(
+            base_url=config.unigraph_api_base_url,
+            auth_token=auth_token,
+            verify_ssl=config.api.verify_ssl,
+        )
+    )
+    mapped_projects = client.get_json(
+        f"/api/projects/by-cnvrt?cnvrt_project_id={request.cnvrt_project_id}"
+        f"&cnvrt_collection_id={request.collection_id}"
+    )
+    if not isinstance(mapped_projects, list) or str(request.unigraph_project_id) not in {
+        str(item.get("id")) for item in mapped_projects if isinstance(item, dict)
+    }:
+        raise ValueError("Selected UniGraph project is not mapped to the CNVRT project and collection")
+    return list_equipment(config.graph, request.limit)
 
 
 def list_cnvrt_projects(auth_token: str) -> list[dict[str, str]]:

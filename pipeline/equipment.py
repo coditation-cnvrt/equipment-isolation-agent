@@ -46,7 +46,8 @@ def _job_id_from_pnid_reference(value):
 
 
 def add_equipment_jobs(items, api_config, job_ids_by_name=None):
-    if not items or not api_config.auth_token:
+    unresolved_items = [item for item in items if not item.get("job_id")]
+    if not unresolved_items or not api_config.auth_token:
         return items
 
     node_to_job = {}
@@ -62,9 +63,7 @@ def add_equipment_jobs(items, api_config, job_ids_by_name=None):
                 if key:
                     node_to_job.setdefault(key, (job_name, job_id))
 
-    for item in items:
-        if item.get("job_id"):
-            continue
+    for item in unresolved_items:
         job = node_to_job.get(_norm(item.get("node_id")))
         if job:
             item["job_name"] = job[0]
