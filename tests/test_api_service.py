@@ -39,6 +39,36 @@ class EquipmentServiceTests(unittest.TestCase):
     @patch("api.service.list_equipment")
     @patch("api.service.Plant360Client")
     @patch("api.service.config_from_equipment_request")
+    def test_listing_accepts_project_export_collection_fallback(
+        self, config_from_request, client_class, list_equipment
+    ):
+        graph = object()
+        config_from_request.return_value = SimpleNamespace(
+            unigraph_api_base_url="https://unigraph.example",
+            api=SimpleNamespace(verify_ssl=True),
+            graph=graph,
+        )
+        client_class.return_value.get_json.side_effect = [
+            [],
+            [{"id": 19}],
+            {"collections": [{"cnvrt_collection_id": 252}]},
+        ]
+        list_equipment.return_value = [{"id": "asset-1", "job_id": "2509"}]
+        request = SimpleNamespace(
+            cnvrt_project_id="306",
+            collection_id="252",
+            unigraph_project_id="19",
+            limit=0,
+        )
+
+        items = list_project_equipment(request, "token")
+
+        self.assertEqual(items, [{"id": "asset-1", "job_id": "2509"}])
+        list_equipment.assert_called_once_with(graph, 0)
+
+    @patch("api.service.list_equipment")
+    @patch("api.service.Plant360Client")
+    @patch("api.service.config_from_equipment_request")
     def test_listing_rejects_unmapped_unigraph_project(
         self, config_from_request, client_class, list_equipment
     ):

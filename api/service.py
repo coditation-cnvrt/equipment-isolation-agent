@@ -106,15 +106,40 @@ def list_project_equipment(request, auth_token: str):
             verify_ssl=config.api.verify_ssl,
         )
     )
-    mapped_projects = client.get_json(
+    if not _is_unigraph_project_mapped(client, request):
+        raise ValueError("Selected UniGraph project is not mapped to the CNVRT project and collection")
+    return list_equipment(config.graph, request.limit)
+
+
+def _is_unigraph_project_mapped(client: Plant360Client, request) -> bool:
+    """Accept both direct and project-export collection mappings.
+
+    Older project exports can expose their collection relationship only through
+    ``/projects/{id}/collections`` even though the collection-filtered
+    ``by-cnvrt`` endpoint returns an empty list.
+    """
+    project_id = str(request.unigraph_project_id)
+    exact = client.get_json(
         f"/api/projects/by-cnvrt?cnvrt_project_id={request.cnvrt_project_id}"
         f"&cnvrt_collection_id={request.collection_id}"
     )
-    if not isinstance(mapped_projects, list) or str(request.unigraph_project_id) not in {
-        str(item.get("id")) for item in mapped_projects if isinstance(item, dict)
+    if not isinstance(exact, list):
+        return False
+    if project_id in {str(item.get("id")) for item in exact if isinstance(item, dict)}:
+        return True
+
+    project_exports = client.get_json(f"/api/projects/by-cnvrt?cnvrt_project_id={request.cnvrt_project_id}")
+    if not isinstance(project_exports, list) or project_id not in {
+        str(item.get("id")) for item in project_exports if isinstance(item, dict)
     }:
-        raise ValueError("Selected UniGraph project is not mapped to the CNVRT project and collection")
-    return list_equipment(config.graph, request.limit)
+        return False
+    collections_payload = client.get_json(f"/api/projects/{project_id}/collections")
+    collections = collections_payload.get("collections") if isinstance(collections_payload, dict) else collections_payload
+    return isinstance(collections, list) and any(
+        str(item.get("cnvrt_collection_id") or "") == str(request.collection_id)
+        for item in collections
+        if isinstance(item, dict)
+    )
 
 
 def list_cnvrt_projects(auth_token: str) -> list[dict[str, str]]:
