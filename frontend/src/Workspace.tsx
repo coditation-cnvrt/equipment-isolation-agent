@@ -329,6 +329,7 @@ function Workspace({
           graph={graph}
           bboxHighlights={bboxHighlights}
           highlights={highlights}
+          panAnimationDuration={520}
           panButton="both"
           selectedId={activeId}
           symbols={symbols}
