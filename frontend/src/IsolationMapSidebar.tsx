@@ -111,7 +111,7 @@ export default function IsolationMapSidebar({
       </details>}
 
       {evidenceReasons.length > 0 && <details className="mt-3" open>
-        <summary className="cursor-pointer text-xs font-semibold text-amber-800">Evidence requirements · {evidenceReasons.length}</summary>
+        <summary className="cursor-pointer text-xs font-semibold text-amber-800">Review and field hold points · {evidenceReasons.length}</summary>
         <ol className="mt-2 space-y-1.5">
           {evidenceReasons.map((reason, index) => <li key={reason.reason_id}><button
             className={`w-full border-l-2 px-2 py-1.5 text-left text-xs ${selectedReasonId === reason.reason_id ? 'border-amber-600 bg-amber-100 text-amber-950' : 'border-amber-300 bg-white text-slate-700 hover:bg-amber-50'}`}

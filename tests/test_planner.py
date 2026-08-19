@@ -61,7 +61,13 @@ class PlannerDrawingEvidenceTests(unittest.TestCase):
         self.assertEqual(checks["find_bleeds_vents_drains"]["evidence_targets"][0]["entity_id"], "drain-1")
         self.assertNotIn("find_pressure_indicators", checks)
         self.assertEqual(checks["confirm_zero_pressure"]["evidence_targets"][0]["entity_id"], "pi-1")
+        self.assertEqual(checks["confirm_zero_pressure"]["completion_context"], "field_execution")
+        self.assertFalse(checks["confirm_zero_pressure"]["blocks_plan_readiness"])
+        self.assertEqual(checks["confirm_zero_pressure"]["loto_phase"], 6)
+        self.assertEqual(checks["find_bleeds_vents_drains"]["loto_phase"], 5)
+        self.assertFalse(checks["find_bleeds_vents_drains"]["blocks_plan_readiness"])
         self.assertEqual(checks["find_bypass_paths"]["evidence_targets"][0]["path_node_ids"], ["nozzle-1", "valve-1"])
+        self.assertEqual(checks["find_bypass_paths"]["completion_context"], "pre_job_review")
         self.assertTrue(all(check["status"] == "required" for check in checks.values()))
 
     def test_terminal_branch_valve_is_bound_as_unconfirmed_release_candidate(self):

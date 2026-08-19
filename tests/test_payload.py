@@ -65,6 +65,7 @@ class PayloadEnvelopeTests(unittest.TestCase):
                 "job_id",
                 "job_name",
                 "manual_visual_isolation_checks",
+                "plan_readiness",
                 "project_id",
                 "project_name",
                 "relief_candidates",

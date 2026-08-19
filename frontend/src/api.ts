@@ -76,6 +76,12 @@ export type AssuranceReason = {
     reason: string
   }>
   required_action?: string
+  completion_context?: 'planning' | 'pre_job_review' | 'field_execution' | 'internal_analysis' | string
+  blocks_plan_readiness?: boolean
+  responsible_role?: string
+  method_identified?: boolean
+  loto_phase?: number
+  user_visible?: boolean
   terminal?: {
     entity_id?: string | null
     entity_type?: string | null
@@ -98,11 +104,39 @@ export type AssuranceExplanation = {
   }
 }
 
+export type PlanRequirement = AssuranceReason & {
+  requirement_id: string
+  instruction?: string
+  completion_context: 'planning' | 'pre_job_review' | 'field_execution' | string
+  blocks_plan_readiness: boolean
+  responsible_role?: string
+  method_identified?: boolean
+  loto_phase?: number
+}
+
+export type PlanReadiness = {
+  schema_version: '1.0' | string
+  status: 'ready_for_field_review' | 'incomplete' | 'insufficient_data' | string
+  planning_complete: boolean
+  advisory_only: boolean
+  field_authorization: boolean
+  rationale: string
+  planning_blockers: PlanRequirement[]
+  pre_job_review_items: PlanRequirement[]
+  field_execution_hold_points: PlanRequirement[]
+  summary: {
+    planning_blocker_count: number
+    pre_job_review_count: number
+    field_hold_point_count: number
+  }
+}
+
 export type IsolationValidation = {
   assurance_status?: string
   rationale?: string
   terminal?: boolean
   assurance_explanation?: AssuranceExplanation
+  plan_readiness?: PlanReadiness
   expected_boundary_count?: number
   covered_boundary_source_count?: number
   missing_boundary_count?: number
@@ -158,6 +192,7 @@ export type ReliefCandidate = {
 
 export type IsolationPlan = {
   assurance_status: string
+  plan_readiness?: PlanReadiness | null
   isolation_validation?: IsolationValidation | null
   isolation_points?: IsolationPoint[]
   unselected_boundary_sources?: unknown[]

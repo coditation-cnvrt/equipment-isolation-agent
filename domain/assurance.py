@@ -195,6 +195,12 @@ def _check_reasons(checks: list[dict]) -> list[dict[str, Any]]:
                 priority=str(check.get("priority") or "").strip() or None,
                 drawing_binding_status=str(check.get("drawing_binding_status") or "").strip() or None,
                 evidence_targets=[target for target in check.get("evidence_targets") or [] if isinstance(target, dict)],
+                completion_context=str(check.get("completion_context") or "planning"),
+                blocks_plan_readiness=bool(check.get("blocks_plan_readiness", True)),
+                responsible_role=str(check.get("responsible_role") or "isolation_planner"),
+                method_identified=bool(check.get("method_identified")),
+                loto_phase=check.get("loto_phase"),
+                user_visible=bool(check.get("user_visible", True)),
                 required_action="complete_required_evidence_check",
             )
         )

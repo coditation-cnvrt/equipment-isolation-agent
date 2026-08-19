@@ -106,6 +106,14 @@ deterministic `validate()` remains the **authoritative** source of
 `assurance_status` (the agent can gather more evidence but cannot declare
 isolation on its own).
 
+New results also include deterministic `plan_readiness`. This is deliberately
+separate from assurance: `ready_for_field_review` means that planning blockers
+are resolved and pre-job/field hold points are identified; it does **not** mean
+that devices were operated, zero energy was demonstrated, or work is
+authorized. Stored-energy release is ordered in LOTO phase 5 and zero-energy
+verification in phase 6. Historical payloads are not assigned reconstructed
+readiness states.
+
 ```bash
 uv run python -m agent --equipment BT-11 --job-name pnid_2_bio_final --job-id 2100
 ```

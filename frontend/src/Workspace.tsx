@@ -120,14 +120,15 @@ function Workspace({
       tone: 'text-orange-800 bg-orange-50 border-orange-300',
       explanation: impact.basis || 'Identified by deterministic HILT downstream traversal.',
     }
+    const evidenceReason = assuranceReasons.find((reason) => reason.evidence_targets?.some((target) => target.entity_id === entityId || target.path_node_ids?.includes(entityId)))
+    const evidence = evidenceReason?.evidence_targets?.find((target) => target.entity_id === entityId || target.path_node_ids?.includes(entityId))
+    if (evidence) return {
+      role: evidenceReason?.loto_phase ? `Field verification point — Phase ${evidenceReason.loto_phase}` : 'Evidence candidate — confirmation required',
+      tone: 'text-amber-900 bg-amber-50 border-amber-300',
+      explanation: evidence.verification_instruction || evidence.basis || `${String(evidence.role || 'Evidence candidate').replaceAll('_', ' ')} located on the drawing; location alone does not complete the evidence check.`,
+    }
     const blocker = assuranceReasons.find((reason) => reason.terminal?.entity_id === entityId || reason.path_node_ids?.includes(entityId))
     if (blocker) {
-      const evidence = blocker.evidence_targets?.find((target) => target.entity_id === entityId || target.path_node_ids?.includes(entityId))
-      if (evidence) return {
-        role: 'Evidence candidate — confirmation required',
-        tone: 'text-amber-900 bg-amber-50 border-amber-300',
-        explanation: evidence.basis || `${String(evidence.role || 'Evidence candidate').replaceAll('_', ' ')} located on the drawing; location alone does not complete the evidence check.`,
-      }
       const encountered = blocker.encountered_devices?.find((device) => device.entity_id === entityId)
       if (encountered) return {
         role: 'Context device — not accepted as isolation',
@@ -190,7 +191,7 @@ function Workspace({
             result.push({
               entityId,
               color: '#d97706',
-              label: candidate ? 'EVIDENCE' : undefined,
+              label: candidate ? selectedAssuranceReason.loto_phase ? `PHASE ${selectedAssuranceReason.loto_phase} HOLD` : 'EVIDENCE' : undefined,
               badgeVariant: candidate ? 'flag' : undefined,
               className: candidate ? 'evidence-candidate-highlight--selected' : 'evidence-path-highlight',
             })
@@ -252,7 +253,7 @@ function Workspace({
           id: `evidence-${target.entity_id}-${index}`,
           bbox: target.bbox as [number, number, number, number],
           color: '#d97706',
-          label: 'EVIDENCE',
+          label: selectedAssuranceReason.loto_phase ? `PHASE ${selectedAssuranceReason.loto_phase} HOLD` : 'EVIDENCE',
           className: 'evidence-candidate-highlight--selected',
           selected: true,
         }

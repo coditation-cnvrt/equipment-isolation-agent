@@ -82,6 +82,7 @@ def build_final_payload(validation_data, config, downstream_impact=None):
                 "target_identity": target_identity,
                 "input_details": {**context, "selected_equipment": [config.equipment_tag], "target_mode": "selected_equipment"},
                 "assurance_status": validation_data.get("assurance_status"),
+                "plan_readiness": validation_data.get("plan_readiness") or (validation_data.get("isolation_validation") or {}).get("plan_readiness"),
                 "isolation_validation": validation_data.get("isolation_validation"),
                 "unselected_boundary_sources": (validation_data.get("isolation_validation") or {}).get("unselected_boundary_sources") or [],
                 "boundary_context_sources": boundary_context_sources,

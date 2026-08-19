@@ -171,7 +171,11 @@ function App() {
   )
   const downstreamImpacts = (displayedIsolationPlan?.downstream_impact?.warnings ?? [])
     .filter((warning): warning is DownstreamImpactWarning => typeof warning !== 'string')
-  const assuranceReasons = displayedIsolationPlan?.isolation_validation?.assurance_explanation?.primary_reasons ?? []
+  const assuranceExplanation = displayedIsolationPlan?.isolation_validation?.assurance_explanation
+  const assuranceReasons = [
+    ...(assuranceExplanation?.primary_reasons ?? []),
+    ...(assuranceExplanation?.outstanding_requirements ?? []),
+  ]
   const selectedAssuranceReason = assuranceReasons.find((reason) => reason.reason_id === selectedAssuranceReasonId) ?? null
   const runInProgress = isolationRun?.status === 'queued' || isolationRun?.status === 'running'
   const historyDisabled = Boolean(historicalNavigation || runInProgress || loading || equipmentLoading || drawingLoading)

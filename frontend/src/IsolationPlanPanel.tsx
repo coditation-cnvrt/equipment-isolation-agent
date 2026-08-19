@@ -34,7 +34,9 @@ function assuranceStyle(status: string): string {
 }
 
 function assuranceLabel(status: string): string {
-  return status === 'not_isolated' ? 'Isolation not demonstrated' : humanize(status)
+  if (status === 'not_isolated') return 'Isolation not demonstrated'
+  if (status.includes('provisional') || status.includes('unproven')) return 'Isolation not yet demonstrated — field verification pending'
+  return humanize(status)
 }
 
 const CHECK_LABELS: Record<string, string> = {
@@ -202,13 +204,21 @@ export default function IsolationPlanPanel({ run, plan, error, selectedPointId, 
   const unresolvedEvidence = validation.unresolved_evidence_checks ?? []
   const missingEvidence = validation.missing_evidence ?? []
   const explanation = validation.assurance_explanation
-  const primaryReasons = explanation?.primary_reasons ?? []
-  const outstandingRequirements = explanation?.outstanding_requirements ?? []
+  const readiness = plan.plan_readiness ?? validation.plan_readiness ?? null
+  const allPrimaryReasons = explanation?.primary_reasons ?? []
+  const allOutstandingRequirements = explanation?.outstanding_requirements ?? []
+  const primaryReasons = readiness
+    ? allPrimaryReasons.filter((reason) => !['pre_job_review', 'field_execution', 'internal_analysis'].includes(reason.completion_context || 'planning') && reason.user_visible !== false)
+    : allPrimaryReasons
+  const outstandingRequirements = readiness
+    ? allOutstandingRequirements.filter((reason) => !['pre_job_review', 'field_execution', 'internal_analysis'].includes(reason.completion_context || 'planning') && reason.user_visible !== false)
+    : allOutstandingRequirements
   const structuredExplanation = Boolean(explanation)
-  const blockerCount = explanation?.summary.primary_reason_count
+  const blockerCount = readiness?.summary.planning_blocker_count
+    ?? explanation?.summary.primary_reason_count
     ?? (plan.assurance_status === 'not_isolated' ? Math.max(missingBoundaryCount, 1) : 0)
   const notIsolated = plan.assurance_status === 'not_isolated'
-  const primaryReasonLabel = notIsolated ? 'PRIMARY BLOCKER' : 'DETERMINING REQUIREMENT'
+  const primaryReasonLabel = readiness ? 'PLANNING BLOCKER' : notIsolated ? 'PRIMARY BLOCKER' : 'DETERMINING REQUIREMENT'
   const primaryReasonTone = notIsolated
     ? { label: 'text-red-700', border: 'border-red-500', background: 'bg-red-50', heading: 'text-red-950', body: 'text-red-900', detail: 'text-red-800' }
     : { label: 'text-amber-700', border: 'border-amber-500', background: 'bg-amber-50', heading: 'text-amber-950', body: 'text-amber-900', detail: 'text-amber-800' }
@@ -237,17 +247,48 @@ export default function IsolationPlanPanel({ run, plan, error, selectedPointId, 
         Gemini orchestration became unavailable. The deterministic guardrail completed the advisory payload; review the audit trace before use.
       </div>}
 
-      <section className={`mt-4 border-l-4 p-4 ${assuranceStyle(plan.assurance_status)}`}>
-        <p className="font-mono text-[10px] tracking-[0.1em]">AUTHORITATIVE VALIDATOR STATUS</p>
+      {!readiness && <div className="mt-4 border-l-2 border-slate-400 bg-slate-50 p-3 text-[10px] leading-4 text-slate-700">Plan readiness was not recorded for this historical result. The original validator determination is shown without reconstructing readiness.</div>}
+
+      {readiness && <section className={`mt-4 border-l-4 p-4 ${readiness.planning_complete ? 'border-blue-600 bg-blue-50 text-blue-950' : 'border-red-500 bg-red-50 text-red-950'}`}>
+        <p className="font-mono text-[10px] tracking-[0.1em]">ADVISORY PLAN READINESS</p>
+        <h3 className="mt-2 text-base font-semibold">{readiness.planning_complete ? 'Plan generation complete — ready for field review' : readiness.status === 'insufficient_data' ? 'Insufficient data to complete planning' : 'Planning incomplete'}</h3>
+        <p className="mt-2 text-xs leading-5">{readiness.rationale}</p>
+        <p className="mt-2 text-[10px] font-medium leading-4">Advisory only. This plan does not authorize field work.</p>
+      </section>}
+
+      <section className={`${readiness ? 'mt-3' : 'mt-4'} border-l-4 p-4 ${assuranceStyle(plan.assurance_status)}`}>
+        <p className="font-mono text-[10px] tracking-[0.1em]">ISOLATION ASSURANCE · AUTHORITATIVE VALIDATOR</p>
         <h3 className="mt-2 text-base font-semibold">{assuranceLabel(plan.assurance_status)}</h3>
         {validation.rationale && <p className="mt-2 text-xs leading-5">{validation.rationale}</p>}
+        {readiness?.planning_complete && <p className="mt-2 text-[10px] leading-4">Plan generation is complete, but isolation and zero energy must still be demonstrated during governed field execution.</p>}
       </section>
 
       <dl className="mt-4 grid grid-cols-3 gap-px bg-slate-200 text-center">
         <div className="bg-slate-50 p-3"><dt className="font-mono text-[9px] text-slate-500">POINTS</dt><dd className="mt-1 text-lg font-medium">{points.length}</dd></div>
         <div className="bg-slate-50 p-3"><dt className="font-mono text-[9px] text-slate-500">COVERAGE</dt><dd className="mt-1 text-lg font-medium">{coveredBoundaryCount}/{expectedBoundaryCount}</dd></div>
-        <div className="bg-slate-50 p-3"><dt className="font-mono text-[9px] text-slate-500">{notIsolated ? 'BLOCKERS' : 'REQUIREMENTS'}</dt><dd className="mt-1 text-lg font-medium">{blockerCount}</dd></div>
+        <div className="bg-slate-50 p-3"><dt className="font-mono text-[9px] text-slate-500">{readiness ? 'PLAN BLOCKERS' : notIsolated ? 'BLOCKERS' : 'REQUIREMENTS'}</dt><dd className="mt-1 text-lg font-medium">{blockerCount}</dd></div>
       </dl>
+
+      {readiness && (readiness.pre_job_review_items.length > 0 || readiness.field_execution_hold_points.length > 0) && <section className="mt-6 space-y-5" aria-label="Pre-job and field execution requirements">
+        {readiness.pre_job_review_items.length > 0 && <div>
+          <div className="flex items-baseline justify-between gap-3"><h3 className="font-mono text-[10px] font-semibold tracking-[0.12em] text-slate-700">PRE-JOB REVIEW</h3><span className="font-mono text-[9px] text-slate-500">{readiness.pre_job_review_items.length}</span></div>
+          <p className="mt-1 text-[10px] leading-4 text-slate-600">Complete these reviews under the site procedure before operating isolation devices.</p>
+          <div className="mt-2 space-y-2">{readiness.pre_job_review_items.map((item) => {
+            const target = item.evidence_targets?.[0]
+            const locatable = Boolean(target?.entity_id || target?.bbox?.length === 4 || target?.path_node_ids?.length)
+            return <article className="border-l-2 border-amber-500 bg-amber-50 p-3" key={item.requirement_id}><h4 className="text-xs font-semibold text-amber-950">{CHECK_LABELS[item.check_name || ''] || item.instruction || reasonTitle(item)}</h4>{item.instruction && <p className="mt-1 text-[10px] leading-4 text-amber-900">{item.instruction}</p>}{locatable && <button className="mt-2 border border-amber-400 bg-white px-2 py-1 font-mono text-[9px] font-semibold text-amber-900 hover:bg-amber-100" onClick={() => onReasonSelect(item)} type="button">REVIEW ON DRAWING</button>}</article>
+          })}</div>
+        </div>}
+        {readiness.field_execution_hold_points.length > 0 && <div>
+          <div className="flex items-baseline justify-between gap-3"><h3 className="font-mono text-[10px] font-semibold tracking-[0.12em] text-amber-900">FIELD EXECUTION HOLD POINTS</h3><span className="font-mono text-[9px] text-amber-800">{readiness.field_execution_hold_points.length}</span></div>
+          <p className="mt-1 text-[10px] leading-4 text-amber-900">Authorized field personnel must complete these steps in the shown LOTO phase order before intrusive work begins.</p>
+          <div className="mt-2 space-y-2">{readiness.field_execution_hold_points.map((item) => {
+            const target = item.evidence_targets?.[0]
+            const locatable = Boolean(target?.entity_id || target?.bbox?.length === 4 || target?.path_node_ids?.length)
+            return <article className="border-l-2 border-amber-600 bg-amber-50 p-3" key={item.requirement_id}><p className="font-mono text-[9px] font-semibold text-amber-800">{item.loto_phase ? `PHASE ${item.loto_phase} HOLD POINT` : 'FIELD HOLD POINT'}</p><h4 className="mt-1 text-xs font-semibold text-amber-950">{CHECK_LABELS[item.check_name || ''] || item.instruction || reasonTitle(item)}</h4>{target?.tag && <p className="mt-1 font-mono text-[9px] text-amber-900">DRAWING POINT · {target.tag}</p>}{target?.verification_instruction && <p className="mt-1 text-[10px] leading-4 text-amber-900">{target.verification_instruction}</p>}{locatable && <button className="mt-2 border border-amber-500 bg-white px-2 py-1 font-mono text-[9px] font-semibold text-amber-950 hover:bg-amber-100" onClick={() => onReasonSelect(item)} type="button">SHOW FIELD POINT</button>}</article>
+          })}</div>
+        </div>}
+      </section>}
 
       {structuredExplanation && (primaryReasons.length > 0 || outstandingRequirements.length > 0) && <section className="mt-6 border-y border-slate-200 py-4" aria-label="Deterministic assurance explanation">
         <h3 className="font-mono text-[10px] font-semibold tracking-[0.12em] text-slate-700">WHY THIS STATUS</h3>

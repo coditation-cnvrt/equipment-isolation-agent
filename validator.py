@@ -1,5 +1,6 @@
 from domain.assurance import build_assurance_explanation
 from domain.enums import AssuranceStatus
+from domain.plan_readiness import build_plan_readiness
 
 
 MISSING_BY_CHECK = {
@@ -69,11 +70,17 @@ def validate(planner_data):
         evidence=evidence,
         unresolved_checks=unresolved,
     )
+    plan_readiness = build_plan_readiness(
+        assurance_status=status.value,
+        assurance_explanation=assurance_explanation,
+        unresolved_checks=unresolved,
+    )
     validation = {
-        "code_version": "local_validator_2026-08-18_v4",
+        "code_version": "local_validator_2026-08-18_v5",
         "assurance_status": status.value,
         "rationale": rationale,
         "assurance_explanation": assurance_explanation,
+        "plan_readiness": plan_readiness,
         "terminal": status in {
             AssuranceStatus.COMPLETE_POSITIVE_ISOLATION,
             AssuranceStatus.COMPLETE_PROVEN_ISOLATION,
@@ -112,4 +119,11 @@ def validate(planner_data):
         }
     )
     debug["assurance_status"] = status.value
-    return {**planner_data, "debug": debug, "missing_evidence": missing, "isolation_validation": validation, "assurance_status": status.value}
+    return {
+        **planner_data,
+        "debug": debug,
+        "missing_evidence": missing,
+        "isolation_validation": validation,
+        "plan_readiness": plan_readiness,
+        "assurance_status": status.value,
+    }

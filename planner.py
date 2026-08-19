@@ -18,22 +18,79 @@ def plan_requests(evidence_data, config):
         "collection_id": context.get("collection_id"),
     }
     if not evidence.get("verification_candidate_ids"):
-        checks.append(_check("find_bleeds_vents_drains", "Find stored-energy release points for proving zero or safe energy.", args, "high", _relief_targets(evidence_data)))
+        release_targets = _relief_targets(evidence_data)
+        checks.append(_check(
+            "find_bleeds_vents_drains",
+            "Find stored-energy release points for proving zero or safe energy.",
+            args,
+            "high",
+            release_targets,
+            completion_context="field_execution" if release_targets else "planning",
+            blocks_plan_readiness=not bool(release_targets),
+            loto_phase=5,
+            method_identified=bool(release_targets),
+        ))
         pressure_targets = _pressure_targets(evidence_data)
         if pressure_targets:
-            checks.append(_check("confirm_zero_pressure", "Use the located pressure indicator to confirm zero gauge pressure (or the site-approved safe threshold), a stable hold, and no pressure reaccumulation.", args, "high", pressure_targets))
+            checks.append(_check(
+                "confirm_zero_pressure",
+                "Use the located pressure indicator to confirm zero gauge pressure (or the site-approved safe threshold), a stable hold, and no pressure reaccumulation.",
+                args,
+                "high",
+                pressure_targets,
+                completion_context="field_execution",
+                blocks_plan_readiness=False,
+                loto_phase=6,
+                method_identified=True,
+            ))
         else:
-            checks.append(_check("find_pressure_indicators", "Find pressure gauges, pressure indicators, or approved test points near isolated sections.", args, "high"))
+            checks.append(_check(
+                "find_pressure_indicators",
+                "Find pressure gauges, pressure indicators, or approved test points near isolated sections.",
+                args,
+                "high",
+                completion_context="planning",
+                blocks_plan_readiness=True,
+                loto_phase=6,
+                method_identified=False,
+            ))
     if config.work_scope.requires_positive_isolation and not evidence.get("positive_candidate_ids"):
-        checks.append(_check("find_blinds_spades_flanges", "Work scope requires positive isolation evidence.", args, "high"))
-    checks.append(_check("find_bypass_paths", "Check for bypasses or alternate routes around selected barriers.", args, "medium", _topology_review_targets(evidence_data)))
+        checks.append(_check(
+            "find_blinds_spades_flanges",
+            "Work scope requires positive isolation evidence.",
+            args,
+            "high",
+            completion_context="planning",
+            blocks_plan_readiness=True,
+            method_identified=False,
+        ))
+    checks.append(_check(
+        "find_bypass_paths",
+        "Check for bypasses or alternate routes around selected barriers.",
+        args,
+        "medium",
+        _topology_review_targets(evidence_data),
+        completion_context="pre_job_review",
+        blocks_plan_readiness=False,
+        loto_phase=1,
+        method_identified=True,
+    ))
     if not evidence.get("positive_candidate_ids") or not evidence.get("verification_candidate_ids"):
-        checks.append(_check("fetch_pid_visual_json", "Inspect P&ID visual JSON when graph evidence lacks required safety devices.", args, "low"))
+        checks.append(_check(
+            "fetch_pid_visual_json",
+            "Inspect P&ID visual JSON when graph evidence lacks required safety devices.",
+            args,
+            "low",
+            completion_context="internal_analysis",
+            blocks_plan_readiness=False,
+            method_identified=False,
+            user_visible=False,
+        ))
 
     debug = dict(evidence_data.get("debug", {}) or {})
     debug.update(
         {
-            "planner_code_version": "local_deterministic_planner_2026-08-18_v2",
+            "planner_code_version": "local_deterministic_planner_2026-08-18_v3",
             "planner_mode": "deterministic_graph_api_evidence_checks",
             "planner_required_evidence_check_count": len(checks),
             "planner_required_evidence_checks": [check["check_name"] for check in checks],
@@ -50,9 +107,21 @@ def plan_requests(evidence_data, config):
     }
 
 
-def _check(check_name, reason, arguments, priority, evidence_targets=None):
+def _check(
+    check_name,
+    reason,
+    arguments,
+    priority,
+    evidence_targets=None,
+    *,
+    completion_context="planning",
+    blocks_plan_readiness=True,
+    loto_phase=None,
+    method_identified=False,
+    user_visible=True,
+):
     targets = evidence_targets or []
-    return {
+    result = {
         "check_name": check_name,
         "priority": priority,
         "reason": reason,
@@ -61,7 +130,15 @@ def _check(check_name, reason, arguments, priority, evidence_targets=None):
         "source": "deterministic_rule",
         "drawing_binding_status": "candidates_found" if targets else "no_drawing_candidate",
         "evidence_targets": targets,
+        "completion_context": completion_context,
+        "blocks_plan_readiness": bool(blocks_plan_readiness),
+        "responsible_role": "authorized_field_personnel" if completion_context in {"pre_job_review", "field_execution"} else "isolation_planner",
+        "method_identified": bool(method_identified),
+        "user_visible": bool(user_visible),
     }
+    if loto_phase is not None:
+        result["loto_phase"] = int(loto_phase)
+    return result
 
 
 def _relief_targets(data):
