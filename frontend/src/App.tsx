@@ -76,7 +76,7 @@ function IsolationRunOverlay({ submitting, run, completedTools }: { submitting: 
   const completed = new Set(completedTools)
   const completedStageCount = RUN_TIMELINE.filter((item) => item.milestones.every((milestone) => completed.has(milestone))).length
   return <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/40 p-5 backdrop-blur-[2px]" role="status" aria-live="polite">
-    <div className="w-full max-w-lg border border-slate-300 bg-white p-6 shadow-2xl">
+    <div className="w-full max-w-3xl border border-slate-300 bg-white p-6 shadow-2xl">
       <div className="flex items-center gap-4">
         <span aria-hidden="true" className="size-7 shrink-0 animate-spin rounded-full border-[3px] border-blue-200 border-t-blue-700 motion-reduce:animate-none" />
         <div><p className="font-mono text-[10px] uppercase tracking-[0.14em] text-blue-700">Advisory isolation plan</p><h2 className="mt-1 text-lg font-medium text-slate-950">{status}</h2></div>
@@ -87,17 +87,20 @@ function IsolationRunOverlay({ submitting, run, completedTools }: { submitting: 
       </div>
       <div className="mt-5 border-y border-slate-200 py-3">
         <div className="mb-3 flex items-baseline justify-between gap-3"><p className="font-mono text-[9px] font-semibold tracking-[0.12em] text-slate-500">RUN TIMELINE</p><p className="font-mono text-[9px] text-slate-500">{completedStageCount} OF {RUN_TIMELINE.length} COMPLETE</p></div>
-        <ol className="space-y-2">
-          {RUN_TIMELINE.map((item, index) => {
-            const done = item.milestones.every((milestone) => completed.has(milestone))
-            const active = !done && item.tools.includes(tool)
-            return <li className="flex items-center gap-3" key={item.label}>
-              <span className={`flex size-5 shrink-0 items-center justify-center rounded-full font-mono text-[9px] font-semibold ${done ? 'bg-emerald-600 text-white' : active ? 'bg-blue-700 text-white ring-4 ring-blue-100' : 'bg-slate-100 text-slate-400'}`}>{done ? '✓' : index + 1}</span>
-              <span className={`text-xs ${done ? 'text-slate-700' : active ? 'font-semibold text-blue-900' : 'text-slate-400'}`}>{item.label}</span>
-              {active && <span className="ml-auto font-mono text-[8px] font-semibold text-blue-700">IN PROGRESS</span>}
-            </li>
-          })}
-        </ol>
+        <div className="overflow-x-auto pb-1">
+          <ol className="grid min-w-[42rem] grid-cols-6 px-2">
+            {RUN_TIMELINE.map((item, index) => {
+              const done = item.milestones.every((milestone) => completed.has(milestone))
+              const active = !done && item.tools.includes(tool)
+              return <li className="relative min-w-0 text-center" key={item.label}>
+                {index < RUN_TIMELINE.length - 1 && <span aria-hidden="true" className={`absolute left-1/2 top-2.5 h-0.5 w-full ${done ? 'bg-emerald-500' : 'bg-slate-200'}`} />}
+                <span className={`relative z-10 mx-auto flex size-5 items-center justify-center rounded-full border font-mono text-[9px] font-semibold ${done ? 'border-emerald-600 bg-emerald-600 text-white' : active ? 'border-blue-700 bg-blue-700 text-white ring-4 ring-blue-100' : 'border-slate-200 bg-white text-slate-400'}`}>{done ? '✓' : index + 1}</span>
+                <span className={`mx-auto mt-2 block max-w-24 text-[10px] leading-4 ${done ? 'font-medium text-slate-700' : active ? 'font-semibold text-blue-900' : 'text-slate-400'}`}>{item.label}</span>
+                {active && <span className="mt-1 block font-mono text-[8px] font-semibold text-blue-700">IN PROGRESS</span>}
+              </li>
+            })}
+          </ol>
+        </div>
       </div>
       <p className="mt-4 text-xs leading-5 text-slate-500">This timeline reports completed tool stages only; it does not estimate time or physical isolation progress. Keep this page open while analysis completes.</p>
     </div>
