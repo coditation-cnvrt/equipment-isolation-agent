@@ -56,13 +56,20 @@ const RUN_STAGE_LABELS: Record<string, string> = {
   finalize_plan: 'Finalising the advisory plan',
 }
 
-const RUN_TIMELINE = [
+type RunTimelineStage = {
+  label: string
+  tools: string[]
+  milestones: string[]
+  completeOnRunSuccess?: boolean
+}
+
+const RUN_TIMELINE: RunTimelineStage[] = [
   { label: 'Boundary and candidates', tools: ['fetch_boundary', 'find_candidates', 'resolve_bboxes'], milestones: ['resolve_bboxes'] },
   { label: 'Isolation topology', tools: ['analyze_isolation_obligations', 'analyze_isolation_schemes_and_relief', 'list_unselected_sources', 'investigate_source'], milestones: ['analyze_isolation_schemes_and_relief'] },
   { label: 'Evidence and instruments', tools: ['build_evidence', 'analyze_instrument_context'], milestones: ['build_evidence', 'analyze_instrument_context'] },
   { label: 'Authoritative validation', tools: ['validate'], milestones: ['validate'] },
   { label: 'Downstream impact', tools: ['analyze_downstream_impact'], milestones: ['analyze_downstream_impact'] },
-  { label: 'LOTO sequence and final plan', tools: ['get_osha_guidance', 'build_loto_procedure', 'set_isolation_order', 'finalize_plan'], milestones: ['build_loto_procedure', 'finalize_plan'] },
+  { label: 'LOTO sequence and final plan', tools: ['get_osha_guidance', 'build_loto_procedure', 'set_isolation_order', 'finalize_plan'], milestones: [], completeOnRunSuccess: true },
 ]
 
 function ContextLoadingOverlay({ stage }: { stage: string }) {
@@ -90,7 +97,10 @@ function IsolationRunOverlay({ submitting, run, completedTools }: { submitting: 
       ? 'The request will begin as soon as a worker is available.'
       : `${RUN_STAGE_LABELS[tool] || 'Gathering graph evidence and running deterministic checks'}.`
   const completed = new Set(completedTools)
-  const completedStageCount = RUN_TIMELINE.filter((item) => item.milestones.every((milestone) => completed.has(milestone))).length
+  const stageIsComplete = (item: RunTimelineStage) => item.completeOnRunSuccess
+    ? run?.status === 'succeeded'
+    : item.milestones.every((milestone) => completed.has(milestone))
+  const completedStageCount = RUN_TIMELINE.filter(stageIsComplete).length
   return <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/40 p-5 backdrop-blur-[2px]" role="status" aria-live="polite">
     <div className="w-full max-w-3xl border border-slate-300 bg-white p-6 shadow-2xl">
       <div className="flex items-center gap-4">
@@ -106,7 +116,7 @@ function IsolationRunOverlay({ submitting, run, completedTools }: { submitting: 
         <div className="overflow-x-auto pb-1">
           <ol className="grid min-w-[42rem] grid-cols-6 px-2">
             {RUN_TIMELINE.map((item, index) => {
-              const done = item.milestones.every((milestone) => completed.has(milestone))
+              const done = stageIsComplete(item)
               const active = !done && item.tools.includes(tool)
               return <li className="relative min-w-0 text-center" key={item.label}>
                 {index < RUN_TIMELINE.length - 1 && <span aria-hidden="true" className={`absolute left-1/2 top-2.5 h-0.5 w-full ${done ? 'bg-emerald-500' : 'bg-slate-200'}`} />}
@@ -421,7 +431,9 @@ function App() {
                 progress: { kind: event.kind, tool, updated_at: Date.now() / 1000 },
               },
             } : current)
-            if (event.kind === 'tool_result') {
+            if (event.kind === 'tool_call') {
+              setCompletedRunTools((current) => current.filter((completedTool) => completedTool !== tool))
+            } else if (event.kind === 'tool_result') {
               setCompletedRunTools((current) => current.includes(tool) ? current : [...current, tool])
             }
           },
