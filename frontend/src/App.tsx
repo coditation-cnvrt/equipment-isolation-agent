@@ -32,6 +32,7 @@ import {
 import { type HiltGraphInput, type HiltSelection, type HiltSymbol } from '@coditation-cnvrt/p360-hitl-viewer'
 import ContextBreadcrumbs from './ContextBreadcrumbs'
 import DrawingModeSummary from './DrawingModeSummary'
+import HistoryModal from './HistoryModal'
 import IsolationMapSidebar from './IsolationMapSidebar'
 import IsolationPlanPanel from './IsolationPlanPanel'
 import { DEFAULT_ISOLATION_MAP_LAYERS, type IsolationMapLayer, type IsolationViewMode } from './isolation-map'
@@ -190,7 +191,7 @@ function App() {
   const [planSaveError, setPlanSaveError] = useState('')
   const [pendingHistoricalEquipmentTag, setPendingHistoricalEquipmentTag] = useState('')
   const [historicalNavigation, setHistoricalNavigation] = useState<{ kind: 'plan' | 'run'; label: string; runId: string; waitForContext: boolean } | null>(null)
-  const [initialBootstrapPending, setInitialBootstrapPending] = useState(true)
+  const [historyModal, setHistoryModal] = useState<'plans' | 'runs' | null>(null)
   const [loading, setLoading] = useState('projects')
   const [error, setError] = useState('')
   const didLoadProjects = useRef(false)
@@ -247,14 +248,7 @@ function App() {
             ? 'Loading equipment from the selected UniGraph.'
             : drawingLoading
               ? 'Loading the selected P&ID drawing.'
-            : initialBootstrapPending
-              ? 'Loading saved plans and recent isolation runs.'
               : ''
-  const historyDisabledReason = historicalNavigation
-    ? `Opening ${historicalNavigation.label}…`
-    : runInProgress
-      ? 'Wait for the current isolation run to finish before opening history.'
-      : 'Planning context is loading. Saved plans and recent runs will be available shortly.'
   const ready = Boolean(selectedProject && selectedCollection && selectedDrawing && selectedUniGraph)
   const projectOptions = projects.map((item) => ({ value: item.id, label: `${item.name} (${item.id})`, searchText: `${item.name} ${item.id}` }))
   const collectionOptions = collections.map((item) => ({ value: item.id, label: `${item.name} (${item.id})`, searchText: `${item.name} ${item.id}` }))
@@ -280,11 +274,6 @@ function App() {
     didLoadProjects.current = true
     void loadProjects()
   }, [])
-
-  useEffect(() => {
-    if (!initialBootstrapPending || loading || savedPlansLoading || pastRunsLoading) return
-    setInitialBootstrapPending(false)
-  }, [initialBootstrapPending, loading, pastRunsLoading, savedPlansLoading])
 
   useEffect(() => {
     const bboxKey = selectedEquipment && drawingId ? `${drawingId}:${selectedEquipment.node_id}` : ''
@@ -345,58 +334,6 @@ function App() {
     })()
     return () => { active = false }
   }, [drawingId, projectId])
-
-  useEffect(() => {
-    if (historicalNavigationLock.current) return
-    let active = true
-    setSavedPlansLoading(true)
-    setSavedPlansError('')
-    const filters = selectedEquipment && projectId && collectionId && drawingId && unigraphProjectId ? {
-      equipmentTag: selectedEquipment.tag || selectedEquipment.name,
-      jobId: drawingId,
-      cnvrtProjectId: projectId,
-      collectionId,
-      unigraphProjectId,
-      limit: 20,
-    } : { limit: 20 }
-    void getIsolationPlans(filters).then((plans) => {
-      if (active) setSavedPlans(plans)
-    }).catch((reason: unknown) => {
-      if (active) {
-        setSavedPlans([])
-        setSavedPlansError(reason instanceof Error ? reason.message : 'Unable to load saved plans.')
-      }
-    }).finally(() => {
-      if (active) setSavedPlansLoading(false)
-    })
-    return () => { active = false }
-  }, [collectionId, drawingId, projectId, selectedEquipment, unigraphProjectId])
-
-  useEffect(() => {
-    if (historicalNavigationLock.current) return
-    let active = true
-    setPastRunsLoading(true)
-    setPastRunsError('')
-    const filters = selectedEquipment && projectId && collectionId && drawingId && unigraphProjectId ? {
-      equipmentTag: selectedEquipment.tag || selectedEquipment.name,
-      jobId: drawingId,
-      cnvrtProjectId: projectId,
-      collectionId,
-      unigraphProjectId,
-      limit: 20,
-    } : { limit: 20 }
-    void getIsolationRuns(filters).then((runs) => {
-      if (active) setPastRuns(runs)
-    }).catch((reason: unknown) => {
-      if (active) {
-        setPastRuns([])
-        setPastRunsError(reason instanceof Error ? reason.message : 'Unable to load previous runs.')
-      }
-    }).finally(() => {
-      if (active) setPastRunsLoading(false)
-    })
-    return () => { active = false }
-  }, [collectionId, drawingId, projectId, selectedEquipment, unigraphProjectId])
 
   useEffect(() => {
     if (!pendingHistoricalEquipmentTag || drawingLoading || equipmentLoading) return
@@ -509,6 +446,41 @@ function App() {
       setError(reason instanceof Error ? reason.message : 'Unable to load CNVRT projects.')
     } finally {
       setLoading('')
+    }
+  }
+
+  async function loadHistory(kind: 'plans' | 'runs') {
+    const filters = selectedEquipment && projectId && collectionId && drawingId && unigraphProjectId ? {
+      equipmentTag: selectedEquipment.tag || selectedEquipment.name,
+      jobId: drawingId,
+      cnvrtProjectId: projectId,
+      collectionId,
+      unigraphProjectId,
+      limit: 20,
+    } : { limit: 20 }
+    setHistoryModal(kind)
+    if (kind === 'plans') {
+      setSavedPlansLoading(true)
+      setSavedPlansError('')
+      try {
+        setSavedPlans(await getIsolationPlans(filters))
+      } catch (reason) {
+        setSavedPlans([])
+        setSavedPlansError(reason instanceof Error ? reason.message : 'Unable to load saved plans.')
+      } finally {
+        setSavedPlansLoading(false)
+      }
+      return
+    }
+    setPastRunsLoading(true)
+    setPastRunsError('')
+    try {
+      setPastRuns(await getIsolationRuns(filters))
+    } catch (reason) {
+      setPastRuns([])
+      setPastRunsError(reason instanceof Error ? reason.message : 'Unable to load recent runs.')
+    } finally {
+      setPastRunsLoading(false)
     }
   }
 
@@ -976,9 +948,25 @@ function App() {
           <p className="mt-3 text-xs leading-5 text-slate-600">Restoring its project, drawing, UniGraph, equipment, and immutable result. Other navigation is temporarily unavailable.</p>
         </div>
       </div>}
+      {historyModal && <HistoryModal
+        error={historyModal === 'plans' ? savedPlansError : pastRunsError}
+        kind={historyModal}
+        loading={historyModal === 'plans' ? savedPlansLoading : pastRunsLoading}
+        onClose={() => setHistoryModal(null)}
+        onOpenPlan={(plan) => { setHistoryModal(null); void openSavedPlan(plan) }}
+        onOpenRun={(run) => { setHistoryModal(null); void openPastRun(run) }}
+        onRefresh={() => { void loadHistory(historyModal) }}
+        pastRuns={pastRuns}
+        savedPlans={savedPlans}
+      />}
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-800 bg-slate-950 px-4 sm:px-6">
         <div className="flex min-w-0 items-center gap-4"><img alt="Plant360.ai" className="h-5 w-auto shrink-0" src={p360Logo} /><span className="hidden h-5 w-px bg-slate-700 sm:block" /><span className="truncate font-mono text-xs text-slate-300">ISOLATION PLANNING</span></div>
-        <div className="flex items-center gap-3"><span className="hidden max-w-52 truncate text-xs text-slate-300 sm:inline">{user?.profile?.email}</span><button className="font-mono text-[10px] font-semibold tracking-wide text-slate-300 hover:text-white" onClick={logout} type="button">LOGOUT</button></div>
+        <div className="flex items-center gap-2">
+          <button className="border border-slate-700 px-2.5 py-1.5 font-mono text-[9px] font-semibold tracking-wide text-slate-200 hover:border-slate-500 hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-600" disabled={historyDisabled} onClick={() => { void loadHistory('plans') }} type="button">SAVED PLANS</button>
+          <button className="border border-slate-700 px-2.5 py-1.5 font-mono text-[9px] font-semibold tracking-wide text-slate-200 hover:border-slate-500 hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-600" disabled={historyDisabled} onClick={() => { void loadHistory('runs') }} type="button">RECENT RUNS</button>
+          <span className="ml-1 hidden max-w-52 truncate text-xs text-slate-300 lg:inline">{user?.profile?.email}</span>
+          <button className="font-mono text-[10px] font-semibold tracking-wide text-slate-300 hover:text-white" onClick={logout} type="button">LOGOUT</button>
+        </div>
       </header>
       <ContextBreadcrumbs items={contextBreadcrumbItems} />
       <main className="grid h-[calc(100vh-6.5rem)] min-h-0 grid-cols-1 overflow-hidden xl:grid-cols-[20rem_minmax(0,1fr)_26rem]">
@@ -989,34 +977,21 @@ function App() {
             layers={mapLayers}
             onImpactSelect={selectDownstreamImpact}
             onLayerChange={changeMapLayer}
-            onOpenPlan={(plan) => { void openSavedPlan(plan) }}
-            onOpenRun={(run) => { void openPastRun(run) }}
             onPointSelect={selectIsolationPoint}
             onReasonSelect={selectAssuranceReason}
-            pastRuns={pastRuns}
             points={isolationPoints}
             reasons={assuranceReasons}
-            savedPlans={savedPlans}
             selectedImpactId={selectedDownstreamImpactId}
             selectedPointId={selectedIsolationPointId}
             selectedReasonId={selectedAssuranceReasonId}
           /> : <PlanningSidebar
             collectionLabel={selectedCollection?.name ?? ''}
+            contextError={error}
+            drawingLabel={selectedDrawing?.name ?? ''}
             equipmentLabel={selectedEquipment ? selectedEquipment.tag || selectedEquipment.name : ''}
             graphLabel={selectedUniGraph?.name ?? ''}
-            onOpenPlan={(plan) => { void openSavedPlan(plan) }}
-            onOpenRun={(run) => { void openPastRun(run) }}
             onRetryContext={retryPlanningContext}
-            pastRuns={pastRuns}
-            contextError={error}
-            plansError={savedPlansError}
-            plansLoading={savedPlansLoading}
             projectLabel={selectedProject?.name ?? ''}
-            runsError={pastRunsError}
-            runsLoading={pastRunsLoading}
-            historyDisabled={historyDisabled}
-            historyDisabledReason={historyDisabledReason}
-            savedPlans={savedPlans}
           />}
         </aside>
         <section className="flex min-h-0 min-w-0 flex-col overflow-hidden border-b border-slate-300 bg-slate-200 xl:border-b-0">

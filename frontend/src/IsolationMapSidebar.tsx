@@ -1,4 +1,4 @@
-import type { AssuranceReason, DownstreamImpactWarning, IsolationPoint, IsolationRunStatus, SavedIsolationPlan } from './api'
+import type { AssuranceReason, DownstreamImpactWarning, IsolationPoint } from './api'
 import type { IsolationMapLayer, IsolationMapLayers } from './isolation-map'
 
 type IsolationMapSidebarProps = {
@@ -10,23 +10,14 @@ type IsolationMapSidebarProps = {
   selectedReasonId: string | null
   selectedImpactId: string | null
   selectedPointId: string | null
-  savedPlans: SavedIsolationPlan[]
-  pastRuns: IsolationRunStatus[]
   onLayerChange: (layer: IsolationMapLayer, visible: boolean) => void
   onReasonSelect: (reason: AssuranceReason) => void
   onImpactSelect: (impact: DownstreamImpactWarning) => void
   onPointSelect: (point: IsolationPoint) => void
-  onOpenPlan: (plan: SavedIsolationPlan) => void
-  onOpenRun: (run: IsolationRunStatus) => void
 }
 
 function humanize(value: unknown): string {
   return String(value ?? 'unknown').replaceAll('_', ' ')
-}
-
-function formatRunTime(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return 'Time unavailable'
-  return new Date(value * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
 }
 
 function reasonLabel(reason: AssuranceReason): string {
@@ -66,14 +57,10 @@ export default function IsolationMapSidebar({
   selectedReasonId,
   selectedImpactId,
   selectedPointId,
-  savedPlans,
-  pastRuns,
   onLayerChange,
   onReasonSelect,
   onImpactSelect,
   onPointSelect,
-  onOpenPlan,
-  onOpenRun,
 }: IsolationMapSidebarProps) {
   const uniqueImpacts = [...new Map(impacts.map((impact) => [impact.affected_id, impact])).values()]
   const blockerReasons = reasons.filter((reason) => reason.code !== 'evidence_check_incomplete')
@@ -152,14 +139,6 @@ export default function IsolationMapSidebar({
         <div><dt className="inline font-semibold text-orange-700">Possible:</dt><dd className="inline"> connected path with unknown or weak flow direction.</dd></div>
         <div><dt className="inline font-semibold text-purple-700">Point:</dt><dd className="inline"> proposed or accepted isolation location.</dd></div>
       </dl>
-    </section>
-
-    <section className="p-5">
-      <details>
-        <summary className="cursor-pointer font-mono text-[10px] tracking-[0.1em] text-slate-600">HISTORY · {savedPlans.length} PLANS · {pastRuns.length} RUNS</summary>
-        {savedPlans.length > 0 && <div className="mt-3"><p className="font-mono text-[9px] text-slate-400">SAVED PLANS</p>{savedPlans.slice(0, 5).map((plan) => <button className="mt-1 block w-full truncate border border-slate-200 bg-white px-2 py-1.5 text-left text-[10px] hover:border-blue-400" key={plan.plan_id} onClick={() => onOpenPlan(plan)} type="button">{plan.plan_number} · v{plan.latest_version.version_no}</button>)}</div>}
-        {pastRuns.length > 0 && <div className="mt-3"><p className="font-mono text-[9px] text-slate-400">RECENT RUNS</p>{pastRuns.slice(0, 5).map((run) => <button className="mt-1 block w-full border border-slate-200 bg-white px-2 py-1.5 text-left text-[10px] hover:border-blue-400 disabled:text-slate-400" disabled={run.status !== 'succeeded'} key={run.run_id} onClick={() => onOpenRun(run)} type="button"><span>{run.equipment_tag}</span><span className="float-right text-slate-400">{formatRunTime(run.created_at)}</span></button>)}</div>}
-      </details>
     </section>
   </div>
 }

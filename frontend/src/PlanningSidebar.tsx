@@ -1,50 +1,26 @@
-import type { IsolationRunStatus, SavedIsolationPlan } from './api'
-
-function formatRunTime(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return 'Time unavailable'
-  return new Date(value * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })
-}
-
 type PlanningSidebarProps = {
   projectLabel: string
   collectionLabel: string
+  drawingLabel: string
   graphLabel: string
   equipmentLabel: string
-  savedPlans: SavedIsolationPlan[]
-  pastRuns: IsolationRunStatus[]
-  plansLoading: boolean
-  runsLoading: boolean
   contextError: string
-  plansError: string
-  runsError: string
-  historyDisabled: boolean
-  historyDisabledReason: string
-  onOpenPlan: (plan: SavedIsolationPlan) => void
-  onOpenRun: (run: IsolationRunStatus) => void
   onRetryContext: () => void
 }
 
 export default function PlanningSidebar({
   projectLabel,
   collectionLabel,
+  drawingLabel,
   graphLabel,
   equipmentLabel,
-  savedPlans,
-  pastRuns,
-  plansLoading,
-  runsLoading,
   contextError,
-  plansError,
-  runsError,
-  historyDisabled,
-  historyDisabledReason,
-  onOpenPlan,
-  onOpenRun,
   onRetryContext,
 }: PlanningSidebarProps) {
   const steps = [
     { label: 'Project', value: projectLabel },
     { label: 'Collection', value: collectionLabel },
+    { label: 'P&ID Drawing', value: drawingLabel },
     { label: 'UniGraph', value: graphLabel },
     { label: 'Equipment', value: equipmentLabel },
   ]
@@ -54,7 +30,7 @@ export default function PlanningSidebar({
     <div className="border-b border-slate-300 p-5">
       <p className="font-mono text-[10px] tracking-[0.12em] text-slate-500">PLANNING CONTEXT</p>
       <h1 className="mt-2 text-lg font-medium">{nextStep ? `Choose ${nextStep.label.toLowerCase()}` : 'Context ready'}</h1>
-      <p className="mt-2 text-xs leading-5 text-slate-600">Choose a UniGraph and then select equipment. Its exact source P&amp;ID will load automatically.</p>
+      <p className="mt-2 text-xs leading-5 text-slate-600">Select a project, collection, P&amp;ID drawing, UniGraph, and equipment to prepare an advisory isolation plan.</p>
       {contextError && <div className="mt-3 border-l-2 border-red-500 bg-red-50 p-2 text-[10px] leading-4 text-red-900" role="alert"><p>{contextError}</p><button className="mt-2 border border-red-400 bg-white px-2 py-1 font-mono text-[9px] font-semibold hover:bg-red-100" onClick={onRetryContext} type="button">RETRY CONTEXT</button></div>}
     </div>
 
@@ -68,27 +44,8 @@ export default function PlanningSidebar({
       </ol>
     </section>
 
-    {historyDisabled && <div aria-live="polite" className="border-b border-slate-300 bg-blue-50 px-5 py-3 text-[10px] text-blue-900" role="status">
-      <span aria-hidden="true" className="mr-2 inline-block size-3 animate-spin rounded-full border-2 border-blue-200 border-t-blue-700 align-middle" />
-      {historyDisabledReason}
-    </div>}
-
-    <section className="border-b border-slate-300 p-5" aria-label="Saved isolation plans" aria-busy={plansLoading}>
-      <div className="flex items-baseline justify-between gap-2"><h2 className="font-mono text-[10px] tracking-[0.12em] text-slate-500">SAVED PLANS</h2>{plansLoading && <span className="text-[9px] text-slate-400">Loading…</span>}</div>
-      {plansError && <p className="mt-2 border-l-2 border-amber-500 bg-amber-50 px-2 py-1 text-[10px] text-amber-900">{plansError}</p>}
-      {!plansLoading && !plansError && !savedPlans.length && <p className="mt-2 text-xs text-slate-500">No matching saved plans.</p>}
-      <ol className="mt-2 space-y-1.5">
-        {savedPlans.slice(0, 8).map((plan) => <li key={plan.plan_id}><button className="w-full border border-slate-200 bg-white p-2 text-left enabled:hover:border-blue-400 disabled:cursor-wait disabled:bg-slate-100 disabled:opacity-55" disabled={historyDisabled || plansLoading} onClick={() => onOpenPlan(plan)} title={historyDisabled ? historyDisabledReason : undefined} type="button"><span className="flex items-center justify-between gap-2"><span className="truncate font-mono text-[10px] font-semibold">{plan.plan_number} · v{plan.latest_version.version_no}</span><span className="font-mono text-[8px] uppercase text-purple-700">{plan.lifecycle_state}</span></span><span className="mt-1 block truncate text-[9px] text-slate-500">{plan.latest_version.source_run.equipment_tag} · {String(plan.latest_version.source_run.assurance_status || 'unknown').replaceAll('_', ' ')}</span></button></li>)}
-      </ol>
-    </section>
-
-    <section className="p-5" aria-label="Previous isolation runs" aria-busy={runsLoading}>
-      <div className="flex items-baseline justify-between gap-2"><h2 className="font-mono text-[10px] tracking-[0.12em] text-slate-500">RECENT RUNS</h2>{runsLoading && <span className="text-[9px] text-slate-400">Loading…</span>}</div>
-      {runsError && <p className="mt-2 border-l-2 border-red-500 bg-red-50 px-2 py-1 text-[10px] text-red-900">{runsError}</p>}
-      {!runsLoading && !runsError && !pastRuns.length && <p className="mt-2 text-xs text-slate-500">No matching previous runs.</p>}
-      <ol className="mt-2 space-y-1.5">
-        {pastRuns.slice(0, 8).map((run) => <li key={run.run_id}><button className={`w-full border border-slate-200 bg-white p-2 text-left enabled:hover:border-blue-400 disabled:bg-slate-100 disabled:opacity-55 ${historyDisabled || runsLoading ? 'disabled:cursor-wait' : 'disabled:cursor-not-allowed'}`} disabled={historyDisabled || runsLoading || run.status !== 'succeeded'} onClick={() => onOpenRun(run)} title={historyDisabled ? historyDisabledReason : undefined} type="button"><span className="flex items-center justify-between gap-2"><span className="truncate text-xs font-medium">{run.equipment_tag}</span><span className="font-mono text-[8px] uppercase">{run.status}</span></span><span className="mt-1 block text-[9px] text-slate-400">{formatRunTime(run.created_at)}</span></button></li>)}
-      </ol>
-    </section>
+    <div className="p-5 text-xs leading-5 text-slate-500">
+      Saved plans and recent runs are loaded only when opened from the header.
+    </div>
   </div>
 }
