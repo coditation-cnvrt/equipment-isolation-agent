@@ -239,12 +239,14 @@ function App() {
     ? 'Loading the projects available to your CNVRT account.'
     : loading === 'collections'
       ? 'Loading collections for the selected project.'
-      : loading === 'unigraph'
-        ? 'Loading drawings and UniGraph exports for the selected collection.'
-        : equipmentLoading
-          ? 'Loading equipment from the selected UniGraph.'
-          : drawingLoading
-            ? 'Loading the selected equipment’s authoritative source drawing.'
+      : loading === 'drawings'
+        ? 'Loading P&ID drawings for the selected collection.'
+        : loading === 'unigraph'
+          ? 'Loading UniGraph exports for the selected drawing context.'
+          : equipmentLoading
+            ? 'Loading equipment from the selected UniGraph.'
+            : drawingLoading
+              ? 'Loading the selected P&ID drawing.'
             : initialBootstrapPending
               ? 'Loading saved plans and recent isolation runs.'
               : ''
@@ -253,19 +255,23 @@ function App() {
     : runInProgress
       ? 'Wait for the current isolation run to finish before opening history.'
       : 'Planning context is loading. Saved plans and recent runs will be available shortly.'
-  const ready = Boolean(selectedProject && selectedCollection && selectedUniGraph)
+  const ready = Boolean(selectedProject && selectedCollection && selectedDrawing && selectedUniGraph)
   const projectOptions = projects.map((item) => ({ value: item.id, label: `${item.name} (${item.id})`, searchText: `${item.name} ${item.id}` }))
   const collectionOptions = collections.map((item) => ({ value: item.id, label: `${item.name} (${item.id})`, searchText: `${item.name} ${item.id}` }))
+  const drawingOptions = drawings.map((item) => ({ value: item.id, label: `${item.name} (${item.id})`, searchText: `${item.name} ${item.id}` }))
   const unigraphOptions = unigraphProjects.map((item) => ({ value: item.id, label: `${item.name} (${item.id})`, searchText: `${item.name} ${item.id}` }))
-  const equipmentOptions = equipment.map((item) => ({
-    value: item.id,
-    label: `${item.tag || item.name} (${item.entity_class})`,
-    searchText: `${item.tag} ${item.name} ${item.entity_class} ${item.job_name}`,
-  }))
+  const equipmentOptions = equipment
+    .filter((item) => item.job_id === drawingId)
+    .map((item) => ({
+      value: item.id,
+      label: `${item.tag || item.name} (${item.entity_class})`,
+      searchText: `${item.tag} ${item.name} ${item.entity_class} ${item.job_name}`,
+    }))
   const contextBreadcrumbItems = [
     { key: 'project', label: 'Project', value: projectId, placeholder: 'Choose project', options: projectOptions, loading: loading === 'projects', onChange: (value: string) => { void selectProject(value) } },
     { key: 'collection', label: 'Collection', value: collectionId, placeholder: 'Choose collection', options: collectionOptions, disabled: !projectId, loading: loading === 'collections', onChange: (value: string) => { void selectCollection(value) } },
-    { key: 'graph', label: 'UniGraph', value: unigraphProjectId, placeholder: 'Choose graph', options: unigraphOptions, disabled: !collectionId, loading: loading === 'unigraph', onChange: (value: string) => { void selectUniGraph(value) } },
+    { key: 'drawing', label: 'P&ID Drawing', value: drawingId, placeholder: 'Choose drawing', options: drawingOptions, disabled: !collectionId, loading: loading === 'drawings', onChange: (value: string) => { void selectDrawing(value) } },
+    { key: 'graph', label: 'UniGraph', value: unigraphProjectId, placeholder: 'Choose graph', options: unigraphOptions, disabled: !drawingId, loading: loading === 'unigraph', onChange: (value: string) => { void selectUniGraph(value) } },
     { key: 'equipment', label: 'Equipment', value: equipmentId, placeholder: 'Choose equipment', options: equipmentOptions, disabled: !unigraphProjectId, loading: equipmentLoading, onChange: selectEquipment, onClear: clearEquipmentSelection },
   ]
 
@@ -515,8 +521,12 @@ function App() {
       void selectProject(projectId)
       return
     }
-    if (!unigraphProjectId) {
+    if (!drawingId) {
       void selectCollection(collectionId)
+      return
+    }
+    if (!unigraphProjectId) {
+      void selectDrawing(drawingId)
       return
     }
     void selectUniGraph(unigraphProjectId)
@@ -560,21 +570,33 @@ function App() {
     setEquipmentLoading(false)
     setError('')
     if (!projectId || !nextCollectionId) return
+    setLoading('drawings')
+    try {
+      setDrawings(await getDrawings(projectId, nextCollectionId))
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to load drawings.')
+    } finally {
+      setLoading('')
+    }
+  }
+
+  async function selectDrawing(nextDrawingId: string) {
+    resetIsolationRun()
+    setDrawingId(nextDrawingId)
+    setHiltGraph(null)
+    setHiltSymbols([])
+    setUnigraphProjectId('')
+    setUnigraphProjects([])
+    setEquipmentId('')
+    setEquipmentBBox([])
+    setEquipment([])
+    setError('')
+    if (!projectId || !collectionId || !nextDrawingId) return
     setLoading('unigraph')
     try {
-      const [nextDrawings, nextUniGraphProjects] = await Promise.all([
-        getDrawings(projectId, nextCollectionId),
-        getUniGraphProjects(projectId, nextCollectionId),
-      ])
-      setDrawings(nextDrawings)
-      setUnigraphProjects(nextUniGraphProjects)
-      if (nextUniGraphProjects.length === 1) {
-        const graphId = nextUniGraphProjects[0].id
-        setUnigraphProjectId(graphId)
-        await loadEquipmentForGraph(nextCollectionId, graphId)
-      }
+      setUnigraphProjects(await getUniGraphProjects(projectId, collectionId))
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Unable to load the collection planning context.')
+      setError(reason instanceof Error ? reason.message : 'Unable to load UniGraph projects.')
     } finally {
       setLoading('')
     }
@@ -597,10 +619,8 @@ function App() {
   async function selectUniGraph(nextUniGraphProjectId: string) {
     resetIsolationRun()
     setUnigraphProjectId(nextUniGraphProjectId)
-    setDrawingId('')
-    setHiltGraph(null)
-    setHiltSymbols([])
     setEquipmentId('')
+    setEquipmentBBox([])
     setEquipment([])
     setError('')
     if (!nextUniGraphProjectId) return
@@ -647,23 +667,12 @@ function App() {
     setScopeNote('')
     const nextEquipment = equipment.find((item) => item.id === nextEquipmentId)
     if (!nextEquipment) return
-    if (!nextEquipment.job_id) {
-      setDrawingId('')
-      setHiltGraph(null)
-      setHiltSymbols([])
-      setError(`No exact source P&ID is recorded for ${nextEquipment.tag || nextEquipment.name}.`)
-      return
-    }
-    const sourceDrawing = drawings.find((item) => item.id === nextEquipment.job_id)
-    if (!sourceDrawing) {
-      setDrawingId('')
-      setHiltGraph(null)
-      setHiltSymbols([])
-      setError(`The source P&ID for ${nextEquipment.tag || nextEquipment.name} is not available in this collection.`)
+    if (!nextEquipment.job_id || nextEquipment.job_id !== drawingId) {
+      setEquipmentId('')
+      setError(`The selected equipment is not authoritatively mapped to this P&ID drawing.`)
       return
     }
     setError('')
-    setDrawingId(sourceDrawing.id)
   }
 
   async function startIsolationRun() {
@@ -1014,7 +1023,7 @@ function App() {
           <div className="border-b border-slate-300 bg-white px-5 py-3"><p className="font-mono text-[10px] tracking-[0.12em] text-slate-500">DRAWING WORKSPACE</p></div>
           <div className="min-h-0 flex-1">
             {ready && drawingId ? <Suspense fallback={<div className="h-full bg-white p-8"><Skeleton className="h-5 w-48" /><Skeleton className="mt-8 h-full w-full" /></div>}><Workspace assuranceReasons={assuranceReasons} downstreamImpacts={downstreamImpacts} drawingError={drawingError} drawingLoading={drawingLoading} drawingName={selectedDrawing?.name ?? ''} drawingSelection={drawingSelection} graph={hiltGraph} graphName={selectedUniGraph?.name ?? ''} isolationPoints={isolationPoints} mapLayers={mapLayers} onDrawingSelectionChange={selectDrawingEntity} onViewModeChange={setViewMode} selectedAssuranceReason={selectedAssuranceReason} selectedDownstreamImpactId={selectedDownstreamImpactId} selectedEntityId={selectedEquipment?.node_id ?? null} selectedIsolationPointId={selectedIsolationPointId} symbols={hiltSymbols} viewMode={viewMode} /></Suspense>
-              : <div className="flex h-full items-center justify-center bg-white p-8 text-center"><div><h2 className="text-lg font-medium">{ready ? 'Select equipment' : 'Complete context selection'}</h2><p className="mt-2 max-w-sm text-sm leading-5 text-slate-600">{ready ? 'Choose equipment from the selected UniGraph. Its source P&ID will open automatically.' : 'Select a project, collection, and UniGraph before choosing equipment.'}</p></div></div>}
+              : <div className="flex h-full items-center justify-center bg-white p-8 text-center"><div><h2 className="text-lg font-medium">{ready ? 'Select equipment' : 'Complete context selection'}</h2><p className="mt-2 max-w-sm text-sm leading-5 text-slate-600">{ready ? 'Choose equipment mapped to the selected P&ID drawing and UniGraph.' : 'Select a project, collection, P&ID drawing, and UniGraph before choosing equipment.'}</p></div></div>}
           </div>
         </section>
         <aside className="flex min-h-0 flex-col overflow-hidden bg-white xl:border-l xl:border-slate-300">
