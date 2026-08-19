@@ -56,7 +56,16 @@ const RUN_STAGE_LABELS: Record<string, string> = {
   finalize_plan: 'Finalising the advisory plan',
 }
 
-function IsolationRunOverlay({ submitting, run }: { submitting: boolean; run: IsolationRunStatus | null }) {
+const RUN_TIMELINE = [
+  { label: 'Boundary and candidates', tools: ['fetch_boundary', 'find_candidates', 'resolve_bboxes'], milestones: ['resolve_bboxes'] },
+  { label: 'Isolation topology', tools: ['analyze_isolation_obligations', 'analyze_isolation_schemes_and_relief', 'list_unselected_sources', 'investigate_source'], milestones: ['analyze_isolation_schemes_and_relief'] },
+  { label: 'Evidence and instruments', tools: ['build_evidence', 'analyze_instrument_context'], milestones: ['build_evidence', 'analyze_instrument_context'] },
+  { label: 'Authoritative validation', tools: ['validate'], milestones: ['validate'] },
+  { label: 'Downstream impact', tools: ['analyze_downstream_impact'], milestones: ['analyze_downstream_impact'] },
+  { label: 'LOTO sequence and final plan', tools: ['get_osha_guidance', 'build_loto_procedure', 'set_isolation_order', 'finalize_plan'], milestones: ['build_loto_procedure', 'finalize_plan'] },
+]
+
+function IsolationRunOverlay({ submitting, run, completedTools }: { submitting: boolean; run: IsolationRunStatus | null; completedTools: string[] }) {
   const status = submitting ? 'Starting isolation analysis' : run?.status === 'queued' ? 'Waiting for an agent worker' : 'Isolation analysis in progress'
   const tool = run?.agent?.progress?.tool || ''
   const stage = submitting
@@ -64,8 +73,10 @@ function IsolationRunOverlay({ submitting, run }: { submitting: boolean; run: Is
     : run?.status === 'queued'
       ? 'The request will begin as soon as a worker is available.'
       : `${RUN_STAGE_LABELS[tool] || 'Gathering graph evidence and running deterministic checks'}.`
+  const completed = new Set(completedTools)
+  const completedStageCount = RUN_TIMELINE.filter((item) => item.milestones.every((milestone) => completed.has(milestone))).length
   return <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/40 p-5 backdrop-blur-[2px]" role="status" aria-live="polite">
-    <div className="w-full max-w-md border border-slate-300 bg-white p-6 shadow-2xl">
+    <div className="w-full max-w-lg border border-slate-300 bg-white p-6 shadow-2xl">
       <div className="flex items-center gap-4">
         <span aria-hidden="true" className="size-7 shrink-0 animate-spin rounded-full border-[3px] border-blue-200 border-t-blue-700 motion-reduce:animate-none" />
         <div><p className="font-mono text-[10px] uppercase tracking-[0.14em] text-blue-700">Advisory isolation plan</p><h2 className="mt-1 text-lg font-medium text-slate-950">{status}</h2></div>
@@ -74,7 +85,21 @@ function IsolationRunOverlay({ submitting, run }: { submitting: boolean; run: Is
       <div aria-label="Agent run in progress" className="mt-5 h-1.5 overflow-hidden bg-blue-100" role="progressbar">
         <div className="agent-progress-indeterminate h-full w-1/3 bg-blue-700" />
       </div>
-      <p className="mt-4 text-xs leading-5 text-slate-500">This may take a few minutes. Keep this page open while the deterministic checks and agent stages complete.</p>
+      <div className="mt-5 border-y border-slate-200 py-3">
+        <div className="mb-3 flex items-baseline justify-between gap-3"><p className="font-mono text-[9px] font-semibold tracking-[0.12em] text-slate-500">RUN TIMELINE</p><p className="font-mono text-[9px] text-slate-500">{completedStageCount} OF {RUN_TIMELINE.length} COMPLETE</p></div>
+        <ol className="space-y-2">
+          {RUN_TIMELINE.map((item, index) => {
+            const done = item.milestones.every((milestone) => completed.has(milestone))
+            const active = !done && item.tools.includes(tool)
+            return <li className="flex items-center gap-3" key={item.label}>
+              <span className={`flex size-5 shrink-0 items-center justify-center rounded-full font-mono text-[9px] font-semibold ${done ? 'bg-emerald-600 text-white' : active ? 'bg-blue-700 text-white ring-4 ring-blue-100' : 'bg-slate-100 text-slate-400'}`}>{done ? '✓' : index + 1}</span>
+              <span className={`text-xs ${done ? 'text-slate-700' : active ? 'font-semibold text-blue-900' : 'text-slate-400'}`}>{item.label}</span>
+              {active && <span className="ml-auto font-mono text-[8px] font-semibold text-blue-700">IN PROGRESS</span>}
+            </li>
+          })}
+        </ol>
+      </div>
+      <p className="mt-4 text-xs leading-5 text-slate-500">This timeline reports completed tool stages only; it does not estimate time or physical isolation progress. Keep this page open while analysis completes.</p>
     </div>
   </div>
 }
@@ -116,6 +141,7 @@ function App() {
   const [highRiskService, setHighRiskService] = useState(true)
   const [scopeNote, setScopeNote] = useState('')
   const [isolationRun, setIsolationRun] = useState<IsolationRunStatus | null>(null)
+  const [completedRunTools, setCompletedRunTools] = useState<string[]>([])
   const [isolationResult, setIsolationResult] = useState<IsolationResult | null>(null)
   const [isolationError, setIsolationError] = useState('')
   const [isolationSubmitting, setIsolationSubmitting] = useState(false)
@@ -357,6 +383,9 @@ function App() {
                 progress: { kind: event.kind, tool, updated_at: Date.now() / 1000 },
               },
             } : current)
+            if (event.kind === 'tool_result') {
+              setCompletedRunTools((current) => current.includes(tool) ? current : [...current, tool])
+            }
           },
           onDone: () => { terminalEventReceived = true },
         }, controller.signal)
@@ -518,6 +547,7 @@ function App() {
 
   function resetIsolationRun() {
     setIsolationRun(null)
+    setCompletedRunTools([])
     setIsolationResult(null)
     setIsolationError('')
     setIsolationSubmitting(false)
@@ -863,7 +893,7 @@ function App() {
 
   return (
     <div aria-busy={Boolean(historicalNavigation || isolationSubmitting || runInProgress)} className="h-screen overflow-hidden bg-[#f7f8fa] text-slate-950">
-      {!historicalNavigation && (isolationSubmitting || runInProgress) && <IsolationRunOverlay run={isolationRun} submitting={isolationSubmitting} />}
+      {!historicalNavigation && (isolationSubmitting || runInProgress) && <IsolationRunOverlay completedTools={completedRunTools} run={isolationRun} submitting={isolationSubmitting} />}
       {historicalNavigation && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/30 backdrop-blur-[2px]" role="status">
         <div className="w-80 border border-slate-300 bg-white p-5 shadow-2xl">
           <div className="flex items-center gap-3"><span aria-hidden="true" className="size-5 shrink-0 animate-spin rounded-full border-2 border-blue-200 border-t-blue-700" /><div><p className="font-mono text-[10px] uppercase tracking-[0.12em] text-blue-700">Opening saved {historicalNavigation.kind}</p><p className="mt-1 truncate text-sm font-medium text-slate-900">{historicalNavigation.label}</p></div></div>
