@@ -250,19 +250,21 @@ rather than retained as run artifacts.
 
 ### Start the frontend
 
-The frontend requires Node.js, `pnpm`, and a `GITHUB_PACKAGES_TOKEN` with
-`read:packages` access to the private `@coditation-cnvrt/p360-hitl-viewer`
-package.
+The React application is maintained separately in
+[`coditation-cnvrt/equipment-isolation-agent-ui`](https://github.com/coditation-cnvrt/equipment-isolation-agent-ui).
+It requires Node.js, `pnpm`, and a `GITHUB_PACKAGES_TOKEN` with `read:packages`
+access to the private `@coditation-cnvrt/p360-hitl-viewer` package.
 
 ```bash
-cd frontend
+git clone https://github.com/coditation-cnvrt/equipment-isolation-agent-ui.git
+cd equipment-isolation-agent-ui
 cp .env.example .env.local
 pnpm install
 pnpm dev
 ```
 
-Populate `frontend/.env.local` with the approved CNVRT password-grant client
-configuration and API URL:
+Populate `.env.local` in the UI repository with the approved CNVRT
+password-grant client configuration and API URL:
 
 ```dotenv
 VITE_API_BASE_URL=http://localhost:8088
@@ -272,8 +274,9 @@ VITE_APP_OAUTH_CLIENT_SECRET=<approved-client-secret>
 ```
 
 Never commit tokens or populated credential files. Browser requests authenticate
-through CNVRT and send the resulting bearer token to this API. See
-[`frontend/README.md`](frontend/README.md) for frontend-specific details.
+through CNVRT and send the resulting bearer token to this API. See the
+[UI repository README](https://github.com/coditation-cnvrt/equipment-isolation-agent-ui#readme)
+for frontend-specific details.
 
 ## Tests
 
