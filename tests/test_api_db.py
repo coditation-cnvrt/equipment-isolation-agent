@@ -132,6 +132,17 @@ class ApiDbTests(unittest.TestCase):
         self.assertNotIn("auth_token", persisted["request"])
         self.assertEqual(persisted["result"]["data"][0]["assurance_status"], "not_isolated")
         self.assertNotIn("result", store.list()[0])
+        for _ in range(100):
+            with store._lock:
+                retained = record.run_id in store._records
+            if not retained:
+                break
+            time.sleep(0.01)
+        self.assertFalse(retained)
+        reloaded = store.get(record.run_id)
+        self.assertIsNot(reloaded, record)
+        self.assertEqual(reloaded.status, "succeeded")
+        self.assertEqual(reloaded.result["data"][0]["assurance_status"], "not_isolated")
         store.shutdown()
 
     def test_repository_insert_failure_rejects_run_creation(self):

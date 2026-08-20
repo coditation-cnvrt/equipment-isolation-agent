@@ -95,6 +95,7 @@ class RunRecord:
 class RunStore:
     def __init__(self, max_workers: int = 2, run_timeout_seconds: int = 900, repository=None):
         self._executor = _DaemonWorkerPool(max_workers=max_workers)
+        # PostgreSQL owns run history; this registry coordinates active local workers only.
         self._records: dict[str, RunRecord] = {}
         self._lock = threading.Lock()
         self._closing = False
@@ -223,6 +224,7 @@ class RunStore:
             if timer:
                 timer.cancel()
             record.events.put(None)
+            self._evict_terminal(record)
 
     def _set_progress(self, record: RunRecord, *, kind: str, tool: str) -> None:
         with self._lock:
@@ -260,6 +262,7 @@ class RunStore:
             return
         self._emit_event(record, {"kind": "error", "payload": error})
         record.events.put(None)
+        self._evict_terminal(record)
 
     def _persist(self, record: RunRecord) -> None:
         if self.repository:
@@ -269,6 +272,14 @@ class RunStore:
         if self.repository:
             self.repository.append_event(record.run_id, event)
         record.events.put(event)
+
+    def _evict_terminal(self, record: RunRecord) -> None:
+        """Retain only active runs in memory when PostgreSQL is authoritative."""
+        if not self.repository or record.status not in {"succeeded", "failed"}:
+            return
+        with self._lock:
+            if self._records.get(record.run_id) is record:
+                self._records.pop(record.run_id, None)
 
     def _interrupt_nonterminal_runs(self) -> None:
         error = {"kind": "server_shutdown", "message": "API server shut down before this run completed."}
@@ -280,6 +291,7 @@ class RunStore:
                 if self._mark(record, status="failed", finished_at=time.time(), error=error):
                     self._emit_event(record, {"kind": "error", "payload": error})
                     record.events.put(None)
+                    self._evict_terminal(record)
             except Exception:
                 LOGGER.exception("Failed to persist shutdown state for run %s", record.run_id)
 
