@@ -42,10 +42,6 @@ class IsolationRunRequest(BaseModel):
     collection_id: str = Field(..., min_length=1)
     unigraph_project_id: str = Field(..., min_length=1)
     collection_name: str = ""
-    api_base_url: str = "https://api.plant360.ai:8080"
-    unigraph_api_base_url: str = ""
-    host: str = ""
-    port: str = ""
     traversal_source: str = ""
     max_depth: int | None = None
     work_scope: WorkScopeRequest = Field(default_factory=WorkScopeRequest)
@@ -78,10 +74,6 @@ class EquipmentListRequest(BaseModel):
     collection_id: str = Field(..., min_length=1)
     unigraph_project_id: str = Field(..., min_length=1)
     collection_name: str = ""
-    api_base_url: str = "https://api.plant360.ai:8080"
-    unigraph_api_base_url: str = ""
-    host: str = ""
-    port: str = ""
     traversal_source: str = ""
     limit: int = 0
 

@@ -1,4 +1,5 @@
 """HTTP route handlers for the isolation API."""
+
 from __future__ import annotations
 
 import logging
@@ -70,10 +71,16 @@ def _run_record(request: Request, run_id: str):
         LOGGER.exception("Run read failed")
         raise HTTPException(
             status_code=503,
-            detail={"kind": "run_store_unavailable", "message": "Run persistence is unavailable."},
+            detail={
+                "kind": "run_store_unavailable",
+                "message": "Run persistence is unavailable.",
+            },
         ) from None
     if record is None:
-        raise HTTPException(status_code=404, detail={"kind": "unknown_run", "message": "Unknown run id."})
+        raise HTTPException(
+            status_code=404,
+            detail={"kind": "unknown_run", "message": "Unknown run id."},
+        )
     return record
 
 
@@ -85,7 +92,10 @@ def _bearer_token(authorization: str = "") -> str:
 
 
 def _plant360_token(authorization: str = "") -> str:
-    return _bearer_token(authorization) or os.environ.get("PLANT360_AUTH_TOKEN", "").strip()
+    return (
+        _bearer_token(authorization)
+        or os.environ.get("PLANT360_AUTH_TOKEN", "").strip()
+    )
 
 
 def _require_run_read_auth(authorization: str = "") -> str:
@@ -93,7 +103,10 @@ def _require_run_read_auth(authorization: str = "") -> str:
     if not token:
         raise HTTPException(
             status_code=401,
-            detail={"kind": "missing_auth_token", "message": "Bearer authorization is required."},
+            detail={
+                "kind": "missing_auth_token",
+                "message": "Bearer authorization is required.",
+            },
             headers={"WWW-Authenticate": "Bearer"},
         )
     return token
@@ -112,10 +125,18 @@ def health():
 
 
 @router.post("/equipment")
-def equipment(request_body: EquipmentListRequest, authorization: str = Header(default="")):
+def equipment(
+    request_body: EquipmentListRequest, authorization: str = Header(default="")
+):
     token = _plant360_token(authorization)
     if not token:
-        raise HTTPException(status_code=400, detail={"kind": "missing_auth_token", "message": "Plant360 auth token is required."})
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "kind": "missing_auth_token",
+                "message": "Plant360 auth token is required.",
+            },
+        )
     return {"items": list_project_equipment(request_body, token)}
 
 
@@ -123,27 +144,50 @@ def equipment(request_body: EquipmentListRequest, authorization: str = Header(de
 def planning_context_projects(authorization: str = Header(default="")):
     token = _plant360_token(authorization)
     if not token:
-        raise HTTPException(status_code=400, detail={"kind": "missing_auth_token", "message": "Plant360 auth token is required."})
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "kind": "missing_auth_token",
+                "message": "Plant360 auth token is required.",
+            },
+        )
     try:
         return {"items": list_cnvrt_projects(token)}
     except Exception:
         raise HTTPException(
             status_code=502,
-            detail={"kind": "project_discovery_failed", "message": "Unable to load CNVRT projects."},
+            detail={
+                "kind": "project_discovery_failed",
+                "message": "Unable to load CNVRT projects.",
+            },
         ) from None
 
 
-@router.get("/planning-context/projects/{cnvrt_project_id}/collections", response_model=PlanningCollectionList)
-def planning_context_collections(cnvrt_project_id: int, authorization: str = Header(default="")):
+@router.get(
+    "/planning-context/projects/{cnvrt_project_id}/collections",
+    response_model=PlanningCollectionList,
+)
+def planning_context_collections(
+    cnvrt_project_id: int, authorization: str = Header(default="")
+):
     token = _plant360_token(authorization)
     if not token:
-        raise HTTPException(status_code=400, detail={"kind": "missing_auth_token", "message": "Plant360 auth token is required."})
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "kind": "missing_auth_token",
+                "message": "Plant360 auth token is required.",
+            },
+        )
     try:
         return {"items": list_cnvrt_collections(cnvrt_project_id, token)}
     except Exception:
         raise HTTPException(
             status_code=502,
-            detail={"kind": "collection_discovery_failed", "message": "Unable to load CNVRT collections."},
+            detail={
+                "kind": "collection_discovery_failed",
+                "message": "Unable to load CNVRT collections.",
+            },
         ) from None
 
 
@@ -151,31 +195,62 @@ def planning_context_collections(cnvrt_project_id: int, authorization: str = Hea
     "/planning-context/projects/{cnvrt_project_id}/collections/{collection_id}/drawings",
     response_model=PlanningDrawingList,
 )
-def planning_context_drawings(cnvrt_project_id: int, collection_id: int, authorization: str = Header(default="")):
+def planning_context_drawings(
+    cnvrt_project_id: int, collection_id: int, authorization: str = Header(default="")
+):
     token = _plant360_token(authorization)
     if not token:
-        raise HTTPException(status_code=400, detail={"kind": "missing_auth_token", "message": "Plant360 auth token is required."})
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "kind": "missing_auth_token",
+                "message": "Plant360 auth token is required.",
+            },
+        )
     try:
         return {"items": list_cnvrt_drawings(cnvrt_project_id, collection_id, token)}
     except Exception:
         raise HTTPException(
             status_code=502,
-            detail={"kind": "drawing_discovery_failed", "message": "Unable to load CNVRT drawings."},
+            detail={
+                "kind": "drawing_discovery_failed",
+                "message": "Unable to load CNVRT drawings.",
+            },
         ) from None
 
 
-@router.get("/planning-context/projects/{cnvrt_project_id}/collections/{collection_id}/drawings/{job_id}/image")
-def planning_context_drawing_image(cnvrt_project_id: int, collection_id: int, job_id: int, authorization: str = Header(default="")):
+@router.get(
+    "/planning-context/projects/{cnvrt_project_id}/collections/{collection_id}/drawings/{job_id}/image"
+)
+def planning_context_drawing_image(
+    cnvrt_project_id: int,
+    collection_id: int,
+    job_id: int,
+    authorization: str = Header(default=""),
+):
     token = _plant360_token(authorization)
     if not token:
-        raise HTTPException(status_code=400, detail={"kind": "missing_auth_token", "message": "Plant360 auth token is required."})
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "kind": "missing_auth_token",
+                "message": "Plant360 auth token is required.",
+            },
+        )
     try:
-        content, content_type = get_cnvrt_drawing_image(cnvrt_project_id, collection_id, job_id, token)
-        return Response(content=content, media_type=content_type or "application/octet-stream")
+        content, content_type = get_cnvrt_drawing_image(
+            cnvrt_project_id, collection_id, job_id, token
+        )
+        return Response(
+            content=content, media_type=content_type or "application/octet-stream"
+        )
     except Exception:
         raise HTTPException(
             status_code=502,
-            detail={"kind": "drawing_image_failed", "message": "Unable to load CNVRT drawing image."},
+            detail={
+                "kind": "drawing_image_failed",
+                "message": "Unable to load CNVRT drawing image.",
+            },
         ) from None
 
 
@@ -183,77 +258,147 @@ def planning_context_drawing_image(cnvrt_project_id: int, collection_id: int, jo
 def planning_context_hilt_graph(job_id: int, authorization: str = Header(default="")):
     token = _plant360_token(authorization)
     if not token:
-        raise HTTPException(status_code=400, detail={"kind": "missing_auth_token", "message": "Plant360 auth token is required."})
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "kind": "missing_auth_token",
+                "message": "Plant360 auth token is required.",
+            },
+        )
     try:
         return get_cnvrt_hilt_graph(job_id, token)
     except Exception:
         raise HTTPException(
             status_code=502,
-            detail={"kind": "hilt_graph_failed", "message": "Unable to load the exported HILT graph."},
+            detail={
+                "kind": "hilt_graph_failed",
+                "message": "Unable to load the exported HILT graph.",
+            },
         ) from None
 
 
 @router.get("/planning-context/symbol-projects/{symbol_project_id}/symbols")
-def planning_context_symbols(symbol_project_id: int, authorization: str = Header(default="")):
+def planning_context_symbols(
+    symbol_project_id: int, authorization: str = Header(default="")
+):
     token = _plant360_token(authorization)
     if not token:
-        raise HTTPException(status_code=400, detail={"kind": "missing_auth_token", "message": "Plant360 auth token is required."})
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "kind": "missing_auth_token",
+                "message": "Plant360 auth token is required.",
+            },
+        )
     try:
         return get_hilt_ui_symbols(symbol_project_id, token)
     except Exception:
         raise HTTPException(
             status_code=502,
-            detail={"kind": "symbol_library_failed", "message": "Unable to load the project symbol library."},
+            detail={
+                "kind": "symbol_library_failed",
+                "message": "Unable to load the project symbol library.",
+            },
         ) from None
 
 
 @router.get("/planning-context/drawings/{job_id}/equipment/{node_id}/bbox")
-def planning_context_equipment_bbox(job_id: int, node_id: str, authorization: str = Header(default="")):
+def planning_context_equipment_bbox(
+    job_id: int, node_id: str, authorization: str = Header(default="")
+):
     token = _plant360_token(authorization)
     if not token:
-        raise HTTPException(status_code=400, detail={"kind": "missing_auth_token", "message": "Plant360 auth token is required."})
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "kind": "missing_auth_token",
+                "message": "Plant360 auth token is required.",
+            },
+        )
     try:
         bbox = get_equipment_bbox(job_id, node_id, token)
         if not bbox:
-            raise HTTPException(status_code=404, detail={"kind": "equipment_bbox_not_found", "message": "Equipment is not located on this drawing."})
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "kind": "equipment_bbox_not_found",
+                    "message": "Equipment is not located on this drawing.",
+                },
+            )
         return {"bbox": bbox}
     except HTTPException:
         raise
     except Exception:
-        raise HTTPException(status_code=502, detail={"kind": "equipment_bbox_failed", "message": "Unable to load equipment bbox."}) from None
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "kind": "equipment_bbox_failed",
+                "message": "Unable to load equipment bbox.",
+            },
+        ) from None
 
 
 @router.get(
     "/planning-context/projects/{cnvrt_project_id}/collections/{collection_id}/unigraph-projects",
     response_model=PlanningUniGraphProjectList,
 )
-def planning_context_unigraph_projects(cnvrt_project_id: int, collection_id: int, authorization: str = Header(default="")):
+def planning_context_unigraph_projects(
+    cnvrt_project_id: int, collection_id: int, authorization: str = Header(default="")
+):
     token = _plant360_token(authorization)
     if not token:
-        raise HTTPException(status_code=400, detail={"kind": "missing_auth_token", "message": "Plant360 auth token is required."})
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "kind": "missing_auth_token",
+                "message": "Plant360 auth token is required.",
+            },
+        )
     try:
         return {"items": list_unigraph_projects(cnvrt_project_id, collection_id, token)}
     except Exception:
         raise HTTPException(
             status_code=502,
-            detail={"kind": "unigraph_project_discovery_failed", "message": "Unable to load UniGraph projects."},
+            detail={
+                "kind": "unigraph_project_discovery_failed",
+                "message": "Unable to load UniGraph projects.",
+            },
         ) from None
 
 
 @router.post("/isolation-runs", response_model=RunAccepted, status_code=202)
-def create_run(request: Request, request_body: IsolationRunRequest, authorization: str = Header(default="")):
+def create_run(
+    request: Request,
+    request_body: IsolationRunRequest,
+    authorization: str = Header(default=""),
+):
     token = _plant360_token(authorization)
     if not token:
-        raise HTTPException(status_code=400, detail={"kind": "missing_auth_token", "message": "Plant360 auth token is required."})
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "kind": "missing_auth_token",
+                "message": "Plant360 auth token is required.",
+            },
+        )
     if not os.environ.get("GEMINI_API_KEY"):
-        raise HTTPException(status_code=503, detail={"kind": "missing_gemini_api_key", "message": "GEMINI_API_KEY is not configured."})
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "kind": "missing_gemini_api_key",
+                "message": "GEMINI_API_KEY is not configured.",
+            },
+        )
     try:
         record = _store(request).create(request_body, token)
     except Exception:
         LOGGER.exception("Run creation persistence failed")
         raise HTTPException(
             status_code=503,
-            detail={"kind": "run_store_unavailable", "message": "Run persistence is unavailable."},
+            detail={
+                "kind": "run_store_unavailable",
+                "message": "Run persistence is unavailable.",
+            },
         ) from None
     return RunAccepted(
         run_id=record.run_id,
@@ -292,7 +437,10 @@ def list_runs(
         LOGGER.exception("Run listing failed")
         raise HTTPException(
             status_code=503,
-            detail={"kind": "run_store_unavailable", "message": "Run persistence is unavailable."},
+            detail={
+                "kind": "run_store_unavailable",
+                "message": "Run persistence is unavailable.",
+            },
         ) from None
     return {"items": items}
 
@@ -307,14 +455,19 @@ def create_plan_from_run(
     _require_run_read_auth(authorization)
     repository = _plan_repository(request)
     try:
-        plan, created = repository.create_plan_from_run(request_body.run_id, request_body.area_code)
+        plan, created = repository.create_plan_from_run(
+            request_body.run_id, request_body.area_code
+        )
     except PlanDomainError as error:
         _raise_plan_error(error)
     except Exception:
         LOGGER.exception("Plan promotion failed")
         raise HTTPException(
             status_code=503,
-            detail={"kind": "plan_store_unavailable", "message": "Saved-plan persistence is unavailable."},
+            detail={
+                "kind": "plan_store_unavailable",
+                "message": "Saved-plan persistence is unavailable.",
+            },
         ) from None
     response.status_code = 201 if created else 200
     if created:
@@ -354,13 +507,18 @@ def list_plans(
         LOGGER.exception("Plan listing failed")
         raise HTTPException(
             status_code=503,
-            detail={"kind": "plan_store_unavailable", "message": "Saved-plan persistence is unavailable."},
+            detail={
+                "kind": "plan_store_unavailable",
+                "message": "Saved-plan persistence is unavailable.",
+            },
         ) from None
     return {"items": items, "limit": limit, "offset": offset, "total": total}
 
 
 @router.get("/isolation-plans/{plan_id}", response_model=IsolationPlanDetail)
-def plan_detail(request: Request, plan_id: UUID, authorization: str = Header(default="")):
+def plan_detail(
+    request: Request, plan_id: UUID, authorization: str = Header(default="")
+):
     _require_run_read_auth(authorization)
     repository = _plan_repository(request)
     try:
@@ -369,10 +527,16 @@ def plan_detail(request: Request, plan_id: UUID, authorization: str = Header(def
         LOGGER.exception("Plan read failed")
         raise HTTPException(
             status_code=503,
-            detail={"kind": "plan_store_unavailable", "message": "Saved-plan persistence is unavailable."},
+            detail={
+                "kind": "plan_store_unavailable",
+                "message": "Saved-plan persistence is unavailable.",
+            },
         ) from None
     if plan is None:
-        raise HTTPException(status_code=404, detail={"kind": "unknown_plan", "message": "Unknown plan id."})
+        raise HTTPException(
+            status_code=404,
+            detail={"kind": "unknown_plan", "message": "Unknown plan id."},
+        )
     return plan
 
 
@@ -387,9 +551,22 @@ def run_result(request: Request, run_id: str, authorization: str = Header(defaul
     _require_run_read_auth(authorization)
     record = _run_record(request, run_id)
     if record.status != "succeeded":
-        raise HTTPException(status_code=409, detail={"kind": "result_not_ready", "status": record.status, "error": record.error})
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "kind": "result_not_ready",
+                "status": record.status,
+                "error": record.error,
+            },
+        )
     if record.result is None:
-        raise HTTPException(status_code=404, detail={"kind": "result_not_available", "message": "Result is not available."})
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "kind": "result_not_available",
+                "message": "Result is not available.",
+            },
+        )
     return record.result
 
 
@@ -399,7 +576,10 @@ def run_trace(request: Request, run_id: str, authorization: str = Header(default
     record = _run_record(request, run_id)
     if record.trace is not None:
         return record.trace
-    raise HTTPException(status_code=404, detail={"kind": "trace_not_available", "message": "Trace is not available."})
+    raise HTTPException(
+        status_code=404,
+        detail={"kind": "trace_not_available", "message": "Trace is not available."},
+    )
 
 
 @router.get("/isolation-runs/{run_id}/events")

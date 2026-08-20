@@ -27,8 +27,11 @@ cp .env.example .env
 
 For CLI runs, set `PLANT360_AUTH_TOKEN` when drawing images/bboxes are needed and
 set `GEMINI_API_KEY` for the agentic runner. The deterministic runner does not
-need Gemini or PostgreSQL. The HTTP API and React application additionally
-require PostgreSQL as described below.
+need Gemini or PostgreSQL. The HTTP API reads its trusted upstream service URLs
+from `CNVRT_API_BASE_URL` and `UNIGRAPH_API_BASE_URL`, and its Gremlin connection
+from `JANUSGRAPH_URL`; clients cannot override these connections per request.
+The HTTP API and React application additionally require PostgreSQL as described
+below.
 
 ## Run
 

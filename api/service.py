@@ -21,10 +21,27 @@ from pipeline.config_builder import build_run_config
 from pipeline.equipment import list_equipment
 
 
+DEFAULT_CNVRT_API_BASE_URL = "https://api.plant360.ai:8080"
 _STLM_BBOX_CACHE_TTL_SECONDS = 300
 _STLM_BBOX_CACHE_MAX_ENTRIES = 16
 _stlm_bbox_cache: OrderedDict[tuple[str, int], tuple[float, dict[str, list[int]]]] = OrderedDict()
 _stlm_bbox_cache_lock = Lock()
+
+
+def _configured_base_url(name: str, default: str) -> str:
+    return os.environ.get(name, "").strip().rstrip("/") or default
+
+
+def _cnvrt_api_base_url() -> str:
+    return _configured_base_url("CNVRT_API_BASE_URL", DEFAULT_CNVRT_API_BASE_URL)
+
+
+def _unigraph_api_base_url() -> str:
+    return _configured_base_url("UNIGRAPH_API_BASE_URL", DEFAULT_UNIGRAPH_API_BASE_URL)
+
+
+def _cnvrt_client(auth_token: str) -> Plant360Client:
+    return Plant360Client(ApiConfig(base_url=_cnvrt_api_base_url(), auth_token=auth_token))
 
 
 def config_from_run_request(request, auth_token: str):
@@ -36,14 +53,12 @@ def config_from_run_request(request, auth_token: str):
         project_config="",
         project_profile="__api_no_profile__",
         auth_token=auth_token,
-        api_base_url=request.api_base_url,
+        api_base_url=_cnvrt_api_base_url(),
         verify_ssl=True,
-        unigraph_api_base_url=request.unigraph_api_base_url,
+        unigraph_api_base_url=_unigraph_api_base_url(),
         cnvrt_project_id=request.cnvrt_project_id,
         collection_id=request.collection_id,
         collection_name=request.collection_name,
-        host=request.host,
-        port=request.port,
         project_id=request.unigraph_project_id,
         traversal_source=request.traversal_source,
         max_depth=request.max_depth,
@@ -80,14 +95,12 @@ def config_from_equipment_request(request, auth_token: str):
         project_config="",
         project_profile="__api_no_profile__",
         auth_token=auth_token,
-        api_base_url=request.api_base_url,
+        api_base_url=_cnvrt_api_base_url(),
         verify_ssl=True,
-        unigraph_api_base_url=request.unigraph_api_base_url,
+        unigraph_api_base_url=_unigraph_api_base_url(),
         cnvrt_project_id=request.cnvrt_project_id,
         collection_id=request.collection_id,
         collection_name=request.collection_name,
-        host=request.host,
-        port=request.port,
         project_id=request.unigraph_project_id,
         traversal_source=request.traversal_source,
     )
@@ -144,7 +157,7 @@ def _is_unigraph_project_mapped(client: Plant360Client, request) -> bool:
 
 def list_cnvrt_projects(auth_token: str) -> list[dict[str, str]]:
     """Return the authenticated user's CNVRT projects for planning-context selection."""
-    client = Plant360Client(ApiConfig(auth_token=auth_token))
+    client = _cnvrt_client(auth_token)
     items = _list_cnvrt_pages(client, "/projects", "project")
     return [
         {
@@ -180,7 +193,7 @@ def _list_cnvrt_pages(client: Plant360Client, path: str, item_name: str) -> list
 
 def list_cnvrt_collections(cnvrt_project_id: int, auth_token: str) -> list[dict[str, str]]:
     """Return the authenticated user's collections for a CNVRT project."""
-    client = Plant360Client(ApiConfig(auth_token=auth_token))
+    client = _cnvrt_client(auth_token)
     items = _list_cnvrt_pages(client, f"/projects/{cnvrt_project_id}/collections", "collection")
 
     return [
@@ -196,7 +209,7 @@ def list_cnvrt_collections(cnvrt_project_id: int, auth_token: str) -> list[dict[
 def list_cnvrt_drawings(cnvrt_project_id: int, collection_id: int, auth_token: str) -> list[dict[str, str]]:
     """Return the authenticated user's drawing jobs for a CNVRT collection."""
     path = f"/projects/{cnvrt_project_id}/collections/{collection_id}/jobs"
-    client = Plant360Client(ApiConfig(auth_token=auth_token))
+    client = _cnvrt_client(auth_token)
     items = _list_cnvrt_pages(client, path, "drawing")
 
     return [
@@ -214,17 +227,17 @@ def list_cnvrt_drawings(cnvrt_project_id: int, collection_id: int, auth_token: s
 
 def get_cnvrt_drawing_image(cnvrt_project_id: int, collection_id: int, job_id: int, auth_token: str):
     path = f"/projects/{cnvrt_project_id}/collections/{collection_id}/jobs/{job_id}/image/source"
-    return Plant360Client(ApiConfig(auth_token=auth_token)).get_bytes(path)
+    return _cnvrt_client(auth_token).get_bytes(path)
 
 
 def get_cnvrt_hilt_graph(job_id: int, auth_token: str):
     """Return the exported L2 HILT graph without transforming its domain payload."""
-    return Plant360Client(ApiConfig(auth_token=auth_token)).hilt_graph(job_id)
+    return _cnvrt_client(auth_token).hilt_graph(job_id)
 
 
 def get_hilt_ui_symbols(symbol_project_id: int, auth_token: str):
     """Return the HILT job's SVG symbol library without assuming its ID matches the planning project."""
-    return Plant360Client(ApiConfig(auth_token=auth_token)).get_json(
+    return _cnvrt_client(auth_token).get_json(
         f"/ui_symbol/get_ui_symbol_format?project_id={symbol_project_id}"
     )
 
@@ -239,7 +252,7 @@ def get_equipment_bbox(job_id: int, node_id: str, auth_token: str) -> list[int]:
             _stlm_bbox_cache.move_to_end(cache_key)
             return cached[1].get(str(node_id), [])
 
-    symbols = extract_symbols(Plant360Client(ApiConfig(auth_token=auth_token)).stlm_symbols(job_id))
+    symbols = extract_symbols(_cnvrt_client(auth_token).stlm_symbols(job_id))
     index = {}
     for symbol in symbols:
         bbox = symbol_bbox(symbol)
@@ -260,7 +273,7 @@ def get_equipment_bbox(job_id: int, node_id: str, auth_token: str) -> list[int]:
 
 def list_unigraph_projects(cnvrt_project_id: int, collection_id: int, auth_token: str) -> list[dict[str, str | bool]]:
     """Return every UniGraph project mapped to the selected CNVRT project and collection."""
-    client = Plant360Client(ApiConfig(base_url=DEFAULT_UNIGRAPH_API_BASE_URL, auth_token=auth_token))
+    client = Plant360Client(ApiConfig(base_url=_unigraph_api_base_url(), auth_token=auth_token))
     project_exports = client.get_json(f"/api/projects/by-cnvrt?cnvrt_project_id={cnvrt_project_id}")
     collection_exports = client.get_json(
         f"/api/projects/by-cnvrt?cnvrt_project_id={cnvrt_project_id}&cnvrt_collection_id={collection_id}"

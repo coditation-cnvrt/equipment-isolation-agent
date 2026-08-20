@@ -152,6 +152,13 @@ class ApiContractTests(unittest.TestCase):
         )
         self.assertEqual(request.request_schema_version, "1.0")
 
+    def test_request_models_do_not_expose_upstream_connections(self):
+        for model in (IsolationRunRequest, EquipmentListRequest):
+            self.assertNotIn("api_base_url", model.model_fields)
+            self.assertNotIn("unigraph_api_base_url", model.model_fields)
+            self.assertNotIn("host", model.model_fields)
+            self.assertNotIn("port", model.model_fields)
+
     def test_request_accepts_exact_selected_asset_identity(self):
         request = IsolationRunRequest(
             equipment_tag="P3",
@@ -219,7 +226,19 @@ class ApiContractTests(unittest.TestCase):
                 selection_source="hilt_equipment_list",
             ),
         )
-        config = config_from_run_request(request, "plant-token")
+        with mock.patch.dict(
+            os.environ,
+            {
+                "CNVRT_API_BASE_URL": "https://cnvrt.internal.example/",
+                "UNIGRAPH_API_BASE_URL": "https://unigraph.internal.example/",
+                "JANUSGRAPH_URL": "wss://janus.internal.example:8182/gremlin",
+            },
+        ):
+            config = config_from_run_request(request, "plant-token")
+        self.assertEqual(config.api.base_url, "https://cnvrt.internal.example")
+        self.assertEqual(config.unigraph_api_base_url, "https://unigraph.internal.example")
+        self.assertEqual(config.graph.host, "janus.internal.example")
+        self.assertEqual(config.graph.port, "8182")
         self.assertEqual(config.selected_asset.hilt_entity_id, "hilt-p3")
         self.assertEqual(config.selected_asset.context.job_id, "2151")
         self.assertEqual(config.selected_asset.context.unigraph_project_id, "15")
@@ -308,8 +327,9 @@ class ApiContractTests(unittest.TestCase):
                 {"id": 278, "name": "Bio", "status": "processing"},
             ],
         }
-        with mock.patch("api.service.Plant360Client", return_value=client) as client_class:
-            projects = list_cnvrt_projects("user-token")
+        with mock.patch.dict(os.environ, {"CNVRT_API_BASE_URL": "https://cnvrt.internal.example/"}):
+            with mock.patch("api.service.Plant360Client", return_value=client) as client_class:
+                projects = list_cnvrt_projects("user-token")
 
         self.assertEqual(
             projects,
@@ -319,6 +339,7 @@ class ApiContractTests(unittest.TestCase):
             ],
         )
         self.assertEqual(client_class.call_args.args[0].auth_token, "user-token")
+        self.assertEqual(client_class.call_args.args[0].base_url, "https://cnvrt.internal.example")
         client.get_json.assert_called_once_with("/projects")
 
     def test_cnvrt_project_discovery_follows_all_pages(self):
@@ -505,9 +526,11 @@ class ApiContractTests(unittest.TestCase):
             {"collections": [{"cnvrt_collection_id": 206}]},
             {"collections": [{"cnvrt_collection_id": 207}]},
         ]
-        with mock.patch("api.service.Plant360Client", return_value=client):
-            projects = list_unigraph_projects(277, 206, "user-token")
+        with mock.patch.dict(os.environ, {"UNIGRAPH_API_BASE_URL": "https://unigraph.internal.example/"}):
+            with mock.patch("api.service.Plant360Client", return_value=client) as client_class:
+                projects = list_unigraph_projects(277, 206, "user-token")
 
+        self.assertEqual(client_class.call_args.args[0].base_url, "https://unigraph.internal.example")
         self.assertEqual([project["id"] for project in projects], ["15"])
         self.assertTrue(projects[0]["has_taxonomy"])
         self.assertEqual(
