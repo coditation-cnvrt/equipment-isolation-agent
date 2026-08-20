@@ -14,10 +14,27 @@ from api.runs import RunStore
 from pipeline.env import load_dotenv
 
 
+def _validate_server_side_environment() -> None:
+    missing = []
+    if not os.environ.get("GEMINI_API_KEY"):
+        missing.append("GEMINI_API_KEY")
+    if not os.environ.get("CNVRT_API_BASE_URL"):
+        missing.append("CNVRT_API_BASE_URL")
+    if not os.environ.get("UNIGRAPH_API_BASE_URL"):
+        missing.append("UNIGRAPH_API_BASE_URL")
+    if not os.environ.get("JANUSGRAPH_URL"):
+        missing.append("JANUSGRAPH_URL")
+    if missing:
+        raise RuntimeError(
+            "Server is missing required configuration: " + ", ".join(sorted(missing))
+        )
+
+
 def create_app() -> FastAPI:
     load_dotenv()
     max_workers = int(os.environ.get("EIA_MAX_CONCURRENT_RUNS") or "2")
     run_timeout = int(os.environ.get("EIA_RUN_TIMEOUT_SECONDS") or "900")
+    _validate_server_side_environment()
     pg_config = postgres_config_from_env()
     if not pg_config.configured:
         raise RuntimeError("PostgreSQL is required; configure POSTGRES_HOST, POSTGRES_DB, and POSTGRES_USER")

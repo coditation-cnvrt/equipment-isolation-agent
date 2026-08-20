@@ -381,14 +381,6 @@ def create_run(
                 "message": "Plant360 auth token is required.",
             },
         )
-    if not os.environ.get("GEMINI_API_KEY"):
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "kind": "missing_gemini_api_key",
-                "message": "GEMINI_API_KEY is not configured.",
-            },
-        )
     try:
         record = _store(request).create(request_body, token)
     except Exception:

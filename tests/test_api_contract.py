@@ -7,6 +7,7 @@ from unittest import mock
 from fastapi import HTTPException
 from pydantic import ValidationError
 
+from api.app import _validate_server_side_environment
 from api.models import EquipmentListRequest, IsolationRunRequest, RunStatus, SelectedAssetRequest
 from api.routes import (
     create_run,
@@ -250,12 +251,14 @@ class ApiContractTests(unittest.TestCase):
             done = self._wait(accepted.run_id)
         self.assertEqual(done["status"], "succeeded")
 
-    def test_create_run_requires_gemini_key(self):
-        os.environ.pop("GEMINI_API_KEY", None)
-        with self.assertRaises(HTTPException) as caught:
-            self._submit()
-        self.assertEqual(caught.exception.status_code, 503)
-        self.assertEqual(caught.exception.detail["kind"], "missing_gemini_api_key")
+    def test_startup_requires_gemini_api_key(self):
+        saved = os.environ.pop("GEMINI_API_KEY", None)
+        try:
+            with self.assertRaises(RuntimeError):
+                _validate_server_side_environment()
+        finally:
+            if saved is not None:
+                os.environ["GEMINI_API_KEY"] = saved
 
     def test_unknown_run_returns_404(self):
         with self.assertRaises(HTTPException) as caught:
