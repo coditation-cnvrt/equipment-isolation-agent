@@ -29,13 +29,15 @@ uv run python eval_compare.py BT-11 C-02
 
 ## Environment
 
-- Python 3.11 managed by `uv`; deps in `pyproject.toml`: `gremlinpython`, `requests`, `google-genai>=2.10.0`
+- Python 3.11 managed by `uv`; key dependencies in `pyproject.toml` include
+  `gremlinpython`, `requests`, `google-genai`, FastAPI, SQLAlchemy, Alembic,
+  and the psycopg PostgreSQL driver.
 - Virtual env at `.venv/` (created by `uv sync`)
 - `.env` is git-ignored; copy `.env.example` → `.env` and set `PLANT360_AUTH_TOKEN`, `GEMINI_API_KEY`, and optionally `GEMINI_MODEL`, `JANUSGRAPH_URL` / `JANUSGRAPH_USERNAME` / `JANUSGRAPH_PASSWORD`
 - API persistence requires Postgres via separate `.env` fields:
   `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`,
-  `POSTGRES_PASSWORD`, `POSTGRES_SSLMODE`. The schema source is `schema.sql`;
-  set `EIA_AUTO_INIT_SCHEMA_ON_STARTUP=true` only for explicit startup DDL.
+  `POSTGRES_PASSWORD`, `POSTGRES_SSLMODE`. Alembic migrations are the
+  authoritative schema source; run `uv run alembic upgrade head` before startup.
 - `GEMINI_API_KEY` is required by the agentic runner (`python -m agent`); the deterministic `run.py` does not need it
 - `.env` is loaded by a hand-rolled parser in `run.py`/`agent/cli.py` (`load_dotenv`) — not python-dotenv
 
@@ -47,6 +49,14 @@ uv run python eval_compare.py BT-11 C-02
 | Run isolation (deterministic) | `uv run python -m run --equipment <TAG> [--job-name <NAME>] [--job-id <ID>]` |
 | Run isolation (agentic / Gemini) | `uv run python -m agent --equipment <TAG> [--model gemini-2.5-flash] [--max-steps 16]` |
 | Run API service | `uv run python -m api` |
+| Apply database migrations | `uv run alembic upgrade head` |
+| Show database revision | `uv run alembic current` |
+| Show migration head | `uv run alembic heads` |
+| Check ORM/schema drift | `uv run alembic check` |
+| Create migration | `uv run alembic revision --autogenerate -m "<description>"` |
+| Preview upgrade SQL | `uv run alembic upgrade head --sql` |
+| Verify ORM on disposable PostgreSQL | `uv run python scripts/verify_postgres_orm.py` |
+| Verify installed-wheel resources | `uv build --wheel && uv run python scripts/verify_wheel.py dist/equipment_isolation-*.whl` |
 | List equipment | `uv run python -m run --list-equipment [--equipment-limit N]` |
 | Run tests | `uv run python -m unittest discover -s tests` |
 | Eval agent vs baseline | `uv run python eval_compare.py <TAG>...` (or `--limit N`) |
@@ -55,6 +65,38 @@ uv run python eval_compare.py BT-11 C-02
 | Custom graph host/source | `--host <IP> --port <PORT> --project-id <UNIGRAPH_ID>`; traversal source defaults to `graph<UNIGRAPH_ID>_traversal` |
 | Override output dir | `--output-dir /path/to/dir` |
 | Quiet mode | `--quiet` |
+
+## Database Migration Workflow
+
+- Alembic migrations under `api/migrations/versions/` are the authoritative
+  schema history. The root `alembic.ini` supports repository CLI commands;
+  runtime migration-head checks load the application-owned migration package
+  through `importlib.resources`. SQLAlchemy models in `api/db_models.py` define
+  the current runtime schema and stay internal to the repository layer.
+- After changing ORM metadata, run
+  `uv run alembic revision --autogenerate -m "<description>"`, then explicitly
+  review and complete both `upgrade()` and `downgrade()`.
+- Autogenerate is a proposal, not approval. Renames, data backfills, standalone
+  sequences, JSONB expressions, partial indexes, PostgreSQL-specific changes,
+  and destructive operations require deliberate migration edits and review.
+- Run `uv run alembic check` to detect ORM/database drift. Never use
+  `Base.metadata.create_all()` in application startup or deployment.
+- Before applying a new revision, inspect `uv run alembic history --verbose`
+  and preview SQL with `uv run alembic upgrade head --sql` when practical.
+- Apply migrations as a deployment step with `uv run alembic upgrade head`.
+  Verify both `uv run alembic current` and `uv run alembic heads` report the
+  same head before starting the API.
+- The API must never apply DDL on startup. Startup should fail clearly when the
+  database is missing, incomplete, unversioned, or behind the packaged head.
+- A fresh database must run `upgrade head`. Use `stamp` only to adopt an
+  existing database after its schema is verified to match the stamped revision.
+- Treat downgrades and database recreation as destructive. Preserve immutable
+  runs/plans with a verified backup when their data matters, resolve the exact
+  database name first, and never reset a shared or production database as part
+  of routine development.
+- After a migration, run backend tests, `git diff --check`, and `git status`.
+  For non-trivial DDL, also migrate a disposable PostgreSQL database and exercise
+  repository readiness and affected persistence operations.
 
 ## Architecture
 
@@ -149,9 +191,9 @@ HTML viewer.
   when no request token is supplied.
 - `POSTGRES_HOST`, `POSTGRES_DB`, and `POSTGRES_USER` are required by the API.
   Run request/status/result/trace/events and saved plans live only in PostgreSQL;
-  startup fails when PostgreSQL is unavailable or the schema is incomplete. Set
-  `EIA_AUTO_INIT_SCHEMA_ON_STARTUP=true` only when this process should initialize
-  `schema.sql` on startup. Drawing/HILT content is proxied from CNVRT, not retained locally.
+  startup fails when PostgreSQL is unavailable or is not at the packaged Alembic
+  migration head. The API never applies DDL on startup. Drawing/HILT content is
+  proxied from CNVRT, not retained locally.
 - Isolation policy: max depth 3; eligible classes = valves/blinds/flanges/breakers/disconnects; conditional classes (check/control/undefined valve) selected but flagged manual-review
 - Work scope defaults: intrusive=true, high_risk_service=true → requires positive isolation
 
@@ -177,7 +219,10 @@ HTML viewer uses a blank canvas unless `--image-url` or the API image download s
 - Deterministic pipeline code at project root (no subpackage); shared domain types in `domain/`
 - Agentic code in the `agent/` package
 - Single-module imports use absolute names (e.g., `from bbox import ...`)
-- No generated code or migrations
+- Runtime persistence uses synchronous SQLAlchemy ORM sessions over the psycopg
+  PostgreSQL driver. ORM entities must not leak into routes, Pydantic contracts,
+  or deterministic safety-domain logic. Alembic owns schema history and every
+  ORM schema change requires a reviewed migration.
 
 ## Unigraph Backend Reference
 

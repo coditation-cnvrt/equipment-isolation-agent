@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.auth import CnvrtAuthMiddleware
-from api.db import PostgresRunRepository, auto_init_schema_on_startup, init_schema, postgres_config_from_env
+from api.db import PostgresRunRepository, postgres_config_from_env
 from api.routes import router
 from api.runs import RunStore
 from pipeline.env import load_dotenv
@@ -44,8 +44,6 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         try:
-            if auto_init_schema_on_startup():
-                init_schema(pg_config)
             repository.check_ready()
             yield
         finally:

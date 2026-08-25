@@ -1,6 +1,6 @@
 import unittest
 from datetime import datetime, timezone
-from pathlib import Path
+from importlib.resources import files
 from types import SimpleNamespace
 from uuid import UUID
 
@@ -160,13 +160,17 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(detail["versions"][0]["version_no"], 1)
         self.assertIsNone(detail["active_plan_version_id"])
 
-    def test_schema_contains_bridge_constraints(self):
-        schema = Path("schema.sql").read_text(encoding="utf-8")
-        self.assertIn("CREATE TABLE IF NOT EXISTS isolation_plan", schema)
-        self.assertIn("CREATE TABLE IF NOT EXISTS plan_version", schema)
-        self.assertIn("CREATE TABLE IF NOT EXISTS external_run_link", schema)
-        self.assertIn("external_run_link_one_derivation_idx", schema)
-        self.assertIn("FOREIGN KEY (plan_id, parent_plan_version_id)", schema)
+    def test_baseline_migration_contains_bridge_constraints(self):
+        migration = (
+            files("api.migrations.versions")
+            .joinpath("0001_current_schema.py")
+            .read_text(encoding="utf-8")
+        )
+        self.assertIn('op.create_table(\n        "isolation_plan"', migration)
+        self.assertIn('op.create_table(\n        "plan_version"', migration)
+        self.assertIn('op.create_table(\n        "external_run_link"', migration)
+        self.assertIn("external_run_link_one_derivation_idx", migration)
+        self.assertIn("plan_version_plan_id_parent_plan_version_id_fkey", migration)
 
 
 if __name__ == "__main__":

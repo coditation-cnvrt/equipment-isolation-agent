@@ -167,23 +167,6 @@ sudo -u postgres psql -c "CREATE ROLE eqiso_app WITH LOGIN PASSWORD 'replace-wit
 sudo -u postgres createdb --owner=eqiso_app eqiso
 ```
 
-Apply the repository schema and verify the required tables:
-
-```bash
-PGPASSWORD='replace-with-a-strong-password' \
-  psql -h localhost -U eqiso_app -d eqiso -f schema.sql
-
-PGPASSWORD='replace-with-a-strong-password' \
-  psql -h localhost -U eqiso_app -d eqiso -c '\\dt'
-```
-
-If PostgreSQL and an authorized role already exist, the shorter setup is:
-
-```bash
-createdb eqiso
-psql -d eqiso -f schema.sql
-```
-
 Configure `.env` for that database:
 
 ```dotenv
@@ -195,11 +178,132 @@ POSTGRES_PASSWORD=<the-strong-password-created-above>
 POSTGRES_SSLMODE=prefer
 ```
 
-For a remote or differently named database, pass the equivalent `-h`, `-p`,
-`-U`, and `-d` arguments to `psql`. `schema.sql` is the development/bootstrap
-schema source. Set `EIA_AUTO_INIT_SCHEMA_ON_STARTUP=true` only when this process
-is explicitly responsible for applying it; the recommended default is `false`.
-Production schema changes should be applied in a controlled deployment step.
+Apply all Alembic migrations and verify the current revision:
+
+```bash
+uv run alembic upgrade head
+uv run alembic current
+```
+
+If PostgreSQL and an authorized role already exist, create the application
+database, configure `.env`, and then run the same Alembic commands.
+
+Alembic reads the separate `POSTGRES_*` fields above; a database URL is not
+required. Migrations are the authoritative schema source and must be applied in
+a controlled deployment step before the API starts. The API never applies DDL
+on startup and fails when the database is not at the packaged migration head.
+
+The baseline revision, `0001_current_schema`, exactly represents the former
+`schema.sql`. For an existing database that was created from that current schema
+and has not drifted, adopt it once without replaying its `CREATE` statements:
+
+```bash
+uv run alembic stamp 0001_current_schema
+uv run alembic current
+```
+
+Do not stamp a database with missing objects, local schema edits, or legacy
+`isolation_runs.artifacts` / `isolation_runs.run_dir` columns. Reconcile such a
+database explicitly before marking it as the baseline.
+
+### Alembic cheat sheet
+
+Alembic creates and orders revision files, records the applied revision, and
+executes upgrades and downgrades. SQLAlchemy ORM metadata defines the current
+application schema, while Alembic migrations remain its reviewed deployment
+history. The API uses synchronous SQLAlchemy sessions internally and does not
+expose ORM entities through its FastAPI/Pydantic contracts.
+
+Inspect migration state:
+
+```bash
+uv run alembic current
+uv run alembic heads
+uv run alembic history --verbose
+uv run alembic check
+```
+
+After editing ORM metadata, generate a candidate migration under
+`api/migrations/versions/`, review both directions, and inspect the SQL before
+applying it. The root `alembic.ini` is the CLI entry point; runtime startup
+resolves the same application-owned migration package through Python package
+resources, so installed wheels do not depend on a source checkout.
+
+```bash
+uv run alembic revision --autogenerate -m "add request schema versions"
+uv run alembic upgrade head --sql
+uv run alembic upgrade head
+uv run alembic current
+uv run alembic check
+```
+
+Autogenerate must always be reviewed. Renames, data backfills, standalone
+sequences, JSONB expression indexes, partial indexes, destructive changes, and
+other PostgreSQL-specific behavior commonly need explicit Alembic operations.
+Never call `Base.metadata.create_all()` from application startup; every schema
+change must have a committed migration. Run the backend tests and repository
+checks after applying a migration:
+
+```bash
+uv run python -m unittest discover -s tests
+git diff --check
+git status --short
+```
+
+For a non-trivial persistence or migration change, run the disposable PostgreSQL
+verification. It inspects the configured database, creates a uniquely named
+sibling database, applies and reverses the migration, upgrades it again,
+exercises the ORM repository and API lifespan, compares both catalogs, and
+drops the disposable database:
+
+```bash
+uv run python scripts/verify_postgres_orm.py
+```
+
+For release packaging, build the wheel and run the isolated-layout verifier. It
+checks that runtime modules, the OSHA and instrument resources, the Alembic
+configuration/template/revisions, and migration-head discovery all work without
+the repository on `sys.path`:
+
+```bash
+uv build --wheel
+uv run python scripts/verify_wheel.py dist/equipment_isolation-*.whl
+```
+
+Downgrade one revision only when its data-loss implications have been reviewed:
+
+```bash
+uv run alembic downgrade -1
+```
+
+For a destructive local reset, first stop the API and back up any data that must
+be retained. Then recreate exactly the configured development database:
+
+```bash
+pg_dump -U postgres --format=custom --file=eqiso-before-reset.dump eqiso
+```
+
+```sql
+-- Run in: psql -U postgres
+DROP DATABASE eqiso;
+CREATE DATABASE eqiso OWNER eqiso_app;
+\q
+```
+
+Recreate the complete schema and verify it:
+
+```bash
+uv sync
+uv run alembic upgrade head
+uv run alembic current
+uv run alembic heads
+psql -U postgres -d eqiso -c '\dt'
+```
+
+Both Alembic status commands should report the same revision with `(head)`.
+Use `upgrade head`, not `stamp`, for a fresh database. `stamp` is reserved for
+adopting an existing database whose schema has already been verified to match a
+known revision.
 
 Optional connection-pool settings are `POSTGRES_POOL_MAX_SIZE` (default `8`) and
 `POSTGRES_POOL_TIMEOUT_SECONDS` (default `5`).
@@ -212,7 +316,7 @@ uv run python -m api
 
 By default, the server listens on `0.0.0.0:8088`. Override with `EIA_HOST` and
 `EIA_PORT`. Startup fails if PostgreSQL is unconfigured, unreachable, or does
-not contain the complete schema.
+not match the packaged Alembic migration head.
 
 API runs use the agentic runner, so `GEMINI_API_KEY` is required. Requests that
 need Plant360 data must send `Authorization: Bearer <token>`; for local/dev only,

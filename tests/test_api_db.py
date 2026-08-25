@@ -2,12 +2,24 @@ import os
 import threading
 import time
 import unittest
+from contextlib import contextmanager
+from importlib.resources import files
 from types import SimpleNamespace
 from unittest import mock
 
-from api.db import postgres_config_from_env
+from api.db import (
+    PostgresConfig,
+    PostgresRunRepository,
+    _migration_config,
+    _plan_number_statement,
+    migration_head_revision,
+    postgres_config_from_env,
+)
+from api.db_models import Base, IsolationRun
 from api.models import IsolationRunRequest
 from api.runs import RunStore, event_stream
+from sqlalchemy import select
+from sqlalchemy.dialects import postgresql
 
 
 class _FakeRepository:
@@ -78,6 +90,138 @@ class _FailingRepository(_FakeRepository):
 
 
 class ApiDbTests(unittest.TestCase):
+    @staticmethod
+    def _ready_repository(tables, current_heads, columns=()):
+        connection = mock.MagicMock()
+        connection_context = mock.MagicMock()
+        connection_context.__enter__.return_value = connection
+        engine = mock.MagicMock()
+        engine.connect.return_value = connection_context
+        repository = PostgresRunRepository(
+            PostgresConfig(host="db", port=5432, dbname="eqiso", user="app", password=""),
+            engine=engine,
+        )
+        inspector = mock.MagicMock()
+        inspector.get_table_names.return_value = tables
+        inspector.get_columns.return_value = columns
+        migration_context = mock.MagicMock()
+        migration_context.get_current_heads.return_value = current_heads
+
+        @contextmanager
+        def patched_inspection():
+            with mock.patch("api.db.inspect", return_value=inspector), mock.patch(
+                "alembic.runtime.migration.MigrationContext.configure",
+                return_value=migration_context,
+            ):
+                yield
+
+        return repository, patched_inspection()
+
+    def test_packaged_migration_has_one_expected_head(self):
+        self.assertEqual(migration_head_revision(), "0001_current_schema")
+
+    def test_migration_config_and_template_are_package_resources(self):
+        migration_package = files("api.migrations")
+        self.assertTrue(migration_package.joinpath("alembic.ini").is_file())
+        self.assertTrue(migration_package.joinpath("script.py.mako").is_file())
+        self.assertTrue(
+            migration_package.joinpath(
+                "versions", "0001_current_schema.py"
+            ).is_file()
+        )
+        self.assertEqual(
+            _migration_config().get_main_option("script_location"),
+            str(migration_package),
+        )
+
+    def test_orm_metadata_owns_all_application_tables(self):
+        self.assertEqual(
+            set(Base.metadata.tables),
+            {
+                "isolation_runs",
+                "isolation_run_events",
+                "isolation_plan",
+                "plan_version",
+                "external_run_link",
+            },
+        )
+        self.assertIn("isolation_plan_number_seq", Base.metadata._sequences)
+
+    def test_postgresql_statements_preserve_json_index_and_lock_semantics(self):
+        dialect = postgresql.dialect()
+        json_filter = str(
+            select(IsolationRun.run_id)
+            .where(IsolationRun.request["job_id"].astext == "9001")
+            .compile(dialect=dialect)
+        )
+        locked_run = str(
+            select(IsolationRun)
+            .where(IsolationRun.run_id == "a" * 32)
+            .with_for_update()
+            .compile(dialect=dialect)
+        )
+        plan_number = str(_plan_number_statement().compile(dialect=dialect))
+        self.assertIn("->>", json_filter)
+        self.assertNotIn("CAST", json_filter)
+        self.assertIn("FOR UPDATE", locked_run)
+        self.assertIn("nextval('isolation_plan_number_seq')", plan_number)
+
+    def test_repository_readiness_accepts_current_migration_head(self):
+        tables = (
+            "alembic_version",
+            "isolation_runs",
+            "isolation_run_events",
+            "isolation_plan",
+            "plan_version",
+            "external_run_link",
+        )
+        repository, connection_patch = self._ready_repository(tables, ("0001_current_schema",))
+        with connection_patch:
+            repository.check_ready()
+
+    def test_repository_readiness_rejects_outdated_migration(self):
+        tables = (
+            "alembic_version",
+            "isolation_runs",
+            "isolation_run_events",
+            "isolation_plan",
+            "plan_version",
+            "external_run_link",
+        )
+        repository, connection_patch = self._ready_repository(tables, ("old_revision",))
+        with connection_patch, self.assertRaisesRegex(RuntimeError, "expected 0001_current_schema"):
+            repository.check_ready()
+
+    def test_repository_readiness_rejects_unversioned_current_schema(self):
+        tables = (
+            "alembic_version",
+            "isolation_runs",
+            "isolation_run_events",
+            "isolation_plan",
+            "plan_version",
+            "external_run_link",
+        )
+        repository, connection_patch = self._ready_repository(tables, ())
+        with connection_patch, self.assertRaisesRegex(RuntimeError, "unversioned"):
+            repository.check_ready()
+
+    def test_repository_readiness_rejects_legacy_run_columns(self):
+        tables = (
+            "alembic_version",
+            "isolation_runs",
+            "isolation_run_events",
+            "isolation_plan",
+            "plan_version",
+            "external_run_link",
+        )
+        repository, connection_patch = self._ready_repository(
+            tables,
+            ("0001_current_schema",),
+            ({"name": "run_id"}, {"name": "artifacts"}),
+        )
+        with connection_patch, self.assertRaisesRegex(RuntimeError, "legacy"):
+            repository.check_ready()
+
     def test_postgres_config_uses_separate_env_fields(self):
         old_env = dict(os.environ)
         try:

@@ -1,16 +1,27 @@
-"""Minimal Postgres access layer for API run persistence."""
+"""SQLAlchemy-backed PostgreSQL repository for API persistence."""
 from __future__ import annotations
 
-import json
-import os
-import threading
-from contextlib import contextmanager
-from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
+from importlib.resources import files
 from typing import Any
+from uuid import UUID
 
 from agent.session import jsonable
+from api.database import (
+    PostgresConfig,
+    create_database_engine,
+    create_session_factory,
+    postgres_config_from_env,
+    postgres_configured,
+)
+from api.db_models import (
+    ExternalRunLink,
+    IsolationPlan,
+    IsolationRun,
+    IsolationRunEvent,
+    PlanVersion,
+    isolation_plan_number_seq,
+)
 from api.plans import (
     PlanDomainError,
     canonical_hash,
@@ -18,201 +29,131 @@ from api.plans import (
     model_fingerprint,
     validate_promotable_result,
 )
+from sqlalchemy import Text, case, cast, func, inspect, literal, select
+from sqlalchemy.orm import aliased, load_only
 
 
-@dataclass(frozen=True)
-class PostgresConfig:
-    host: str
-    port: int
-    dbname: str
-    user: str
-    password: str
-    sslmode: str = "prefer"
+def _migration_config():
+    from alembic.config import Config
 
-    @property
-    def configured(self) -> bool:
-        return bool(self.host and self.dbname and self.user)
+    migration_package = files("api.migrations")
+    config_resource = migration_package.joinpath("alembic.ini")
+    if not config_resource.is_file():
+        raise RuntimeError("Packaged Alembic configuration is missing")
 
-
-def postgres_config_from_env() -> PostgresConfig:
-    return PostgresConfig(
-        host=os.environ.get("POSTGRES_HOST", "").strip(),
-        port=int(os.environ.get("POSTGRES_PORT") or "5432"),
-        dbname=os.environ.get("POSTGRES_DB", "").strip(),
-        user=os.environ.get("POSTGRES_USER", "").strip(),
-        password=os.environ.get("POSTGRES_PASSWORD", ""),
-        sslmode=os.environ.get("POSTGRES_SSLMODE", "prefer").strip() or "prefer",
-    )
+    config = Config(str(config_resource))
+    config.set_main_option("script_location", str(migration_package))
+    return config
 
 
-def postgres_configured() -> bool:
-    return postgres_config_from_env().configured
+def _migration_script_directory():
+    from alembic.script import ScriptDirectory
+
+    return ScriptDirectory.from_config(_migration_config())
 
 
-def auto_init_schema_on_startup() -> bool:
-    return os.environ.get("EIA_AUTO_INIT_SCHEMA_ON_STARTUP", "").strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _connect_kwargs(config: PostgresConfig) -> dict[str, Any]:
-    return {
-        "host": config.host,
-        "port": config.port,
-        "dbname": config.dbname,
-        "user": config.user,
-        "password": config.password,
-        "sslmode": config.sslmode,
-    }
-
-
-def _connect(config: PostgresConfig | None = None):
-    import psycopg
-
-    config = config or postgres_config_from_env()
-    return psycopg.connect(**_connect_kwargs(config))
-
-
-def init_schema(config: PostgresConfig | None = None, schema_path: str | Path = "schema.sql") -> None:
-    sql = Path(schema_path).read_text(encoding="utf-8")
-    with _connect(config) as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql)
-        conn.commit()
-
-
-def _pool_max_size() -> int:
-    return int(os.environ.get("POSTGRES_POOL_MAX_SIZE") or "8")
-
-
-def _pool_timeout() -> float:
-    return float(os.environ.get("POSTGRES_POOL_TIMEOUT_SECONDS") or "5")
+def migration_head_revision() -> str:
+    """Return the single migration head packaged with this application."""
+    head = _migration_script_directory().get_current_head()
+    if head is None:
+        raise RuntimeError("No Alembic migration head is configured")
+    return head
 
 
 class PostgresRunRepository:
-    def __init__(self, config: PostgresConfig | None = None):
+    def __init__(self, config: PostgresConfig | None = None, *, engine=None):
         self.config = config or postgres_config_from_env()
-        self._pool = None
-        self._pool_lock = threading.Lock()
-
-    @contextmanager
-    def _connection(self):
-        with self._get_pool().connection() as conn:
-            yield conn
-
-    def _get_pool(self):
-        if self._pool is None:
-            with self._pool_lock:
-                if self._pool is None:
-                    from psycopg_pool import ConnectionPool
-
-                    self._pool = ConnectionPool(
-                        "",
-                        kwargs=_connect_kwargs(self.config),
-                        min_size=0,
-                        max_size=_pool_max_size(),
-                        timeout=_pool_timeout(),
-                    )
-        return self._pool
+        self._engine = engine or create_database_engine(self.config)
+        self._session_factory = create_session_factory(self._engine)
 
     def close(self) -> None:
-        if self._pool is not None:
-            self._pool.close()
-            self._pool = None
+        self._engine.dispose()
 
     def check_ready(self) -> None:
-        """Fail unless the database is reachable and the required schema exists."""
-        with self._connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT to_regclass('public.isolation_runs'),
-                           to_regclass('public.isolation_run_events'),
-                           to_regclass('public.isolation_plan'),
-                           to_regclass('public.plan_version'),
-                           to_regclass('public.external_run_link')
-                    """
-                )
-                tables = cur.fetchone()
-                cur.execute(
-                    """
-                    SELECT count(*)
-                    FROM information_schema.columns
-                    WHERE table_schema = 'public'
-                      AND table_name = 'isolation_runs'
-                      AND column_name IN ('artifacts', 'run_dir')
-                    """
-                )
-                legacy_run_columns = int(cur.fetchone()[0])
-        if not tables or any(table is None for table in tables):
-            raise RuntimeError("PostgreSQL is reachable but the equipment-isolation schema is incomplete")
+        """Fail unless the database is reachable and migrated to application head."""
+        from alembic.runtime.migration import MigrationContext
+
+        required_tables = {
+            "isolation_runs",
+            "isolation_run_events",
+            "isolation_plan",
+            "plan_version",
+            "external_run_link",
+        }
+        with self._engine.connect() as connection:
+            inspector = inspect(connection)
+            present_tables = set(inspector.get_table_names(schema="public"))
+            legacy_run_columns: set[str] = set()
+            if "isolation_runs" in present_tables:
+                legacy_run_columns = {
+                    str(column["name"])
+                    for column in inspector.get_columns("isolation_runs", schema="public")
+                    if column["name"] in {"artifacts", "run_dir"}
+                }
+            current_heads = set(MigrationContext.configure(connection).get_current_heads())
+
+        if not required_tables.issubset(present_tables):
+            raise RuntimeError(
+                "PostgreSQL is reachable but the equipment-isolation schema is incomplete; "
+                "run `uv run alembic upgrade head`"
+            )
         if legacy_run_columns:
-            raise RuntimeError("PostgreSQL still has legacy local-artifact columns; recreate it from the current schema.sql")
+            raise RuntimeError(
+                "PostgreSQL still has unsupported legacy local-artifact columns; "
+                "do not stamp it as the current baseline"
+            )
+
+        expected_heads = set(_migration_script_directory().get_heads())
+        if current_heads != expected_heads:
+            current_label = ", ".join(sorted(current_heads)) or "unversioned"
+            expected_label = ", ".join(sorted(expected_heads)) or "no packaged head"
+            raise RuntimeError(
+                "PostgreSQL migration revision is "
+                f"{current_label}; expected {expected_label}. "
+                "Run `uv run alembic upgrade head`, or verify an existing current-schema "
+                "database before stamping the baseline."
+            )
 
     def insert_run(self, record, request_payload: dict) -> None:
-        with self._connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO isolation_runs (
-                        run_id, equipment_tag, runner, status, created_at, started_at,
-                        finished_at, request, agent, result, trace, error
-                    )
-                    VALUES (
-                        %(run_id)s, %(equipment_tag)s, %(runner)s, %(status)s, %(created_at)s,
-                        %(started_at)s, %(finished_at)s, %(request)s::jsonb, %(agent)s::jsonb,
-                        %(result)s::jsonb, %(trace)s::jsonb, %(error)s::jsonb
-                    )
-                    """,
-                    _record_params(record, request_payload=request_payload),
+        with self._session_factory.begin() as session:
+            session.add(
+                IsolationRun(
+                    run_id=record.run_id,
+                    equipment_tag=record.equipment_tag,
+                    runner=record.runner,
+                    status=record.status,
+                    created_at=_dt(record.created_at),
+                    started_at=_dt(record.started_at),
+                    finished_at=_dt(record.finished_at),
+                    request=_jsonable(request_payload or {}),
+                    agent=_jsonable(record.agent),
+                    result=_jsonable(record.result),
+                    trace=_jsonable(record.trace),
+                    error=_jsonable(record.error),
                 )
-            conn.commit()
+            )
 
     def update_run(self, record) -> None:
-        with self._connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    UPDATE isolation_runs
-                    SET status = %(status)s,
-                        started_at = %(started_at)s,
-                        finished_at = %(finished_at)s,
-                        agent = %(agent)s::jsonb,
-                        result = %(result)s::jsonb,
-                        trace = %(trace)s::jsonb,
-                        error = %(error)s::jsonb
-                    WHERE run_id = %(run_id)s
-                    """,
-                    _record_params(record),
-                )
-            conn.commit()
+        with self._session_factory.begin() as session:
+            persisted = session.get(IsolationRun, record.run_id)
+            if persisted is None:
+                return
+            persisted.status = record.status
+            persisted.started_at = _dt(record.started_at)
+            persisted.finished_at = _dt(record.finished_at)
+            persisted.agent = _jsonable(record.agent)
+            persisted.result = _jsonable(record.result)
+            persisted.trace = _jsonable(record.trace)
+            persisted.error = _jsonable(record.error)
 
     def append_event(self, run_id: str, event: dict) -> None:
-        with self._connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO isolation_run_events (run_id, event)
-                    VALUES (%s, %s::jsonb)
-                    """,
-                    (run_id, _json(event)),
-                )
-            conn.commit()
+        with self._session_factory.begin() as session:
+            session.add(IsolationRunEvent(run_id=run_id, event=_jsonable(event)))
 
     def get_run(self, run_id: str) -> dict | None:
-        with self._connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT run_id, equipment_tag, runner, status, created_at, started_at,
-                           finished_at, agent, request, result, trace, error
-                    FROM isolation_runs
-                    WHERE run_id = %s
-                    """,
-                    (run_id,),
-                )
-                row = cur.fetchone()
-        if not row:
-            return None
-        return _row_to_dict(row)
+        with self._session_factory() as session:
+            run = session.get(IsolationRun, run_id)
+            return _run_to_dict(run) if run is not None else None
 
     def list_runs(
         self,
@@ -225,160 +166,137 @@ class PostgresRunRepository:
         collection_id: str | None = None,
         unigraph_project_id: str | None = None,
     ) -> list[dict]:
-        with self._connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT run_id, equipment_tag, runner, status, created_at, started_at,
-                           finished_at, agent, request, NULL::jsonb AS result,
-                           NULL::jsonb AS trace, error
-                    FROM isolation_runs
-                    WHERE (%s::text IS NULL OR equipment_tag = %s)
-                      AND (%s::text IS NULL OR status = %s)
-                      AND (%s::text IS NULL OR request->>'job_id' = %s)
-                      AND (%s::text IS NULL OR request->>'cnvrt_project_id' = %s)
-                      AND (%s::text IS NULL OR request->>'collection_id' = %s)
-                      AND (%s::text IS NULL OR request->>'unigraph_project_id' = %s)
-                    ORDER BY created_at DESC
-                    LIMIT %s OFFSET %s
-                    """,
-                    (
-                        equipment_tag, equipment_tag, status, status, job_id, job_id,
-                        cnvrt_project_id, cnvrt_project_id, collection_id, collection_id,
-                        unigraph_project_id, unigraph_project_id, limit, offset,
-                    ),
-                )
-                rows = cur.fetchall()
-        return [_row_to_dict(row) for row in rows]
+        statement = select(IsolationRun).options(
+            load_only(
+                IsolationRun.run_id,
+                IsolationRun.equipment_tag,
+                IsolationRun.runner,
+                IsolationRun.status,
+                IsolationRun.created_at,
+                IsolationRun.started_at,
+                IsolationRun.finished_at,
+                IsolationRun.agent,
+                IsolationRun.request,
+                IsolationRun.error,
+            )
+        )
+        if equipment_tag is not None:
+            statement = statement.where(IsolationRun.equipment_tag == equipment_tag)
+        if status is not None:
+            statement = statement.where(IsolationRun.status == status)
+        json_filters = {
+            "job_id": job_id,
+            "cnvrt_project_id": cnvrt_project_id,
+            "collection_id": collection_id,
+            "unigraph_project_id": unigraph_project_id,
+        }
+        for key, value in json_filters.items():
+            if value is not None:
+                statement = statement.where(IsolationRun.request[key].astext == value)
+        statement = statement.order_by(IsolationRun.created_at.desc()).limit(limit).offset(offset)
+        with self._session_factory() as session:
+            runs = session.scalars(statement).all()
+            return [_run_to_dict(run, include_payloads=False) for run in runs]
 
     def create_plan_from_run(self, run_id: str, area_code: str | None = None) -> tuple[dict, bool]:
         """Atomically promote one succeeded persisted run into advisory plan v1."""
-        with self._connection() as conn:
-            with conn.cursor() as cur:
-                # Locking the source row serializes concurrent promotion requests for
-                # the same run without requiring an application-level lock.
-                cur.execute(
-                    """
-                    SELECT run_id, equipment_tag, runner, status, created_at, finished_at,
-                           request, agent, result
-                    FROM isolation_runs
-                    WHERE run_id = %s
-                    FOR UPDATE
-                    """,
-                    (run_id,),
+        with self._session_factory.begin() as session:
+            run = session.scalar(
+                select(IsolationRun)
+                .where(IsolationRun.run_id == run_id)
+                .with_for_update()
+            )
+            if run is None:
+                raise PlanDomainError("unknown_run", "Unknown persisted run id.", 404)
+            if run.status != "succeeded":
+                raise PlanDomainError(
+                    "run_not_succeeded",
+                    "Only a succeeded isolation run can be saved as a plan.",
+                    409,
+                    {"status": run.status},
                 )
-                run = cur.fetchone()
-                if not run:
-                    raise PlanDomainError("unknown_run", "Unknown persisted run id.", 404)
-                if run[3] != "succeeded":
-                    raise PlanDomainError(
-                        "run_not_succeeded",
-                        "Only a succeeded isolation run can be saved as a plan.",
-                        409,
-                        {"status": run[3]},
-                    )
-                if run[8] is None:
-                    raise PlanDomainError(
-                        "result_not_available",
-                        "The succeeded run has no persisted result.",
-                        409,
-                    )
-                validate_promotable_result(run[8])
+            if run.result is None:
+                raise PlanDomainError(
+                    "result_not_available",
+                    "The succeeded run has no persisted result.",
+                    409,
+                )
+            validate_promotable_result(run.result)
 
-                cur.execute(
-                    """
-                    SELECT p.plan_id
-                    FROM external_run_link l
-                    JOIN plan_version v ON v.plan_version_id = l.plan_version_id
-                    JOIN isolation_plan p ON p.plan_id = v.plan_id
-                    WHERE l.run_id = %s
-                    """,
-                    (run_id,),
-                )
-                existing = cur.fetchone()
-                if existing:
-                    plan = self._get_plan_with_cursor(cur, str(existing[0]))
-                    conn.commit()
-                    return plan, False
+            existing_plan_id = session.scalar(
+                select(PlanVersion.plan_id)
+                .join(ExternalRunLink)
+                .where(ExternalRunLink.run_id == run_id)
+            )
+            if existing_plan_id is not None:
+                plan = self._get_plan_with_session(session, existing_plan_id)
+                return plan, False
 
-                request_payload = run[6] or {}
-                agent_payload = run[7] or {}
-                input_hash = canonical_hash(request_payload)
-                model_hash = canonical_hash(model_fingerprint(run[2], agent_payload))
-                status = derivation_status(agent_payload)
-                derived_at = run[5] or run[4]
+            request_payload = run.request or {}
+            agent_payload = run.agent or {}
+            input_hash = canonical_hash(request_payload)
+            model_hash = canonical_hash(model_fingerprint(run.runner, agent_payload))
+            status = derivation_status(agent_payload)
+            derived_at = run.finished_at or run.created_at
+            plan_number = session.scalar(_plan_number_statement())
 
-                cur.execute(
-                    """
-                    INSERT INTO isolation_plan (plan_number, mode, lifecycle_state, area_code)
-                    VALUES (
-                        'ISO-' || to_char(now() AT TIME ZONE 'UTC', 'YYYY') || '-' ||
-                        lpad(nextval('isolation_plan_number_seq')::text, 6, '0'),
-                        'advisory', 'draft', %s
-                    )
-                    RETURNING plan_id
-                    """,
-                    (area_code,),
+            plan_row = IsolationPlan(
+                plan_number=plan_number,
+                mode="advisory",
+                lifecycle_state="draft",
+                area_code=area_code,
+            )
+            session.add(plan_row)
+            session.flush()
+            version = PlanVersion(
+                plan_id=plan_row.plan_id,
+                parent_plan_version_id=None,
+                version_no=1,
+                derivation_status=status,
+                input_hash=input_hash,
+                model_hash=model_hash,
+                derived_at=derived_at,
+            )
+            session.add(version)
+            session.flush()
+            session.add(
+                ExternalRunLink(
+                    plan_version_id=version.plan_version_id,
+                    run_id=run_id,
+                    runner=run.runner,
+                    link_role="derivation",
+                    result_uri=f"/isolation-runs/{run_id}/result",
+                    trace_uri=f"/isolation-runs/{run_id}/trace",
                 )
-                plan_id = cur.fetchone()[0]
-                cur.execute(
-                    """
-                    INSERT INTO plan_version (
-                        plan_id, parent_plan_version_id, version_no, derivation_status,
-                        input_hash, model_hash, derived_at
-                    )
-                    VALUES (%s, NULL, 1, %s, %s, %s, %s)
-                    RETURNING plan_version_id
-                    """,
-                    (plan_id, status, input_hash, model_hash, derived_at),
-                )
-                version_id = cur.fetchone()[0]
-                cur.execute(
-                    """
-                    INSERT INTO external_run_link (
-                        plan_version_id, run_id, runner, link_role, result_uri, trace_uri
-                    )
-                    VALUES (%s, %s, %s, 'derivation', %s, %s)
-                    """,
-                    (
-                        version_id,
-                        run_id,
-                        run[2],
-                        f"/isolation-runs/{run_id}/result",
-                        f"/isolation-runs/{run_id}/trace",
-                    ),
-                )
-                plan = self._get_plan_with_cursor(cur, str(plan_id))
-            conn.commit()
-        return plan, True
+            )
+            session.flush()
+            plan = self._get_plan_with_session(session, plan_row.plan_id)
+            return plan, True
 
     def get_plan(self, plan_id: str) -> dict | None:
-        with self._connection() as conn:
-            with conn.cursor() as cur:
-                return self._get_plan_with_cursor(cur, plan_id)
+        try:
+            parsed_plan_id = UUID(plan_id)
+        except (TypeError, ValueError):
+            return None
+        with self._session_factory() as session:
+            return self._get_plan_with_session(session, parsed_plan_id)
 
-    def _get_plan_with_cursor(self, cur, plan_id: str) -> dict | None:
-        cur.execute(
-            """
-            SELECT p.plan_id, p.plan_number, p.active_plan_version_id, p.mode,
-                   p.lifecycle_state, p.area_code, p.created_at,
-                   v.plan_version_id, v.parent_plan_version_id, v.version_no,
-                   v.derivation_status, v.input_hash, v.model_hash, v.derived_at,
-                   v.superseded_at, r.run_id, r.runner, r.status, r.equipment_tag,
-                   r.created_at, r.request, r.agent,
-                   CASE WHEN jsonb_typeof(r.result->'data') = 'array'
-                        THEN r.result->'data'->0->>'assurance_status' END
-            FROM isolation_plan p
-            JOIN plan_version v ON v.plan_id = p.plan_id
-            LEFT JOIN external_run_link l
-                   ON l.plan_version_id = v.plan_version_id AND l.link_role = 'derivation'
-            LEFT JOIN isolation_runs r ON r.run_id = l.run_id
-            WHERE p.plan_id = %s
-            ORDER BY v.version_no DESC
-            """,
-            (plan_id,),
+    def _get_plan_with_session(self, session, plan_id: UUID) -> dict | None:
+        assurance_status = _assurance_status_expression(IsolationRun)
+        statement = (
+            select(*_plan_columns(IsolationPlan, PlanVersion, IsolationRun, assurance_status))
+            .select_from(IsolationPlan)
+            .join(PlanVersion, PlanVersion.plan_id == IsolationPlan.plan_id)
+            .outerjoin(
+                ExternalRunLink,
+                (ExternalRunLink.plan_version_id == PlanVersion.plan_version_id)
+                & (ExternalRunLink.link_role == "derivation"),
+            )
+            .outerjoin(IsolationRun, IsolationRun.run_id == ExternalRunLink.run_id)
+            .where(IsolationPlan.plan_id == plan_id)
+            .order_by(PlanVersion.version_no.desc())
         )
-        rows = cur.fetchall()
+        rows = session.execute(statement).all()
         return _plan_from_rows(rows) if rows else None
 
     def list_plans(
@@ -393,73 +311,146 @@ class PostgresRunRepository:
         unigraph_project_id: str | None = None,
         plan_number: str | None = None,
     ) -> tuple[list[dict], int]:
-        params = (
-            lifecycle_state, lifecycle_state, equipment_tag, equipment_tag,
-            job_id, job_id, cnvrt_project_id, cnvrt_project_id,
-            collection_id, collection_id, unigraph_project_id, unigraph_project_id,
-            plan_number, f"{plan_number}%" if plan_number else None,
+        ranked_versions = (
+            select(
+                PlanVersion,
+                func.row_number()
+                .over(
+                    partition_by=PlanVersion.plan_id,
+                    order_by=PlanVersion.version_no.desc(),
+                )
+                .label("version_rank"),
+            )
+            .subquery()
         )
-        where = """
-            WHERE (%s::text IS NULL OR p.lifecycle_state = %s)
-              AND (%s::text IS NULL OR r.equipment_tag = %s)
-              AND (%s::text IS NULL OR r.request->>'job_id' = %s)
-              AND (%s::text IS NULL OR r.request->>'cnvrt_project_id' = %s)
-              AND (%s::text IS NULL OR r.request->>'collection_id' = %s)
-              AND (%s::text IS NULL OR r.request->>'unigraph_project_id' = %s)
-              AND (%s::text IS NULL OR p.plan_number ILIKE %s)
-        """
-        with self._connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT count(*) FROM isolation_plan p "
-                    "JOIN LATERAL (SELECT * FROM plan_version WHERE plan_id = p.plan_id ORDER BY version_no DESC LIMIT 1) v ON true "
-                    "LEFT JOIN external_run_link l ON l.plan_version_id = v.plan_version_id AND l.link_role = 'derivation' "
-                    "LEFT JOIN isolation_runs r ON r.run_id = l.run_id " + where,
-                    params,
-                )
-                total = int(cur.fetchone()[0])
-                cur.execute(
-                    """
-                    SELECT p.plan_id, p.plan_number, p.active_plan_version_id, p.mode,
-                           p.lifecycle_state, p.area_code, p.created_at,
-                           v.plan_version_id, v.parent_plan_version_id, v.version_no,
-                           v.derivation_status, v.input_hash, v.model_hash, v.derived_at,
-                           v.superseded_at, r.run_id, r.runner, r.status, r.equipment_tag,
-                           r.created_at, r.request, r.agent,
-                           CASE WHEN jsonb_typeof(r.result->'data') = 'array'
-                                THEN r.result->'data'->0->>'assurance_status' END
-                    FROM isolation_plan p
-                    JOIN LATERAL (
-                        SELECT * FROM plan_version
-                        WHERE plan_id = p.plan_id
-                        ORDER BY version_no DESC LIMIT 1
-                    ) v ON true
-                    LEFT JOIN external_run_link l
-                           ON l.plan_version_id = v.plan_version_id AND l.link_role = 'derivation'
-                    LEFT JOIN isolation_runs r ON r.run_id = l.run_id
-                    """ + where + " ORDER BY p.created_at DESC, p.plan_id DESC LIMIT %s OFFSET %s",
-                    (*params, limit, offset),
-                )
-                rows = cur.fetchall()
-        return [_plan_from_rows([row], summary=True) for row in rows], total
+        latest_version = aliased(PlanVersion, ranked_versions)
+        assurance_status = _assurance_status_expression(IsolationRun)
+        filters = _plan_filters(
+            IsolationPlan,
+            IsolationRun,
+            lifecycle_state=lifecycle_state,
+            equipment_tag=equipment_tag,
+            job_id=job_id,
+            cnvrt_project_id=cnvrt_project_id,
+            collection_id=collection_id,
+            unigraph_project_id=unigraph_project_id,
+            plan_number=plan_number,
+        )
+        statement = (
+            select(*_plan_columns(IsolationPlan, latest_version, IsolationRun, assurance_status))
+            .select_from(IsolationPlan)
+            .join(
+                latest_version,
+                (latest_version.plan_id == IsolationPlan.plan_id)
+                & (ranked_versions.c.version_rank == 1),
+            )
+            .outerjoin(
+                ExternalRunLink,
+                (ExternalRunLink.plan_version_id == latest_version.plan_version_id)
+                & (ExternalRunLink.link_role == "derivation"),
+            )
+            .outerjoin(IsolationRun, IsolationRun.run_id == ExternalRunLink.run_id)
+            .where(*filters)
+            .order_by(IsolationPlan.created_at.desc(), IsolationPlan.plan_id.desc())
+        )
+        paged_statement = statement.limit(limit).offset(offset)
+        count_statement = (
+            select(func.count())
+            .select_from(IsolationPlan)
+            .join(
+                latest_version,
+                (latest_version.plan_id == IsolationPlan.plan_id)
+                & (ranked_versions.c.version_rank == 1),
+            )
+            .outerjoin(
+                ExternalRunLink,
+                (ExternalRunLink.plan_version_id == latest_version.plan_version_id)
+                & (ExternalRunLink.link_role == "derivation"),
+            )
+            .outerjoin(IsolationRun, IsolationRun.run_id == ExternalRunLink.run_id)
+            .where(*filters)
+        )
+        with self._session_factory() as session:
+            total = int(session.scalar(count_statement) or 0)
+            rows = session.execute(paged_statement).all()
+            return [_plan_from_rows([row], summary=True) for row in rows], total
 
     def list_events(self, run_id: str, after_id: int = 0) -> list[dict]:
-        with self._connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT id, event
-                    FROM isolation_run_events
-                    WHERE run_id = %s AND id > %s
-                    ORDER BY id
-                    """,
-                    (run_id, after_id),
-                )
-                rows = cur.fetchall()
-        return [{"id": row[0], "event": row[1]} for row in rows]
+        statement = (
+            select(IsolationRunEvent.id, IsolationRunEvent.event)
+            .where(
+                IsolationRunEvent.run_id == run_id,
+                IsolationRunEvent.id > after_id,
+            )
+            .order_by(IsolationRunEvent.id)
+        )
+        with self._session_factory() as session:
+            rows = session.execute(statement).all()
+            return [{"id": row.id, "event": row.event} for row in rows]
 
 
-def _plan_from_rows(rows: list[tuple], summary: bool = False) -> dict:
+def _plan_number_statement():
+    return select(
+        literal("ISO-")
+        + func.to_char(func.timezone("UTC", func.now()), "YYYY")
+        + literal("-")
+        + func.lpad(cast(isolation_plan_number_seq.next_value(), Text), 6, "0")
+    )
+
+
+def _assurance_status_expression(run_model):
+    return case(
+        (
+            func.jsonb_typeof(run_model.result["data"]) == "array",
+            run_model.result["data"][0]["assurance_status"].astext,
+        ),
+        else_=None,
+    ).label("assurance_status")
+
+
+def _plan_columns(plan_model, version_model, run_model, assurance_status):
+    return (
+        plan_model.plan_id,
+        plan_model.plan_number,
+        plan_model.active_plan_version_id,
+        plan_model.mode,
+        plan_model.lifecycle_state,
+        plan_model.area_code,
+        plan_model.created_at,
+        version_model.plan_version_id,
+        version_model.parent_plan_version_id,
+        version_model.version_no,
+        version_model.derivation_status,
+        version_model.input_hash,
+        version_model.model_hash,
+        version_model.derived_at,
+        version_model.superseded_at,
+        run_model.run_id,
+        run_model.runner,
+        run_model.status,
+        run_model.equipment_tag,
+        run_model.created_at,
+        run_model.request,
+        run_model.agent,
+        assurance_status,
+    )
+
+
+def _plan_filters(plan_model, run_model, **values):
+    filters = []
+    if values["lifecycle_state"] is not None:
+        filters.append(plan_model.lifecycle_state == values["lifecycle_state"])
+    if values["equipment_tag"] is not None:
+        filters.append(run_model.equipment_tag == values["equipment_tag"])
+    for key in ("job_id", "cnvrt_project_id", "collection_id", "unigraph_project_id"):
+        if values[key] is not None:
+            filters.append(run_model.request[key].astext == values[key])
+    if values["plan_number"] is not None:
+        filters.append(plan_model.plan_number.ilike(f"{values['plan_number']}%"))
+    return filters
+
+
+def _plan_from_rows(rows: list, summary: bool = False) -> dict:
     first = rows[0]
     versions = []
     for row in rows:
@@ -511,25 +502,8 @@ def _plan_from_rows(rows: list[tuple], summary: bool = False) -> dict:
     return payload
 
 
-def _record_params(record, request_payload: dict | None = None) -> dict:
-    return {
-        "run_id": record.run_id,
-        "equipment_tag": record.equipment_tag,
-        "runner": record.runner,
-        "status": record.status,
-        "created_at": _dt(record.created_at),
-        "started_at": _dt(record.started_at),
-        "finished_at": _dt(record.finished_at),
-        "request": _json(request_payload or {}),
-        "agent": _json(record.agent),
-        "result": _json(record.result),
-        "trace": _json(record.trace),
-        "error": _json(record.error),
-    }
-
-
-def _json(value: Any) -> str:
-    return json.dumps(jsonable(value), default=str)
+def _jsonable(value: Any):
+    return jsonable(value) if value is not None else None
 
 
 def _dt(value: float | None):
@@ -544,34 +518,18 @@ def _ts(value) -> float | None:
     return value.timestamp()
 
 
-def _row_to_dict(row) -> dict:
+def _run_to_dict(run: IsolationRun, *, include_payloads: bool = True) -> dict:
     return {
-        "run_id": row[0],
-        "equipment_tag": row[1],
-        "runner": row[2],
-        "status": row[3],
-        "created_at": _ts(row[4]),
-        "started_at": _ts(row[5]),
-        "finished_at": _ts(row[6]),
-        "agent": row[7],
-        "request": row[8] or {},
-        "result": row[9],
-        "trace": row[10],
-        "error": row[11],
+        "run_id": run.run_id,
+        "equipment_tag": run.equipment_tag,
+        "runner": run.runner,
+        "status": run.status,
+        "created_at": _ts(run.created_at),
+        "started_at": _ts(run.started_at),
+        "finished_at": _ts(run.finished_at),
+        "agent": run.agent,
+        "request": run.request or {},
+        "result": run.result if include_payloads else None,
+        "trace": run.trace if include_payloads else None,
+        "error": run.error,
     }
-
-
-def main(argv: list[str] | None = None) -> int:
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Equipment isolation API database utility.")
-    parser.add_argument("command", choices=["init"])
-    parser.add_argument("--schema", default="schema.sql")
-    args = parser.parse_args(argv)
-    if args.command == "init":
-        init_schema(postgres_config_from_env(), args.schema)
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

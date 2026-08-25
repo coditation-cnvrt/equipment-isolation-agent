@@ -4,13 +4,14 @@ version = "0.1.0"
 description = "Deterministic local runner for equipment isolation using graph traversal and Plant360 APIs"
 requires-python = ">=3.11"
 dependencies = [
+    "alembic>=1.16",
     "fastapi>=0.115",
     "google-genai>=2.10.0",
     "gremlinpython>=3.6.2",
     "httpx>=0.27",
     "psycopg[binary]>=3.2",
-    "psycopg-pool>=3.2",
     "requests>=2.31.0",
+    "sqlalchemy>=2.0",
     "uvicorn[standard]>=0.32",
 ]
 
@@ -20,5 +21,48 @@ build-backend = "setuptools.build_meta"
 
 [tool.uv]
 
+[tool.setuptools]
+py-modules = [
+    "api_client",
+    "bbox",
+    "bbox_geometry",
+    "bbox_util",
+    "boundary",
+    "candidates",
+    "config",
+    "eval_compare",
+    "evidence",
+    "flow",
+    "graph_client",
+    "hilt_index",
+    "hilt_merge",
+    "hilt_topology",
+    "image",
+    "impact",
+    "instrument_context",
+    "job_resolver",
+    "loto",
+    "obligations",
+    "output",
+    "payload",
+    "planner",
+    "relief",
+    "run",
+    "secondary_context",
+    "stlm_payload",
+    "unigraph_metadata",
+    "validator",
+    "viewer",
+    "viewer_overlays",
+    "visual_selection",
+]
+
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["agent*", "api*", "domain*", "pipeline*"]
+namespaces = false
+
+[tool.setuptools.package-data]
+"agent.docs" = ["*.md"]
+"api.migrations" = ["alembic.ini", "script.py.mako"]
+domain = ["instrument_catalog.json"]

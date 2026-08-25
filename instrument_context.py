@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import re
 from collections import deque
+from importlib.resources import files
 from pathlib import Path
 
 from api_client import Plant360Client
@@ -19,7 +20,7 @@ from domain.hilt_geometry import valid_bbox as _valid_bbox
 from domain.topology import PROCESS_LINE_CLASSES, normalize_tag
 
 
-CATALOG_PATH = Path(__file__).with_name("instrument_catalog.json")
+CATALOG_RESOURCE = files("domain").joinpath("instrument_catalog.json")
 MAX_RELEVANCE_HOPS = 10
 INSTRUMENT_LINE_CLASSES = {
     "piping_to_instrument_line",
@@ -135,7 +136,7 @@ def analyze_hilt_instrument_context(
 
 
 def load_instrument_catalog(path: str | Path | None = None) -> dict:
-    source = Path(path) if path else CATALOG_PATH
+    source = Path(path) if path else CATALOG_RESOURCE
     return json.loads(source.read_text(encoding="utf-8"))
 
 
