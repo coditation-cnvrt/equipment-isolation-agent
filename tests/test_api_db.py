@@ -119,7 +119,7 @@ class ApiDbTests(unittest.TestCase):
         return repository, patched_inspection()
 
     def test_packaged_migration_has_one_expected_head(self):
-        self.assertEqual(migration_head_revision(), "0003_scoped_asset_identity")
+        self.assertEqual(migration_head_revision(), "0005_feedback_constraint_names")
 
     def test_migration_config_and_template_are_package_resources(self):
         migration_package = files("api.migrations")
@@ -132,6 +132,8 @@ class ApiDbTests(unittest.TestCase):
         )
         self.assertTrue(migration_package.joinpath("versions", "0002_plan_corrections.py").is_file())
         self.assertTrue(migration_package.joinpath("versions", "0003_scoped_asset_identity.py").is_file())
+        self.assertTrue(migration_package.joinpath("versions", "0004_plan_feedback_framework.py").is_file())
+        self.assertTrue(migration_package.joinpath("versions", "0005_feedback_constraint_names.py").is_file())
         self.assertEqual(
             _migration_config().get_main_option("script_location"),
             str(migration_package),
@@ -140,7 +142,7 @@ class ApiDbTests(unittest.TestCase):
     def test_orm_metadata_owns_all_application_tables(self):
         self.assertEqual(
             set(Base.metadata.tables),
-            {"isolation_runs", "isolation_run_events", "isolation_plan", "plan_version", "external_run_link", "asset_reference", "work_scope", "work_scope_asset", "input_snapshot", "isolation_branch", "isolation_point", "path_point", "plan_step", "finding", "change_request", "derivation_manifest", "derivation_manifest_change", "plan_version_change", "change_coverage_result", "audit_event"},
+            {"isolation_runs", "isolation_run_events", "isolation_plan", "plan_version", "external_run_link", "asset_reference", "work_scope", "work_scope_asset", "input_snapshot", "isolation_branch", "isolation_point", "path_point", "plan_step", "finding", "plan_feedback", "feedback_review_decision", "derivation_manifest", "derivation_manifest_feedback", "plan_version_feedback", "feedback_application_result", "audit_event"},
         )
         self.assertIn("isolation_plan_number_seq", Base.metadata._sequences)
 
@@ -172,7 +174,7 @@ class ApiDbTests(unittest.TestCase):
             "plan_version",
             "external_run_link",
         )
-        repository, connection_patch = self._ready_repository(tables, ("0003_scoped_asset_identity",))
+        repository, connection_patch = self._ready_repository(tables, ("0005_feedback_constraint_names",))
         with connection_patch:
             repository.check_ready()
 
@@ -186,7 +188,7 @@ class ApiDbTests(unittest.TestCase):
             "external_run_link",
         )
         repository, connection_patch = self._ready_repository(tables, ("old_revision",))
-        with connection_patch, self.assertRaisesRegex(RuntimeError, "expected 0003_scoped_asset_identity"):
+        with connection_patch, self.assertRaisesRegex(RuntimeError, "expected 0005_feedback_constraint_names"):
             repository.check_ready()
 
     def test_asset_scope_separates_reused_external_ids(self):

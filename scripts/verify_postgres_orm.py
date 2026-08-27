@@ -36,10 +36,10 @@ from pipeline.env import load_dotenv
 APP_TABLES = (
     "asset_reference",
     "audit_event",
-    "change_coverage_result",
-    "change_request",
+    "feedback_application_result",
+    "feedback_review_decision",
     "derivation_manifest",
-    "derivation_manifest_change",
+    "derivation_manifest_feedback",
     "external_run_link",
     "finding",
     "input_snapshot",
@@ -49,9 +49,10 @@ APP_TABLES = (
     "isolation_run_events",
     "isolation_runs",
     "path_point",
+    "plan_feedback",
     "plan_step",
     "plan_version",
-    "plan_version_change",
+    "plan_version_feedback",
     "work_scope",
     "work_scope_asset",
 )
@@ -188,15 +189,20 @@ def _repository_smoke(repository: PostgresRunRepository) -> None:
             target_type="isolation_point",
             target_id="manual-v2",
             justification="Disposable database correction smoke test.",
+            source_system="field_review",
+            source_reference={"drawing_entity_id": "manual-v2"},
+            evidence={"note": "Observed on disposable verification fixture"},
         ),
         "reviewer-1",
     )
+    _require(change["feedback_category"] == "manual_observation", "Feedback category inference failed")
     try:
         repository.approve_change(plan["plan_id"], change["change_id"], "reviewer-1")
     except Exception as error:
         _require(getattr(error, "kind", "") == "self_approval_forbidden", "Self approval was not rejected")
     approved = repository.approve_change(plan["plan_id"], change["change_id"], "reviewer-2")
     _require(approved["state"] == "approved", "Correction approval failed")
+    _require(len(approved["review_decisions"]) == 1, "Append-only feedback review decision was not recorded")
     prepared = repository.prepare_derivation(plan["plan_id"], plan["latest_plan_version_id"], "reviewer-2")
     failed = SimpleNamespace(
         run_id=uuid.uuid4().hex, equipment_tag=run.equipment_tag, runner="agentic", status="queued",

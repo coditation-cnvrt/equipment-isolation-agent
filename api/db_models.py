@@ -315,24 +315,57 @@ class Finding(Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
 
 
-class ChangeRequest(Base):
-    __tablename__ = "change_request"
+class PlanFeedback(Base):
+    __tablename__ = "plan_feedback"
     __table_args__ = (
-        CheckConstraint("state IN ('submitted','approved','rejected','applied','superseded')", name="change_request_state_check"),
+        CheckConstraint("state IN ('submitted','approved','rejected','applied','superseded')", name="plan_feedback_state_check"),
+        CheckConstraint(
+            "feedback_category IN ('input_correction','requirement_deviation','manual_observation','execution_failure')",
+            name="plan_feedback_category_check",
+        ),
     )
-    change_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+    feedback_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     plan_id: Mapped[UUID] = mapped_column(ForeignKey("isolation_plan.plan_id", ondelete="CASCADE"), nullable=False)
     raised_against_version_id: Mapped[UUID] = mapped_column(ForeignKey("plan_version.plan_version_id", ondelete="RESTRICT"), nullable=False)
-    change_type: Mapped[str] = mapped_column(Text, nullable=False)
+    feedback_category: Mapped[str] = mapped_column(Text, nullable=False)
+    feedback_type: Mapped[str] = mapped_column(Text, nullable=False)
     target_type: Mapped[str] = mapped_column(Text, nullable=False)
     target_id: Mapped[str] = mapped_column(Text, nullable=False)
     proposed_change: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     justification: Mapped[str] = mapped_column(Text, nullable=False)
+    source_system: Mapped[str | None] = mapped_column(Text)
+    source_reference: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    evidence: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    supersedes_feedback_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("plan_feedback.feedback_id", ondelete="RESTRICT")
+    )
     state: Mapped[str] = mapped_column(Text, nullable=False, server_default="submitted")
     raised_by: Mapped[str] = mapped_column(Text, nullable=False)
     approved_by: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class FeedbackReviewDecision(Base):
+    __tablename__ = "feedback_review_decision"
+    __table_args__ = (
+        CheckConstraint(
+            "decision IN ('approved','rejected')",
+            name="feedback_review_decision_value_check",
+        ),
+    )
+    review_decision_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    feedback_id: Mapped[UUID] = mapped_column(
+        ForeignKey("plan_feedback.feedback_id", ondelete="RESTRICT"), nullable=False
+    )
+    decision: Mapped[str] = mapped_column(Text, nullable=False)
+    actor_id: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class DerivationManifest(Base):
@@ -352,29 +385,29 @@ class DerivationManifest(Base):
     error: Mapped[Any | None] = mapped_column(JSONB)
 
 
-class DerivationManifestChange(Base):
-    __tablename__ = "derivation_manifest_change"
+class DerivationManifestFeedback(Base):
+    __tablename__ = "derivation_manifest_feedback"
     manifest_id: Mapped[UUID] = mapped_column(ForeignKey("derivation_manifest.manifest_id", ondelete="CASCADE"), primary_key=True)
-    change_id: Mapped[UUID] = mapped_column(ForeignKey("change_request.change_id", ondelete="RESTRICT"), primary_key=True)
+    feedback_id: Mapped[UUID] = mapped_column(ForeignKey("plan_feedback.feedback_id", ondelete="RESTRICT"), primary_key=True)
     mandatory: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     required_effects: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
 
 
-class PlanVersionChange(Base):
-    __tablename__ = "plan_version_change"
+class PlanVersionFeedback(Base):
+    __tablename__ = "plan_version_feedback"
     plan_version_id: Mapped[UUID] = mapped_column(ForeignKey("plan_version.plan_version_id", ondelete="CASCADE"), primary_key=True)
-    change_id: Mapped[UUID] = mapped_column(ForeignKey("change_request.change_id", ondelete="RESTRICT"), primary_key=True)
+    feedback_id: Mapped[UUID] = mapped_column(ForeignKey("plan_feedback.feedback_id", ondelete="RESTRICT"), primary_key=True)
     application_outcome: Mapped[str] = mapped_column(Text, nullable=False)
     derivation_note: Mapped[str | None] = mapped_column(Text)
     applied_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
-class ChangeCoverageResult(Base):
-    __tablename__ = "change_coverage_result"
-    __table_args__ = (UniqueConstraint("manifest_id", "change_id", name="change_coverage_manifest_change_key"),)
-    coverage_result_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
+class FeedbackApplicationResult(Base):
+    __tablename__ = "feedback_application_result"
+    __table_args__ = (UniqueConstraint("manifest_id", "feedback_id", name="feedback_application_manifest_feedback_key"),)
+    application_result_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     manifest_id: Mapped[UUID] = mapped_column(ForeignKey("derivation_manifest.manifest_id", ondelete="CASCADE"), nullable=False)
-    change_id: Mapped[UUID] = mapped_column(ForeignKey("change_request.change_id", ondelete="RESTRICT"), nullable=False)
+    feedback_id: Mapped[UUID] = mapped_column(ForeignKey("plan_feedback.feedback_id", ondelete="RESTRICT"), nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     evidence: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
@@ -405,7 +438,19 @@ Index(
     IsolationRun.created_at.desc(),
 )
 Index("isolation_runs_parent_run_idx", IsolationRun.parent_run_id, IsolationRun.created_at.desc())
-Index("change_request_plan_state_idx", ChangeRequest.plan_id, ChangeRequest.state, ChangeRequest.created_at.desc())
+Index("plan_feedback_plan_state_idx", PlanFeedback.plan_id, PlanFeedback.state, PlanFeedback.created_at.desc())
+Index(
+    "plan_feedback_category_state_idx",
+    PlanFeedback.plan_id,
+    PlanFeedback.feedback_category,
+    PlanFeedback.state,
+    PlanFeedback.created_at.desc(),
+)
+Index(
+    "feedback_review_decision_feedback_idx",
+    FeedbackReviewDecision.feedback_id,
+    FeedbackReviewDecision.created_at.desc(),
+)
 Index("derivation_manifest_plan_state_idx", DerivationManifest.plan_id, DerivationManifest.state)
 Index(
     "isolation_run_events_run_id_id_idx",

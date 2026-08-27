@@ -8,22 +8,25 @@ from __future__ import annotations
 from copy import deepcopy
 
 from domain.enums import IsolationDecision
+from domain.feedback import (
+    SUPPORTED_FEEDBACK_TYPES,
+    FeedbackEffect,
+    feedback_definition,
+    validate_feedback_category,
+)
 from domain.isolation_actions import is_installed_positive_isolation, is_operable_barrier
 
 
-SUPPORTED_CORRECTION_TYPES = {
-    "accept_manual_candidate",
-    "reject_manual_candidate",
-    "confirm_bypass",
-    "correct_label",
-    "add_manual_isolation_point",
-    "mark_point_unavailable",
-    "mark_point_available",
-}
+SUPPORTED_CORRECTION_TYPES = SUPPORTED_FEEDBACK_TYPES
 
 
 def apply_approved_corrections(candidate_data: dict, corrections) -> dict:
-    corrections = [dict(item) for item in (corrections or ())]
+    """Compatibility entry point for approved feedback derivation overlays."""
+    return apply_approved_feedback(candidate_data, corrections)
+
+
+def apply_approved_feedback(candidate_data: dict, feedback_items) -> dict:
+    corrections = [dict(item) for item in (feedback_items or ())]
     if not corrections:
         return candidate_data
 
@@ -39,6 +42,29 @@ def apply_approved_corrections(candidate_data: dict, corrections) -> dict:
         proposed = correction.get("proposed_change") or {}
         if kind not in SUPPORTED_CORRECTION_TYPES:
             applied.append(_coverage(correction, "failed", "Unsupported correction type."))
+            continue
+        try:
+            category = validate_feedback_category(
+                kind,
+                correction.get("feedback_category"),
+            )
+            definition = feedback_definition(kind)
+            correction["feedback_category"] = category.value
+            correction.setdefault("feedback_effect", definition.effect.value)
+        except ValueError as error:
+            applied.append(_coverage(correction, "failed", str(error)))
+            continue
+        if definition.effect not in {
+            FeedbackEffect.INPUT_OVERLAY,
+            FeedbackEffect.MANUAL_OBSERVATION_OVERLAY,
+        }:
+            applied.append(
+                _coverage(
+                    correction,
+                    "failed",
+                    f"Feedback category {category.value!r} has no candidate-overlay handler.",
+                )
+            )
             continue
 
         target = _find(candidates, target_id)
@@ -87,6 +113,7 @@ def apply_approved_corrections(candidate_data: dict, corrections) -> dict:
                 applied.append(_coverage(correction, "failed", "Corrected label is blank."))
                 continue
             target["tag_number"] = label
+            target["feedback_basis"] = category.value
             target["correction_provenance"] = _provenance(correction)
         elif kind == "mark_point_unavailable":
             target["availability_status"] = "unavailable"
@@ -164,6 +191,8 @@ def _accept(candidate, correction):
     candidate["policy_decision"] = IsolationDecision.AUTOMATIC.value
     candidate["requires_manual_review"] = False
     candidate["provenance"] = "manual"
+    candidate["feedback_basis"] = "manual_observation"
+    candidate["authoritative_source_update"] = False
     candidate["correction_provenance"] = _provenance(correction)
 
 
@@ -173,8 +202,18 @@ def _provenance(correction):
         "reason": correction.get("justification"),
         "raised_by": correction.get("raised_by"),
         "approved_by": correction.get("approved_by"),
+        "feedback_category": correction.get("feedback_category"),
+        "feedback_effect": correction.get("feedback_effect"),
+        "source_system": correction.get("source_system"),
+        "source_reference": correction.get("source_reference") or {},
+        "evidence": correction.get("evidence") or {},
     }
 
 
 def _coverage(correction, status, reason):
-    return {"change_id": str(correction.get("change_id") or ""), "status": status, "reason": reason}
+    return {
+        "change_id": str(correction.get("change_id") or ""),
+        "feedback_category": correction.get("feedback_category"),
+        "status": status,
+        "reason": reason,
+    }

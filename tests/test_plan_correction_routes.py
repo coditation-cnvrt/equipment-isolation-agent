@@ -84,6 +84,20 @@ class PlanCorrectionRouteTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             CreateChangeRequest(raised_against_version_id=VERSION_ID, change_type="correct_label", target_type="candidate", target_id="v1", proposed_change={"label": "   "}, justification="Field verified")
 
+    def test_feedback_category_is_inferred_and_mismatch_is_rejected(self):
+        body = self.body()
+        self.assertEqual(body.feedback_category, "manual_observation")
+        with self.assertRaisesRegex(ValidationError, "belongs to category"):
+            CreateChangeRequest(
+                raised_against_version_id=VERSION_ID,
+                change_type="correct_label",
+                feedback_category="manual_observation",
+                target_type="candidate",
+                target_id="v1",
+                proposed_change={"label": "XV-101"},
+                justification="Field tag plate checked",
+            )
+
     def test_operational_availability_corrections_are_part_of_the_api_contract(self):
         unavailable = CreateChangeRequest(
             raised_against_version_id=VERSION_ID,

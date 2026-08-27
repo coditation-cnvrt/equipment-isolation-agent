@@ -81,6 +81,21 @@
             "title": "Created At",
             "type": "string"
           },
+          "evidence": {
+            "additionalProperties": true,
+            "title": "Evidence",
+            "type": "object"
+          },
+          "feedback_category": {
+            "enum": [
+              "input_correction",
+              "requirement_deviation",
+              "manual_observation",
+              "execution_failure"
+            ],
+            "title": "Feedback Category",
+            "type": "string"
+          },
           "justification": {
             "title": "Justification",
             "type": "string"
@@ -102,9 +117,43 @@
             "title": "Raised By",
             "type": "string"
           },
+          "review_decisions": {
+            "items": {
+              "$ref": "#/components/schemas/FeedbackReviewDecisionDetail"
+            },
+            "title": "Review Decisions",
+            "type": "array"
+          },
+          "source_reference": {
+            "additionalProperties": true,
+            "title": "Source Reference",
+            "type": "object"
+          },
+          "source_system": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source System"
+          },
           "state": {
             "title": "State",
             "type": "string"
+          },
+          "supersedes_feedback_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersedes Feedback Id"
           },
           "target_id": {
             "title": "Target Id",
@@ -120,6 +169,7 @@
           "plan_id",
           "raised_against_version_id",
           "change_type",
+          "feedback_category",
           "target_type",
           "target_id",
           "proposed_change",
@@ -162,6 +212,28 @@
             "title": "Change Type",
             "type": "string"
           },
+          "evidence": {
+            "additionalProperties": true,
+            "title": "Evidence",
+            "type": "object"
+          },
+          "feedback_category": {
+            "anyOf": [
+              {
+                "enum": [
+                  "input_correction",
+                  "requirement_deviation",
+                  "manual_observation",
+                  "execution_failure"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feedback Category"
+          },
           "justification": {
             "maxLength": 4000,
             "minLength": 3,
@@ -176,6 +248,33 @@
           "raised_against_version_id": {
             "title": "Raised Against Version Id",
             "type": "string"
+          },
+          "source_reference": {
+            "additionalProperties": true,
+            "title": "Source Reference",
+            "type": "object"
+          },
+          "source_system": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source System"
+          },
+          "supersedes_feedback_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersedes Feedback Id"
           },
           "target_id": {
             "minLength": 1,
@@ -342,6 +441,50 @@
           "unigraph_project_id"
         ],
         "title": "EquipmentListRequest",
+        "type": "object"
+      },
+      "FeedbackReviewDecisionDetail": {
+        "properties": {
+          "actor_id": {
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "decision": {
+            "enum": [
+              "approved",
+              "rejected"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "review_decision_id": {
+            "title": "Review Decision Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "review_decision_id",
+          "decision",
+          "actor_id",
+          "created_at"
+        ],
+        "title": "FeedbackReviewDecisionDetail",
         "type": "object"
       },
       "HTTPValidationError": {

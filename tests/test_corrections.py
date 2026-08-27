@@ -110,6 +110,17 @@ class CorrectionApplicationTests(unittest.TestCase):
         self.assertEqual(point["tag_number"], "XV-101")
         self.assertTrue(point["required_branch_isolation"])
 
+    def test_feedback_category_mismatch_cannot_reach_candidate_logic(self):
+        mismatched = correction("correct_label", label="XV-101")
+        mismatched["feedback_category"] = "manual_observation"
+        result = apply_approved_corrections(
+            {"candidates": [candidate()], "debug": {}},
+            [mismatched],
+        )
+        self.assertEqual(result["candidates"][0]["tag_number"], "XV-1")
+        self.assertEqual(result["correction_coverage"][0]["status"], "failed")
+        self.assertIn("belongs to category", result["correction_coverage"][0]["reason"])
+
     def test_unavailable_point_remains_auditable_but_cannot_be_a_barrier(self):
         available = candidate(decision="automatic")
         available["classification"]["is_barrier"] = True

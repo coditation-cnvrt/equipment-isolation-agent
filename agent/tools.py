@@ -19,7 +19,7 @@ from bbox import resolve_bboxes
 from boundary import fetch_boundaries
 from candidates import find_candidates
 from correction_targets import enrich_approved_correction_targets
-from domain.corrections import apply_approved_corrections
+from domain.corrections import apply_approved_feedback
 from domain.topology import normalize_tag
 from evidence import build_evidence
 from impact import analyze_downstream_impact as _analyze_downstream_impact
@@ -114,7 +114,7 @@ def t_resolve_bboxes(session: AgentSession, **_) -> dict:
     data = resolve_bboxes(session.candidate_data, session.config)
     # HILT topology is authoritative and may replace graph-selected candidates.
     # Apply review decisions only after that final candidate set exists.
-    data = apply_approved_corrections(data, session.config.approved_corrections)
+    data = apply_approved_feedback(data, session.config.approved_corrections)
     session.bbox_data = data
     summary = _summarize_bbox(data)
     summary["job_id_used"] = session.config.resolved_job_id or ""

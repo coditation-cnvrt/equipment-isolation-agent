@@ -26,8 +26,11 @@ REQUIRED_MEMBERS = {
     "api/migrations/versions/0001_current_schema.py",
     "api/migrations/versions/0002_plan_corrections.py",
     "api/migrations/versions/0003_scoped_asset_identity.py",
+    "api/migrations/versions/0004_plan_feedback_framework.py",
+    "api/migrations/versions/0005_feedback_constraint_names.py",
     "config.py",
     "domain/instrument_catalog.json",
+    "domain/feedback.py",
     "instrument_context.py",
 }
 FORBIDDEN_MEMBERS = {
@@ -77,7 +80,7 @@ from api.service import execute_agent_request
 from instrument_context import load_instrument_catalog
 from run import main
 
-assert migration_head_revision() == "0003_scoped_asset_identity"
+assert migration_head_revision() == "0005_feedback_constraint_names"
 assert list_osha_topics()
 assert load_instrument_catalog().get("version")
 assert callable(run_agent_pipeline)

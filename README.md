@@ -354,8 +354,8 @@ link, scope, assets, branches, points, steps, findings, and input snapshots). Th
 latest draft is not active or authorised, and reopening it does not invoke the
 agent.
 
-Corrections never edit a version or its run result. A reviewer submits a typed
-change against the latest version, an authenticated reviewer approves it, and
+Plan feedback never edits a version or its run result. A reviewer submits a typed
+feedback record against the latest version, an authenticated reviewer approves it, and
 `/derive` locks every outstanding approved change before launching a complete
 child run. Advisory plans record audited self-approval; stricter plan modes
 require separation of duties. Successful runs create the next immutable plan version;
@@ -363,7 +363,16 @@ failed runs remain in the parent-run tree and leave approved changes available
 for retry. The diff endpoint compares the complete child projection with its
 parent. See `docs/openapi.json` for the checked-in API contract.
 
-Supported draft-review corrections are accepting or rejecting a conditional
+Feedback is categorized as `input_correction`, `manual_observation`,
+`requirement_deviation`, or `execution_failure`. The current advisory product
+registers derivation handlers only for the first two categories; category/type
+mismatches and unsupported future behaviors are rejected before they can reach
+the deterministic pipeline. Existing `/changes` request and response names are
+retained as a compatibility API. Review decisions are append-only, while the
+feedback row retains approval fields as a query projection. See
+`docs/feedback-architecture.md` for the category and persistence invariants.
+
+Supported draft-review feedback actions are accepting or rejecting a conditional
 manual-review candidate, confirming a bypass point, correcting a display label,
 adding a graph-identified manual point, reporting an isolation point unavailable
 (faulty, bypassed, or out of service), and returning a repaired point to service.

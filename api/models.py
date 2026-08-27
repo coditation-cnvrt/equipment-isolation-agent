@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from domain.feedback import validate_feedback_category
+
 from domain.identity import REQUEST_SCHEMA_VERSION, RESULT_SCHEMA_VERSION
 
 
@@ -249,14 +251,26 @@ CorrectionType = Literal[
     "mark_point_available",
 ]
 
+FeedbackCategoryType = Literal[
+    "input_correction",
+    "requirement_deviation",
+    "manual_observation",
+    "execution_failure",
+]
+
 
 class CreateChangeRequest(BaseModel):
     raised_against_version_id: str
     change_type: CorrectionType
+    feedback_category: FeedbackCategoryType | None = None
     target_type: Literal["candidate", "isolation_point", "branch"]
     target_id: str = Field(..., min_length=1)
     proposed_change: dict[str, Any] = Field(default_factory=dict)
     justification: str = Field(..., min_length=3, max_length=4000)
+    source_system: str | None = None
+    source_reference: dict[str, Any] = Field(default_factory=dict)
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    supersedes_feedback_id: str | None = None
 
     @field_validator("target_id", "justification", mode="before")
     @classmethod
@@ -265,6 +279,10 @@ class CreateChangeRequest(BaseModel):
 
     @model_validator(mode="after")
     def _validate_change_payload(self):
+        self.feedback_category = validate_feedback_category(
+            self.change_type,
+            self.feedback_category,
+        ).value
         if self.change_type == "correct_label":
             label = str(self.proposed_change.get("label") or "").strip()
             if not label:
@@ -273,15 +291,28 @@ class CreateChangeRequest(BaseModel):
         return self
 
 
+class FeedbackReviewDecisionDetail(BaseModel):
+    review_decision_id: str
+    decision: Literal["approved", "rejected"]
+    actor_id: str
+    reason: str | None = None
+    created_at: datetime
+
+
 class ChangeRequestDetail(BaseModel):
     change_id: str
     plan_id: str
     raised_against_version_id: str
     change_type: CorrectionType
+    feedback_category: FeedbackCategoryType
     target_type: str
     target_id: str
     proposed_change: dict[str, Any]
     justification: str
+    source_system: str | None = None
+    source_reference: dict[str, Any] = Field(default_factory=dict)
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    supersedes_feedback_id: str | None = None
     state: str
     raised_by: str
     approved_by: str | None = None
@@ -290,6 +321,7 @@ class ChangeRequestDetail(BaseModel):
     application_outcome: str | None = None
     coverage_status: str | None = None
     coverage_reason: str | None = None
+    review_decisions: list[FeedbackReviewDecisionDetail] = Field(default_factory=list)
 
 
 class ChangeRequestList(BaseModel):
