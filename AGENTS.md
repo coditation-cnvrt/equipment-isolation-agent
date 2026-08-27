@@ -194,7 +194,7 @@ HTML viewer.
   startup fails when PostgreSQL is unavailable or is not at the packaged Alembic
   migration head. The API never applies DDL on startup. Drawing/HILT content is
   proxied from CNVRT, not retained locally.
-- Isolation policy: max depth 3; eligible classes = valves/blinds/flanges/breakers/disconnects; conditional classes (check/control/undefined valve) selected but flagged manual-review
+- Isolation policy: UniGraph fallback uses cycle-safe adaptive branch traversal and stops each path at its first available eligible barrier or a terminal. `max_traversal_depth=20` is only a fail-safe ceiling; reaching it leaves the path unresolved. Eligible classes = valves/blinds/flanges/breakers/disconnects; conditional classes (check/control/undefined valve) are selected but flagged manual-review.
 - Work scope defaults: intrusive=true, high_risk_service=true → requires positive isolation
 
 ## Output Files

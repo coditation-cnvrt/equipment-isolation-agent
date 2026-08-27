@@ -22,6 +22,7 @@ MAX_TOTAL_CANDIDATES = 20
 
 def find_candidates(boundary_data, policy):
     raw_candidates = []
+    unigraph_branch_obligations = []
     skipped_count = 0
     selected_equipment_nodes = []
     for boundary in boundary_data.get("equipment_boundaries", []):
@@ -39,9 +40,21 @@ def find_candidates(boundary_data, policy):
             component_props = component.get("properties", {}) or {}
             source_component_id = component.get("id")
             source_component_tag = _tag(component_props) or str(source_component_id)
-            sources = []
-            sources.extend(("component direct neighbor", item) for item in component_boundary.get("direct_neighbors", []) or [])
-            sources.extend(("component traversal sample", item) for item in component_boundary.get("traversal_sample", []) or [])
+            for branch in component_boundary.get("graph_branches", []) or []:
+                unigraph_branch_obligations.append(
+                    {
+                        **branch,
+                        "equipment_tag": equipment_tag,
+                        "source_component": source_component_id,
+                        "source_component_tag": source_component_tag,
+                    }
+                )
+            traversal_sample = component_boundary.get("traversal_sample", []) or []
+            sources = (
+                [("adaptive component path", item) for item in traversal_sample]
+                if traversal_sample
+                else [("component direct neighbor", item) for item in component_boundary.get("direct_neighbors", []) or []]
+            )
             for source_name, vertex in sources:
                 candidate = _candidate_from_vertex(
                     equipment_tag,
@@ -83,6 +96,7 @@ def find_candidates(boundary_data, policy):
         "all_candidates_before_ranking": len(deduped),
         "candidates": ranked,
         "_candidate_pool": raw_candidates,
+        "unigraph_branch_obligations": unigraph_branch_obligations,
         "selected_equipment_nodes": selected_equipment_nodes,
         "target_identity": boundary_data.get("target_identity") or {},
         "context": boundary_data.get("context") or {},
@@ -98,11 +112,12 @@ def find_candidates(boundary_data, policy):
             "deduped_candidate_count": len(deduped),
             "skipped_count": skipped_count,
             "traversal_limit_hit": boundary_data.get("traversal_limit_hit"),
+            "unigraph_branch_obligation_count": len(unigraph_branch_obligations),
         },
     }
 
 
-def _candidate_from_vertex(equipment_tag, source_component_tag, source_component_id, source_component_props, vertex, source_name, policy):
+def _candidate_from_vertex(equipment_tag, source_component_tag, source_component_id, source_component_props, vertex, source_name, policy, *, allow_beyond_max_depth=False):
     properties = vertex.get("properties", {}) or {}
     label = _norm(vertex.get("label"))
     vertex_type = _norm(properties.get("type"))
@@ -116,7 +131,7 @@ def _candidate_from_vertex(equipment_tag, source_component_tag, source_component
         return None
 
     depth = int(vertex.get("traversal_depth") or 1)
-    if depth > policy.max_traversal_depth:
+    if depth > policy.max_traversal_depth and not allow_beyond_max_depth:
         return None
 
     candidate_id = vertex.get("id")
@@ -159,15 +174,52 @@ def _candidate_from_vertex(equipment_tag, source_component_tag, source_component
             "source_name": source_name,
             "confidence": confidence,
             "property_preview": {key: properties[key] for key in sorted(properties)[:12] if properties.get(key) is not None},
+            "graph_path_ids": vertex.get("graph_path_ids") or [],
+            "graph_path_edge_labels": vertex.get("graph_path_edge_labels") or [],
+            "graph_path_key": vertex.get("graph_path_key") or "",
+            "graph_path_status": vertex.get("graph_path_status") or "",
+            "graph_path_complete": bool(vertex.get("graph_path_complete")),
+            "availability_status": vertex.get("availability_status") or "available",
+            "available_for_isolation": vertex.get("available_for_isolation") is not False,
         },
     )
     return candidate.to_dict()
 
 
+def candidate_from_exact_correction_target(equipment_tag, source_component, vertex, traversal_depth, policy):
+    """Build a normal candidate for one approved, exact-identity lookup.
+
+    The automatic search depth remains unchanged.  This helper only permits an
+    already approved correction target to be evaluated beyond that depth.
+    """
+    source_props = source_component.get("properties") or {}
+    candidate = _candidate_from_vertex(
+        equipment_tag,
+        _tag(source_props) or str(source_component.get("id")),
+        source_component.get("id"),
+        source_props,
+        {**vertex, "traversal_depth": traversal_depth},
+        "approved exact-target correction lookup",
+        policy,
+        allow_beyond_max_depth=True,
+    )
+    if candidate:
+        candidate["manual_target_lookup"] = True
+        candidate["reason"] = (
+            f"Exact approved correction target resolved {traversal_depth} graph hops "
+            f"from boundary source {candidate.get('source_component_tag')}."
+        )
+    return candidate
+
+
 def _select_nearest_per_source(candidates):
     by_source = {}
     for candidate in candidates:
-        source_key = (candidate.get("equipment_tag"), candidate.get("source_component_id") or candidate.get("source_component_tag"))
+        source_key = (
+            candidate.get("equipment_tag"),
+            candidate.get("source_component_id") or candidate.get("source_component_tag"),
+            candidate.get("graph_path_key") or "",
+        )
         by_source.setdefault(source_key, []).append(candidate)
     selected = []
     samples = []
@@ -272,5 +324,3 @@ def _looks_like_uuid(value):
 
 def _norm(value):
     return normalize_class(value)
-
-

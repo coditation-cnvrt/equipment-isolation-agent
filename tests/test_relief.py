@@ -5,6 +5,21 @@ from relief import analyze_isolation_schemes_and_relief
 
 
 class ReliefAndSchemeTests(unittest.TestCase):
+    def test_unavailable_point_does_not_define_an_isolated_envelope_or_scheme(self):
+        unavailable = candidate("S1", "V1", ["S1", "V1"])
+        unavailable.update(availability_status="unavailable", available_for_isolation=False)
+        result = analyze_isolation_schemes_and_relief(
+            data(
+                nodes=[node("S1", "equipment_nozzle"), node("V1", "gate_valve")],
+                links=[link("S1", "V1")],
+                candidates=[unavailable],
+            ),
+            RunConfig(equipment_tag="T-1"),
+        )
+
+        self.assertEqual(result["detected_isolation_schemes"]["items"], [])
+        self.assertEqual(result["isolated_envelope"]["reason"], "no_selected_barriers")
+
     def test_single_block_scheme_detected(self):
         result = analyze_isolation_schemes_and_relief(
             data(

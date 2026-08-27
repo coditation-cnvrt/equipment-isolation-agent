@@ -24,19 +24,36 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, func, inspect, select
 
 from api.database import database_url, postgres_config_from_env
-from api.db import PostgresRunRepository
+from api.db import PostgresRunRepository, _get_or_create_asset
+from api.db_models import PathPoint
+from api.models import CreateChangeRequest
 from pipeline.env import load_dotenv
 
 
 APP_TABLES = (
+    "asset_reference",
+    "audit_event",
+    "change_coverage_result",
+    "change_request",
+    "derivation_manifest",
+    "derivation_manifest_change",
     "external_run_link",
+    "finding",
+    "input_snapshot",
+    "isolation_branch",
+    "isolation_point",
     "isolation_plan",
     "isolation_run_events",
     "isolation_runs",
+    "path_point",
+    "plan_step",
     "plan_version",
+    "plan_version_change",
+    "work_scope",
+    "work_scope_asset",
 )
 
 
@@ -162,6 +179,58 @@ def _repository_smoke(repository: PostgresRunRepository) -> None:
         repository.get_plan(plan["plan_id"])["versions"][0]["version_no"] == 1,
         "Plan detail failed",
     )
+
+    change = repository.create_change(
+        plan["plan_id"],
+        CreateChangeRequest(
+            raised_against_version_id=plan["latest_plan_version_id"],
+            change_type="add_manual_isolation_point",
+            target_type="isolation_point",
+            target_id="manual-v2",
+            justification="Disposable database correction smoke test.",
+        ),
+        "reviewer-1",
+    )
+    try:
+        repository.approve_change(plan["plan_id"], change["change_id"], "reviewer-1")
+    except Exception as error:
+        _require(getattr(error, "kind", "") == "self_approval_forbidden", "Self approval was not rejected")
+    approved = repository.approve_change(plan["plan_id"], change["change_id"], "reviewer-2")
+    _require(approved["state"] == "approved", "Correction approval failed")
+    prepared = repository.prepare_derivation(plan["plan_id"], plan["latest_plan_version_id"], "reviewer-2")
+    failed = SimpleNamespace(
+        run_id=uuid.uuid4().hex, equipment_tag=run.equipment_tag, runner="agentic", status="queued",
+        created_at=now + 3, started_at=None, finished_at=None, agent=None, result=None, trace=None, error=None,
+        parent_run_id=run_id,
+    )
+    repository.insert_run(failed, prepared["request"])
+    failed.status, failed.started_at, failed.finished_at = "failed", now + 3.1, now + 3.2
+    failed.error = {"kind": "pipeline_error", "message": "Deliberate correction retry smoke test"}
+    repository.update_run(failed)
+    _require(repository.list_changes(plan["plan_id"])[0]["state"] == "approved", "Failed derivation consumed approved correction")
+    prepared = repository.prepare_derivation(plan["plan_id"], plan["latest_plan_version_id"], "reviewer-2")
+    child = SimpleNamespace(
+        run_id=uuid.uuid4().hex, equipment_tag=run.equipment_tag, runner="agentic", status="queued",
+        created_at=now + 3, started_at=None, finished_at=None, agent=None, result=None, trace=None, error=None,
+        parent_run_id=run_id,
+    )
+    repository.insert_run(child, prepared["request"])
+    child.status, child.started_at, child.finished_at = "succeeded", now + 4, now + 5
+    child.agent = {"steps_used": 1}
+    child.result = {"data": [{"assurance_status": "provisional_unproven_isolation", "isolation_points": [{"uuid": "manual-v2", "tag_number": "XV-MANUAL", "branch_id": "branch-2", "provenance": "manual", "source_paths": [{"branch_id": "branch-2"}, {"branch_id": "branch-3"}]}], "correction_coverage": [{"change_id": change["change_id"], "status": "applied", "reason": "Applied before deterministic validation."}]}]}
+    child.trace = [{"tool": "validate"}]
+    repository.update_run(child)
+    revised = repository.get_plan(plan["plan_id"])
+    _require(len(revised["versions"]) == 2 and revised["versions"][0]["parent_plan_version_id"] == plan["latest_plan_version_id"], "Child plan version lineage failed")
+    _require(repository.get_run(child.run_id)["parent_run_id"] == run_id, "Child run lineage failed")
+    _require(repository.list_changes(plan["plan_id"])[0]["state"] == "applied", "Correction application ledger failed")
+    diff = repository.get_plan_version_diff(plan["plan_id"], revised["latest_plan_version_id"])
+    _require(diff["summary"]["added"] > 0 and diff["summary"]["safety_significant"] > 0, "Structural version diff failed")
+    with repository._session_factory.begin() as session:
+        _require(int(session.scalar(select(func.count()).select_from(PathPoint)) or 0) == 2, "Shared isolation point did not persist both branch relationships")
+        first = _get_or_create_asset(session, "unigraph_candidate", "reused-vertex", "XV-P15", "gate_valve", {"unigraph_project_id": "15"})
+        second = _get_or_create_asset(session, "unigraph_candidate", "reused-vertex", "XV-P27", "gate_valve", {"unigraph_project_id": "27"})
+        _require(first.asset_ref_id != second.asset_ref_id, "Asset identities collided across UniGraph projects")
 
 
 async def _lifespan_smoke() -> None:

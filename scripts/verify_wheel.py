@@ -24,6 +24,8 @@ REQUIRED_MEMBERS = {
     "api/migrations/script.py.mako",
     "api/migrations/versions/__init__.py",
     "api/migrations/versions/0001_current_schema.py",
+    "api/migrations/versions/0002_plan_corrections.py",
+    "api/migrations/versions/0003_scoped_asset_identity.py",
     "config.py",
     "domain/instrument_catalog.json",
     "instrument_context.py",
@@ -75,7 +77,7 @@ from api.service import execute_agent_request
 from instrument_context import load_instrument_catalog
 from run import main
 
-assert migration_head_revision() == "0001_current_schema"
+assert migration_head_revision() == "0003_scoped_asset_identity"
 assert list_osha_topics()
 assert load_instrument_catalog().get("version")
 assert callable(run_agent_pipeline)

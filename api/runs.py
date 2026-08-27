@@ -89,6 +89,9 @@ class RunRecord:
     result: dict[str, Any] | None = None
     trace: dict[str, Any] | None = None
     error: dict[str, Any] | None = None
+    parent_run_id: str | None = None
+    derivation_manifest_id: str | None = None
+    produced_plan_version_id: str | None = None
     events: queue.Queue = field(default_factory=queue.Queue)
 
 
@@ -102,13 +105,15 @@ class RunStore:
         self.run_timeout_seconds = run_timeout_seconds
         self.repository = repository
 
-    def create(self, request, auth_token: str) -> RunRecord:
+    def create(self, request, auth_token: str, *, parent_run_id: str | None = None) -> RunRecord:
         run_id = uuid.uuid4().hex
         record = RunRecord(
             run_id=run_id,
             equipment_tag=request.equipment_tag,
             runner=request.runner,
             request=_request_payload(request),
+            parent_run_id=parent_run_id,
+            derivation_manifest_id=str((getattr(request, "derivation_context", {}) or {}).get("manifest_id") or "") or None,
         )
         # Persist before exposing or scheduling the run. PostgreSQL failure must
         # reject run creation rather than producing an untracked local run.
@@ -116,7 +121,15 @@ class RunStore:
             self.repository.insert_run(record, record.request)
         with self._lock:
             self._records[run_id] = record
-        self._executor.submit(self._run, record, request, auth_token)
+        try:
+            self._executor.submit(self._run, record, request, auth_token)
+        except Exception as exc:
+            error = _error_detail(exc)
+            try:
+                self._mark(record, status="failed", finished_at=time.time(), error=error)
+            finally:
+                self._evict_terminal(record)
+            raise
         return record
 
     def get(self, run_id: str) -> RunRecord | None:
@@ -161,6 +174,9 @@ class RunStore:
             "agent": record.agent,
             "request": dict(record.request),
             "error": record.error,
+            "parent_run_id": record.parent_run_id,
+            "derivation_manifest_id": record.derivation_manifest_id,
+            "produced_plan_version_id": record.produced_plan_version_id,
         }
         if include_result:
             payload["result"] = record.result
@@ -363,4 +379,7 @@ def _record_from_row(row: dict) -> RunRecord:
         result=row.get("result"),
         trace=row.get("trace"),
         error=row.get("error"),
+        parent_run_id=row.get("parent_run_id"),
+        derivation_manifest_id=row.get("derivation_manifest_id"),
+        produced_plan_version_id=row.get("produced_plan_version_id"),
     )

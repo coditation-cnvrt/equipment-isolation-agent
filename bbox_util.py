@@ -66,7 +66,9 @@ def _selectable_candidate_pool(candidate_pool, policy):
     return [
         candidate
         for candidate in candidate_pool
-        if candidate.get("policy_decision")
+        if candidate.get("available_for_isolation") is not False
+        and str(candidate.get("availability_status") or "").lower() != "unavailable"
+        and candidate.get("policy_decision")
         in {IsolationDecision.AUTOMATIC.value, IsolationDecision.CONDITIONAL_MANUAL_REVIEW.value}
     ]
 

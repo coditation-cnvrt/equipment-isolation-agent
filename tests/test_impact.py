@@ -58,6 +58,28 @@ def candidate(candidate_id, source="N1_FT18", role="outlet", tag="XV-1"):
 
 
 class DownstreamImpactTests(unittest.TestCase):
+    def test_explicit_empty_barrier_set_does_not_fall_back_to_unavailable_candidates(self):
+        payload = {
+            "hilt_graph": {
+                "nodes": [
+                    node("N1", "equipment_nozzle", "N1_FT18"),
+                    node("V1", "gate_valve", "XV-FAULTY"),
+                    node("P1", "centrifugal_pump", "PT-19", entity_type="equipment"),
+                ],
+                "links": [line("N1", "V1"), line("V1", "P1")],
+            }
+        }
+        unavailable = candidate("V1")
+        unavailable.update(availability_status="unavailable", available_for_isolation=False)
+        result = analyze_hilt_downstream_impact(
+            payload,
+            validation([unavailable], barrier_ids=[]),
+            equipment_tag="FT-18",
+        )
+
+        self.assertEqual(result["debug"]["start_count"], 0)
+        self.assertEqual(result["warnings"], [])
+
     def test_one_way_closure_reaches_downstream_pump_as_likely(self):
         payload = {
             "hilt_graph": {

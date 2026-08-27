@@ -83,6 +83,7 @@ def _summarize_candidates(data: dict) -> dict:
                 "depth": cand.get("traversal_depth"),
                 "source": cand.get("source_component_tag"),
                 "bbox_resolved": bool(cand.get("bbox")),
+                "availability_status": cand.get("availability_status") or "available",
             }
         )
     debug = data.get("debug") or {}
@@ -134,6 +135,11 @@ def _summarize_bbox(data: dict) -> dict:
         "manual_visual_checks": debug.get("manual_visual_isolation_check_count"),
         "context_instruments": len(data.get("context_instruments") or []),
         "unselected_sources": len(debug.get("bbox_unselected_source_components") or []),
+        "unavailable_count": sum(
+            1 for candidate in candidates
+            if candidate.get("available_for_isolation") is False
+            or str(candidate.get("availability_status") or "").lower() == "unavailable"
+        ),
         "candidates": [
             {"tag": c.get("tag_number"), "bbox_present": bool(c.get("bbox"))} for c in candidates[:20]
         ],
@@ -147,6 +153,7 @@ def _summarize_evidence(data: dict) -> dict:
         "barrier_count": len(evidence.get("barrier_candidate_ids") or []),
         "positive_count": len(evidence.get("positive_candidate_ids") or []),
         "verification_count": len(evidence.get("verification_candidate_ids") or []),
+        "unavailable_count": len(evidence.get("unavailable_candidate_ids") or []),
         "expected_boundary_count": evidence.get("expected_boundary_count"),
         "covered_boundary_source_count": evidence.get("covered_boundary_source_count"),
         "missing_boundary_count": evidence.get("missing_boundary_count"),
@@ -168,6 +175,7 @@ def _summarize_validation(data: dict) -> dict:
         "expected_boundary_count": validation.get("expected_boundary_count"),
         "covered_boundary_source_count": validation.get("covered_boundary_source_count"),
         "missing_boundary_count": validation.get("missing_boundary_count"),
+        "unavailable_count": len(validation.get("unavailable_candidate_ids") or []),
         "primary_reason_codes": [reason.get("code") for reason in primary_reasons],
         "primary_reason_count": len(primary_reasons),
         "outstanding_requirement_count": len(outstanding),

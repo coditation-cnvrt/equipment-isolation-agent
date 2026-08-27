@@ -19,10 +19,18 @@ def analyze_isolation_obligations(candidate_data, config):
     debug = candidate_data.get("debug") or {}
     candidates = candidate_data.get("candidates") or []
     candidate_pool = candidate_data.get("_candidate_pool") or candidates
+    unavailable_ids = {
+        _norm(value)
+        for candidate in candidates
+        if not _available_for_isolation(candidate)
+        for value in _candidate_identities(candidate)
+        if value
+    }
     selected_ids = {
         _norm(value)
         for candidate in candidates
-        for value in (candidate.get("candidate_id"), candidate.get("visual_id"))
+        if _available_for_isolation(candidate)
+        for value in _candidate_identities(candidate)
         if value
     }
     pool_by_source = _pool_by_source(candidate_pool)
@@ -44,13 +52,25 @@ def analyze_isolation_obligations(candidate_data, config):
         seen_sources.add(source_key)
         for branch_index, branch in enumerate(source.get("branches") or []):
             valve = branch.get("valve") or {}
-            selected_for_branch = [str(valve.get("valve_id"))] if branch.get("status") == ObligationStatus.ISOLATED.value and valve.get("valve_id") else []
+            valve_id = _norm(valve.get("valve_id"))
+            valve_unavailable = bool(valve_id and valve_id in unavailable_ids)
+            selected_for_branch = [str(valve.get("valve_id"))] if branch.get("status") == ObligationStatus.ISOLATED.value and valve.get("valve_id") and not valve_unavailable else []
             manual_candidates = []
             relief_context = _branch_key(source, branch, branch_index) in relief_context_branches
             source_type = SourceType.RELIEF_CONTEXT if relief_context else SourceType.PROCESS
-            status = ObligationStatus.CONTEXT.value if relief_context else (branch.get("status") or ObligationStatus.UNRESOLVED.value)
+            status = ObligationStatus.CONTEXT.value if relief_context else (
+                ObligationStatus.UNRESOLVED.value
+                if valve_unavailable
+                else branch.get("status") or ObligationStatus.UNRESOLVED.value
+            )
             path_ids = branch.get("path_node_ids") or []
             path_classes = branch.get("path_node_classes") or []
+            unavailable_devices = [
+                device for device in (branch.get("context_devices") or [])
+                if not _available_for_isolation(device)
+            ]
+            if valve_unavailable:
+                unavailable_devices.append({**valve, "availability_status": "unavailable", "available_for_isolation": False})
             items.append(
                 {
                     "equipment_tag": source_key[0],
@@ -67,6 +87,7 @@ def analyze_isolation_obligations(candidate_data, config):
                     "branch_path_node_ids": path_ids,
                     "branch_path_node_classes": path_classes,
                     "branch_context_devices": branch.get("context_devices") or [],
+                    "unavailable_devices": unavailable_devices,
                     **({"terminal_node": branch["terminal_node"]} if branch.get("terminal_node") else {}),
                     **(
                         {
@@ -80,7 +101,79 @@ def analyze_isolation_obligations(candidate_data, config):
                     "basis": (
                         "connected HILT branch network contains an explicit pressure/vacuum relief device and no off-page process connector; treat as relief context pending safe-discharge and zero-energy verification"
                         if relief_context
+                        else "reported unavailable isolation device leaves this branch without an available barrier"
+                        if valve_unavailable
                         else branch.get("basis") or "HILT branch-level process isolation obligation"
+                    ),
+                }
+            )
+
+    # UniGraph is the topology fallback when HILT cannot map a boundary source.
+    # Its adaptive traversal emits one outcome per completed or unresolved path;
+    # preserve those paths instead of collapsing them into one nearest point.
+    graph_branches_by_source = {}
+    context_source_keys = {
+        source_key
+        for item in candidate_data.get("boundary_context_sources") or []
+        if (source_key := _source_key_from_item(item))
+    }
+    for branch in candidate_data.get("unigraph_branch_obligations") or []:
+        source_key = _source_key_from_item(branch)
+        if source_key and source_key not in seen_sources:
+            graph_branches_by_source.setdefault(source_key, []).append(branch)
+    for source_key, branches in graph_branches_by_source.items():
+        seen_sources.add(source_key)
+        source_pool = pool_by_source.get(source_key) or []
+        for branch_index, branch in enumerate(branches):
+            if source_key in context_source_keys:
+                items.append(
+                    {
+                        "equipment_tag": source_key[0],
+                        "source_component": source_key[1],
+                        "source_component_tag": branch.get("source_component_tag") or _source_label(branch, source_pool),
+                        "source_type": SourceType.INSTRUMENT_CONTEXT.value,
+                        "status": ObligationStatus.CONTEXT.value,
+                        "selected_candidate_ids": [],
+                        "manual_candidates": [],
+                        "manual_candidate_count": 0,
+                        "branch_id": branch.get("branch_id") or f"unigraph:{source_key[1]}:{branch_index}",
+                        "branch_index": branch_index,
+                        "branch_path_node_ids": branch.get("path_node_ids") or [],
+                        "branch_path_edge_labels": branch.get("path_edge_labels") or [],
+                        "basis": "HILT classifies this UniGraph-connected source as instrument or companion context, not a process isolation boundary.",
+                    }
+                )
+                continue
+            barrier_id = _norm(branch.get("barrier_id"))
+            covered = bool(
+                branch.get("status") == ObligationStatus.ISOLATED.value
+                and barrier_id
+                and barrier_id in selected_ids
+            )
+            reason = str(branch.get("reason") or "")
+            manual_candidates = _manual_candidates_for_source(source_pool, selected_ids, unavailable_ids=unavailable_ids)
+            items.append(
+                {
+                    "equipment_tag": source_key[0],
+                    "source_component": source_key[1],
+                    "source_component_tag": branch.get("source_component_tag") or _source_label(branch, source_pool),
+                    "source_type": SourceType.PROCESS.value,
+                    "status": (ObligationStatus.ISOLATED if covered else ObligationStatus.UNRESOLVED).value,
+                    "selected_candidate_ids": [str(branch.get("barrier_id"))] if covered else [],
+                    "manual_candidates": manual_candidates,
+                    "manual_candidate_count": len(manual_candidates),
+                    "branch_id": branch.get("branch_id") or f"unigraph:{source_key[1]}:{branch_index}",
+                    "branch_index": branch_index,
+                    "branch_path_node_ids": branch.get("path_node_ids") or [],
+                    "branch_path_edge_labels": branch.get("path_edge_labels") or [],
+                    "basis": (
+                        "adaptive UniGraph path reached its first available eligible isolation barrier"
+                        if covered
+                        else "adaptive UniGraph traversal reached its safety limit before proving a barrier"
+                        if reason == "safety_limit_reached"
+                        else "adaptive UniGraph path terminated without an available eligible isolation barrier"
+                        if reason == "terminal_without_barrier"
+                        else "the graph-discovered barrier was not retained in the authoritative candidate set"
                     ),
                 }
             )
@@ -90,19 +183,26 @@ def analyze_isolation_obligations(candidate_data, config):
         if not source_key or source_key in seen_sources:
             continue
         seen_sources.add(source_key)
-        selected_for_source = [str(value) for value in sample.get("selected_candidate_ids") or [] if value]
-        manual_candidates = _manual_candidates_for_source(pool_by_source.get(source_key) or [], selected_ids)
+        selected_for_source = [
+            str(value) for value in sample.get("selected_candidate_ids") or []
+            if value and _norm(value) not in unavailable_ids
+        ]
+        manual_candidates = _manual_candidates_for_source(pool_by_source.get(source_key) or [], selected_ids, unavailable_ids=unavailable_ids)
         items.append(
             {
                 "equipment_tag": source_key[0],
                 "source_component": source_key[1],
                 "source_component_tag": _source_label(sample, pool_by_source.get(source_key) or []),
                 "source_type": SourceType.PROCESS.value,
-                "status": ObligationStatus.ISOLATED.value,
+                "status": (ObligationStatus.ISOLATED if selected_for_source else ObligationStatus.UNRESOLVED).value,
                 "selected_candidate_ids": selected_for_source,
                 "manual_candidates": manual_candidates,
                 "manual_candidate_count": len(manual_candidates),
-                "basis": "selected drawable isolation candidate for boundary source",
+                "basis": (
+                    "selected drawable isolation candidate for boundary source"
+                    if selected_for_source
+                    else "the selected isolation candidate was reported unavailable; an alternate barrier is required"
+                ),
             }
         )
 
@@ -114,7 +214,7 @@ def analyze_isolation_obligations(candidate_data, config):
         line_kind = "context" if source.get("source_context_type") else _line_kind(source.get("source_hilt_lines") or [])
         source_pool = pool_by_source.get(source_key) or []
         shared_selected_ids = _selected_candidate_ids_for_source(source_pool, selected_ids)
-        manual_candidates = _manual_candidates_for_source(source_pool, selected_ids)
+        manual_candidates = _manual_candidates_for_source(source_pool, selected_ids, unavailable_ids=unavailable_ids)
         source_type = SourceType.PROCESS if line_kind != "context" else SourceType.INSTRUMENT_CONTEXT
         if source_type == SourceType.PROCESS and shared_selected_ids:
             status = ObligationStatus.ISOLATED
@@ -258,7 +358,7 @@ def _pool_by_source(candidate_pool):
     return grouped
 
 
-def _manual_candidates_for_source(items, selected_ids, include_selected=False, limit=6):
+def _manual_candidates_for_source(items, selected_ids, include_selected=False, limit=6, unavailable_ids=None):
     rows = []
     seen = set()
     for candidate in sorted(items or [], key=_candidate_sort_key):
@@ -267,6 +367,8 @@ def _manual_candidates_for_source(items, selected_ids, include_selected=False, l
         if not candidate_id or candidate_id in seen:
             continue
         if not include_selected and candidate_keys & selected_ids:
+            continue
+        if candidate_keys & set(unavailable_ids or ()):
             continue
         bbox = _valid_bbox(candidate.get("bbox"))
         if not bbox:
@@ -357,6 +459,22 @@ def _candidate_sort_key(candidate):
         int(candidate.get("traversal_depth") or 99),
         str(candidate.get("tag_number") or ""),
         str(candidate.get("candidate_id") or ""),
+    )
+
+
+def _candidate_identities(candidate):
+    return (
+        candidate.get("candidate_id"),
+        candidate.get("visual_node_id"),
+        candidate.get("visual_id"),
+        candidate.get("cnvrt_id"),
+    )
+
+
+def _available_for_isolation(candidate):
+    return not (
+        candidate.get("available_for_isolation") is False
+        or str(candidate.get("availability_status") or "").lower() == "unavailable"
     )
 
 

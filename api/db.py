@@ -15,18 +15,36 @@ from api.database import (
     postgres_configured,
 )
 from api.db_models import (
+    AssetReference,
+    AuditEvent,
+    ChangeCoverageResult,
+    ChangeRequest,
+    DerivationManifest,
+    DerivationManifestChange,
     ExternalRunLink,
+    Finding,
+    InputSnapshot,
+    IsolationBranch,
     IsolationPlan,
     IsolationRun,
     IsolationRunEvent,
+    NormalizedIsolationPoint,
+    PathPoint,
+    PlanStep,
     PlanVersion,
+    PlanVersionChange,
+    PlanWorkScope,
+    WorkScopeAsset,
     isolation_plan_number_seq,
 )
 from api.plans import (
     PlanDomainError,
+    assurance_status,
     canonical_hash,
     derivation_status,
     model_fingerprint,
+    normalized_plan_content,
+    plan_content_diff,
     validate_promotable_result,
 )
 from sqlalchemy import Text, case, cast, func, inspect, literal, select
@@ -130,8 +148,16 @@ class PostgresRunRepository:
                     result=_jsonable(record.result),
                     trace=_jsonable(record.trace),
                     error=_jsonable(record.error),
+                    parent_run_id=getattr(record, "parent_run_id", None),
                 )
             )
+            context = (request_payload or {}).get("derivation_context") or {}
+            if context.get("manifest_id"):
+                manifest = session.get(DerivationManifest, UUID(str(context["manifest_id"])))
+                if manifest is None or manifest.state != "locked":
+                    raise PlanDomainError("invalid_derivation_manifest", "Derivation manifest is not available.", 409)
+                manifest.run_id = record.run_id
+                manifest.state = "running"
 
     def update_run(self, record) -> None:
         with self._session_factory.begin() as session:
@@ -145,6 +171,15 @@ class PostgresRunRepository:
             persisted.result = _jsonable(record.result)
             persisted.trace = _jsonable(record.trace)
             persisted.error = _jsonable(record.error)
+            context = (persisted.request or {}).get("derivation_context") or {}
+            if context.get("manifest_id"):
+                manifest = session.get(DerivationManifest, UUID(str(context["manifest_id"])))
+                if manifest is not None and record.status == "failed":
+                    manifest.state = "failed"
+                    manifest.finished_at = _dt(record.finished_at)
+                    manifest.error = _jsonable(record.error)
+                elif manifest is not None and record.status == "succeeded" and manifest.child_plan_version_id is None:
+                    self._complete_derivation(session, manifest, persisted)
 
     def append_event(self, run_id: str, event: dict) -> None:
         with self._session_factory.begin() as session:
@@ -153,7 +188,18 @@ class PostgresRunRepository:
     def get_run(self, run_id: str) -> dict | None:
         with self._session_factory() as session:
             run = session.get(IsolationRun, run_id)
-            return _run_to_dict(run) if run is not None else None
+            if run is None:
+                return None
+            result = _run_to_dict(run)
+            manifest = session.scalar(
+                select(DerivationManifest).where(DerivationManifest.run_id == run_id).limit(1)
+            )
+            if manifest is not None:
+                result["derivation_manifest_id"] = str(manifest.manifest_id)
+                result["produced_plan_version_id"] = (
+                    str(manifest.child_plan_version_id) if manifest.child_plan_version_id else None
+                )
+            return result
 
     def list_runs(
         self,
@@ -178,6 +224,7 @@ class PostgresRunRepository:
                 IsolationRun.agent,
                 IsolationRun.request,
                 IsolationRun.error,
+                IsolationRun.parent_run_id,
             )
         )
         if equipment_tag is not None:
@@ -256,6 +303,9 @@ class PostgresRunRepository:
                 input_hash=input_hash,
                 model_hash=model_hash,
                 derived_at=derived_at,
+                normalization_status="complete",
+                assurance_status=assurance_status(run.result),
+                content=normalized_plan_content(request_payload, run.result),
             )
             session.add(version)
             session.flush()
@@ -269,6 +319,7 @@ class PostgresRunRepository:
                     trace_uri=f"/isolation-runs/{run_id}/trace",
                 )
             )
+            _persist_normalized_content(session, version, request_payload, run.result)
             session.flush()
             plan = self._get_plan_with_session(session, plan_row.plan_id)
             return plan, True
@@ -375,6 +426,188 @@ class PostgresRunRepository:
             rows = session.execute(paged_statement).all()
             return [_plan_from_rows([row], summary=True) for row in rows], total
 
+    def create_change(self, plan_id: str, payload, actor_id: str) -> dict:
+        plan_uuid = _uuid(plan_id, "unknown_plan")
+        version_uuid = _uuid(payload.raised_against_version_id, "unknown_plan_version")
+        with self._session_factory.begin() as session:
+            plan = session.scalar(select(IsolationPlan).where(IsolationPlan.plan_id == plan_uuid).with_for_update())
+            if plan is None:
+                raise PlanDomainError("unknown_plan", "Unknown plan id.", 404)
+            latest = session.scalar(select(PlanVersion).where(PlanVersion.plan_id == plan_uuid).order_by(PlanVersion.version_no.desc()).limit(1))
+            if latest is None or latest.plan_version_id != version_uuid:
+                raise PlanDomainError("stale_plan_version", "Corrections may only target the latest plan version.", 409)
+            if latest.normalization_status != "complete" or not latest.content:
+                raise PlanDomainError("legacy_plan_not_correctable", "This historical plan is not normalized; create a fresh run and plan.", 409)
+            point_keys = {str(item.get("key")) for item in (latest.content.get("points") or [])}
+            branch_keys = {str(item.get("key")) for item in (latest.content.get("branches") or [])}
+            if payload.change_type != "add_manual_isolation_point":
+                valid = point_keys if payload.target_type in {"candidate", "isolation_point"} else branch_keys
+                if payload.target_id not in valid:
+                    raise PlanDomainError("invalid_correction_target", "Correction target is not present in the latest plan version.", 422)
+            row = ChangeRequest(
+                plan_id=plan_uuid, raised_against_version_id=version_uuid,
+                change_type=payload.change_type, target_type=payload.target_type,
+                target_id=payload.target_id, proposed_change=_jsonable(payload.proposed_change),
+                justification=payload.justification, state="submitted", raised_by=actor_id,
+            )
+            session.add(row)
+            session.flush()
+            _append_audit(session, plan_uuid, version_uuid, "change_submitted", actor_id, {"change_id": str(row.change_id), "change_type": row.change_type, "target_id": row.target_id})
+            return _change_to_dict(row)
+
+    def approve_change(self, plan_id: str, change_id: str, actor_id: str) -> dict:
+        plan_uuid, change_uuid = _uuid(plan_id, "unknown_plan"), _uuid(change_id, "unknown_change")
+        with self._session_factory.begin() as session:
+            plan = session.scalar(select(IsolationPlan).where(IsolationPlan.plan_id == plan_uuid).with_for_update())
+            if plan is None:
+                raise PlanDomainError("unknown_plan", "Unknown plan id.", 404)
+            row = session.scalar(select(ChangeRequest).where(ChangeRequest.change_id == change_uuid, ChangeRequest.plan_id == plan_uuid).with_for_update())
+            if row is None:
+                raise PlanDomainError("unknown_change", "Unknown correction request.", 404)
+            self_approval = row.raised_by == actor_id
+            if self_approval and plan.mode != "advisory":
+                raise PlanDomainError("self_approval_forbidden", "A correction must be approved by a different authenticated user.", 409)
+            if row.state == "approved":
+                return _change_to_dict(row)
+            if row.state != "submitted":
+                raise PlanDomainError("invalid_change_state", "Only submitted corrections can be approved.", 409, {"state": row.state})
+            row.state, row.approved_by, row.approved_at = "approved", actor_id, func.now()
+            session.flush()
+            _append_audit(session, plan_uuid, row.raised_against_version_id, "change_approved", actor_id, {"change_id": str(row.change_id), "self_approval": self_approval, "plan_mode": plan.mode})
+            return _change_to_dict(row)
+
+    def list_changes(self, plan_id: str) -> list[dict]:
+        plan_uuid = _uuid(plan_id, "unknown_plan")
+        with self._session_factory() as session:
+            rows = session.scalars(select(ChangeRequest).where(ChangeRequest.plan_id == plan_uuid).order_by(ChangeRequest.created_at.desc())).all()
+            if not rows and session.get(IsolationPlan, plan_uuid) is None:
+                raise PlanDomainError("unknown_plan", "Unknown plan id.", 404)
+            result = []
+            for row in rows:
+                item = _change_to_dict(row)
+                application = session.scalar(select(PlanVersionChange).where(PlanVersionChange.change_id == row.change_id).order_by(PlanVersionChange.applied_at.desc()).limit(1))
+                coverage = session.scalar(select(ChangeCoverageResult).where(ChangeCoverageResult.change_id == row.change_id).order_by(ChangeCoverageResult.validated_at.desc()).limit(1))
+                if application:
+                    item["application_outcome"] = application.application_outcome
+                if coverage:
+                    item.update(coverage_status=coverage.status, coverage_reason=coverage.reason)
+                result.append(item)
+            return result
+
+    def prepare_derivation(self, plan_id: str, parent_version_id: str, actor_id: str) -> dict:
+        plan_uuid, parent_uuid = _uuid(plan_id, "unknown_plan"), _uuid(parent_version_id, "unknown_plan_version")
+        with self._session_factory.begin() as session:
+            plan = session.scalar(select(IsolationPlan).where(IsolationPlan.plan_id == plan_uuid).with_for_update())
+            if plan is None:
+                raise PlanDomainError("unknown_plan", "Unknown plan id.", 404)
+            parent = session.scalar(select(PlanVersion).where(PlanVersion.plan_id == plan_uuid).order_by(PlanVersion.version_no.desc()).limit(1))
+            if parent is None or parent.plan_version_id != parent_uuid:
+                raise PlanDomainError("stale_plan_version", "Derivation parent is not the latest plan version.", 409)
+            if parent.normalization_status != "complete":
+                raise PlanDomainError("legacy_plan_not_correctable", "This historical plan is not normalized.", 409)
+            active = session.scalar(select(DerivationManifest).where(DerivationManifest.plan_id == plan_uuid, DerivationManifest.state.in_(("locked", "running"))).limit(1))
+            if active:
+                raise PlanDomainError("derivation_in_progress", "A correction derivation is already running for this plan.", 409)
+            changes = session.scalars(select(ChangeRequest).where(ChangeRequest.plan_id == plan_uuid, ChangeRequest.state == "approved").order_by(ChangeRequest.created_at)).all()
+            if not changes:
+                raise PlanDomainError("no_approved_corrections", "No approved corrections are available for derivation.", 409)
+            effective_changes = session.scalars(
+                select(ChangeRequest)
+                .where(ChangeRequest.plan_id == plan_uuid, ChangeRequest.state.in_(("applied", "approved")))
+                .order_by(ChangeRequest.created_at, ChangeRequest.change_id)
+            ).all()
+            source_run = session.scalar(select(IsolationRun).join(ExternalRunLink, ExternalRunLink.run_id == IsolationRun.run_id).where(ExternalRunLink.plan_version_id == parent_uuid, ExternalRunLink.link_role == "derivation"))
+            if source_run is None:
+                raise PlanDomainError("source_run_missing", "Parent plan version has no derivation run.", 409)
+            corrections = [_change_to_correction(item) for item in effective_changes]
+            manifest = DerivationManifest(plan_id=plan_uuid, parent_plan_version_id=parent_uuid, state="locked", policy_hash=canonical_hash(corrections), created_by=actor_id)
+            session.add(manifest)
+            session.flush()
+            for change in changes:
+                session.add(DerivationManifestChange(manifest_id=manifest.manifest_id, change_id=change.change_id, mandatory=True, required_effects={"change_type": change.change_type}))
+            request_payload = dict(source_run.request or {})
+            request_payload.pop("derivation_context", None)
+            request_payload["approved_corrections"] = corrections
+            request_payload["derivation_context"] = {"manifest_id": str(manifest.manifest_id), "plan_id": plan_id, "parent_plan_version_id": parent_version_id}
+            _append_audit(session, plan_uuid, parent_uuid, "derivation_locked", actor_id, {"manifest_id": str(manifest.manifest_id), "change_ids": [str(row.change_id) for row in changes]})
+            return {"manifest_id": str(manifest.manifest_id), "parent_run_id": source_run.run_id, "request": request_payload}
+
+    def fail_derivation_launch(self, manifest_id: str, actor_id: str, error: dict) -> None:
+        manifest_uuid = _uuid(manifest_id, "unknown_derivation_manifest")
+        with self._session_factory.begin() as session:
+            manifest = session.scalar(
+                select(DerivationManifest)
+                .where(DerivationManifest.manifest_id == manifest_uuid)
+                .with_for_update()
+            )
+            if manifest is None or manifest.state not in {"locked", "running"}:
+                return
+            manifest.state = "failed"
+            manifest.finished_at = func.now()
+            manifest.error = _jsonable(error)
+            _append_audit(
+                session,
+                manifest.plan_id,
+                manifest.parent_plan_version_id,
+                "derivation_launch_failed",
+                actor_id,
+                {"manifest_id": str(manifest.manifest_id), "error": error},
+            )
+
+    def get_plan_version(self, plan_id: str, version_id: str) -> dict | None:
+        plan_uuid, version_uuid = _uuid(plan_id, "unknown_plan"), _uuid(version_id, "unknown_plan_version")
+        with self._session_factory() as session:
+            row = session.scalar(select(PlanVersion).where(PlanVersion.plan_id == plan_uuid, PlanVersion.plan_version_id == version_uuid))
+            if row is None:
+                return None
+            return {"plan_version_id": str(row.plan_version_id), "plan_id": str(row.plan_id), "parent_plan_version_id": str(row.parent_plan_version_id) if row.parent_plan_version_id else None, "version_no": row.version_no, "normalization_status": row.normalization_status, "assurance_status": row.assurance_status, "content": row.content or {}}
+
+    def get_plan_version_diff(self, plan_id: str, version_id: str) -> dict | None:
+        plan_uuid, version_uuid = _uuid(plan_id, "unknown_plan"), _uuid(version_id, "unknown_plan_version")
+        with self._session_factory() as session:
+            row = session.scalar(select(PlanVersion).where(PlanVersion.plan_id == plan_uuid, PlanVersion.plan_version_id == version_uuid))
+            if row is None:
+                return None
+            parent = session.get(PlanVersion, row.parent_plan_version_id) if row.parent_plan_version_id else None
+            diff = plan_content_diff(parent.content if parent else None, row.content or {})
+            return {"plan_id": plan_id, "from_version_id": str(parent.plan_version_id) if parent else None, "to_version_id": version_id, **diff}
+
+    def _complete_derivation(self, session, manifest: DerivationManifest, run: IsolationRun) -> None:
+        parent = session.scalar(select(PlanVersion).where(PlanVersion.plan_version_id == manifest.parent_plan_version_id).with_for_update())
+        plan = session.scalar(select(IsolationPlan).where(IsolationPlan.plan_id == manifest.plan_id).with_for_update())
+        if parent is None or plan is None:
+            raise RuntimeError("Derivation parent disappeared")
+        latest_no = int(session.scalar(select(func.max(PlanVersion.version_no)).where(PlanVersion.plan_id == plan.plan_id)) or 0)
+        if latest_no != parent.version_no:
+            raise RuntimeError("Derivation completed against a stale parent")
+        content = normalized_plan_content(run.request or {}, run.result or {})
+        coverage_by_id = {str(item.get("change_id")): item for item in (content.get("correction_coverage") or [])}
+        manifest_changes = session.scalars(select(DerivationManifestChange).where(DerivationManifestChange.manifest_id == manifest.manifest_id)).all()
+        degraded = False
+        version = PlanVersion(plan_id=plan.plan_id, parent_plan_version_id=parent.plan_version_id, version_no=parent.version_no + 1,
+            derivation_status=derivation_status(run.agent), input_hash=canonical_hash(run.request or {}), model_hash=canonical_hash(model_fingerprint(run.runner, run.agent)),
+            derived_at=run.finished_at or run.created_at, normalization_status="complete", assurance_status=assurance_status(run.result), content=content)
+        session.add(version)
+        session.flush()
+        session.add(ExternalRunLink(plan_version_id=version.plan_version_id, run_id=run.run_id, runner=run.runner, link_role="derivation", result_uri=f"/isolation-runs/{run.run_id}/result", trace_uri=f"/isolation-runs/{run.run_id}/trace"))
+        _persist_normalized_content(session, version, run.request or {}, run.result or {})
+        for link in manifest_changes:
+            change = session.get(ChangeRequest, link.change_id)
+            coverage = coverage_by_id.get(str(link.change_id)) or {"status": "failed", "reason": "Pipeline returned no coverage result."}
+            status, reason = str(coverage.get("status") or "failed"), str(coverage.get("reason") or "")
+            degraded = degraded or status != "applied"
+            session.add(ChangeCoverageResult(manifest_id=manifest.manifest_id, change_id=link.change_id, status=status, reason=reason, evidence=_jsonable(coverage)))
+            session.add(PlanVersionChange(plan_version_id=version.plan_version_id, change_id=link.change_id, application_outcome=status, derivation_note=reason))
+            if change is not None and status == "applied":
+                change.state = "applied"
+        if degraded:
+            version.derivation_status = "completed_degraded"
+        parent.superseded_at = func.now()
+        for stale in session.scalars(select(ChangeRequest).where(ChangeRequest.plan_id == plan.plan_id, ChangeRequest.state == "submitted", ChangeRequest.raised_against_version_id == parent.plan_version_id)).all():
+            stale.state = "superseded"
+        manifest.state, manifest.child_plan_version_id, manifest.finished_at = "completed", version.plan_version_id, func.now()
+        _append_audit(session, plan.plan_id, version.plan_version_id, "plan_version_derived", "system", {"manifest_id": str(manifest.manifest_id), "run_id": run.run_id, "parent_plan_version_id": str(parent.plan_version_id)})
+
     def list_events(self, run_id: str, after_id: int = 0) -> list[dict]:
         statement = (
             select(IsolationRunEvent.id, IsolationRunEvent.event)
@@ -425,6 +658,8 @@ def _plan_columns(plan_model, version_model, run_model, assurance_status):
         version_model.model_hash,
         version_model.derived_at,
         version_model.superseded_at,
+        version_model.normalization_status,
+        version_model.assurance_status,
         run_model.run_id,
         run_model.runner,
         run_model.status,
@@ -454,22 +689,22 @@ def _plan_from_rows(rows: list, summary: bool = False) -> dict:
     first = rows[0]
     versions = []
     for row in rows:
-        request = row[20] or {}
-        run_id = str(row[15]) if row[15] is not None else ""
+        request = row[22] or {}
+        run_id = str(row[17]) if row[17] is not None else ""
         source_run = {
             "run_id": run_id,
-            "runner": str(row[16] or ""),
-            "status": str(row[17] or ""),
-            "equipment_tag": str(row[18] or ""),
-            "created_at": row[19],
-            "assurance_status": row[22],
+            "runner": str(row[18] or ""),
+            "status": str(row[19] or ""),
+            "equipment_tag": str(row[20] or ""),
+            "created_at": row[21],
+            "assurance_status": row[24] or row[16],
             "job_id": str(request.get("job_id") or ""),
             "job_name": str(request.get("job_name") or ""),
             "cnvrt_project_id": str(request.get("cnvrt_project_id") or ""),
             "collection_id": str(request.get("collection_id") or ""),
             "unigraph_project_id": str(request.get("unigraph_project_id") or ""),
             "request": {} if summary else request,
-            "agent": None if summary else row[21],
+            "agent": None if summary else row[23],
             "result_url": f"/isolation-runs/{run_id}/result" if run_id else "",
             "trace_url": f"/isolation-runs/{run_id}/trace" if run_id else "",
         }
@@ -483,6 +718,8 @@ def _plan_from_rows(rows: list, summary: bool = False) -> dict:
                 "model_hash": row[12],
                 "derived_at": row[13],
                 "superseded_at": row[14],
+                "normalization_status": row[15],
+                "assurance_status": row[16],
                 "source_run": source_run,
             }
         )
@@ -532,4 +769,91 @@ def _run_to_dict(run: IsolationRun, *, include_payloads: bool = True) -> dict:
         "result": run.result if include_payloads else None,
         "trace": run.trace if include_payloads else None,
         "error": run.error,
+        "parent_run_id": run.parent_run_id,
+        "derivation_manifest_id": str(((run.request or {}).get("derivation_context") or {}).get("manifest_id") or "") or None,
     }
+
+
+def _persist_normalized_content(session, version: PlanVersion, request: dict, result: dict) -> None:
+    content = version.content or normalized_plan_content(request, result)
+    scope = PlanWorkScope(plan_version_id=version.plan_version_id, payload=_jsonable(content.get("work_scope") or {}))
+    session.add(scope)
+    session.flush()
+    selected = content.get("selected_asset") or content.get("target_identity") or {}
+    selected_external = str(selected.get("hilt_entity_id") or selected.get("unigraph_vertex_id") or request.get("equipment_tag") or "")
+    if selected_external:
+        selected_system = "selected_asset_hilt" if selected.get("hilt_entity_id") else "selected_asset_unigraph" if selected.get("unigraph_vertex_id") else "selected_equipment_tag"
+        asset = _get_or_create_asset(session, selected_system, selected_external, str(selected.get("tag") or request.get("equipment_tag") or selected_external), str(selected.get("entity_class") or ""), content.get("context") or {})
+        session.add(WorkScopeAsset(work_scope_id=scope.work_scope_id, asset_ref_id=asset.asset_ref_id, scope_role="primary", selection_source=str(selected.get("selection_source") or "run_request")))
+    session.add(InputSnapshot(plan_version_id=version.plan_version_id, source_type="run_request", content_hash=canonical_hash(request), payload=_jsonable(request)))
+    session.add(InputSnapshot(plan_version_id=version.plan_version_id, source_type="derived_plan_projection", content_hash=canonical_hash(content), payload=_jsonable({"schema_version": content.get("schema_version"), "target_identity": content.get("target_identity")})))
+
+    branch_rows = {}
+    for item in content.get("branches") or []:
+        row = IsolationBranch(plan_version_id=version.plan_version_id, branch_key=str(item["key"]), topology_signature=str(item.get("topology_signature") or canonical_hash(item)), payload=_jsonable(item))
+        session.add(row)
+        session.flush()
+        branch_rows[str(item["key"])] = row
+    for item in content.get("points") or []:
+        drawing_id = str(item.get("drawing_entity_id") or "").strip()
+        external_id = drawing_id or str(item.get("external_id") or item["key"])
+        external_system = "cnvrt_drawing_entity" if drawing_id else "unigraph_candidate"
+        asset = _get_or_create_asset(session, external_system, external_id, str(item.get("tag") or external_id), str(item.get("asset_class") or ""), content.get("context") or {})
+        point = NormalizedIsolationPoint(plan_version_id=version.plan_version_id, asset_ref_id=asset.asset_ref_id, point_key=str(item["key"]), provenance=str(item.get("provenance") or "derived"), payload=_jsonable(item))
+        session.add(point)
+        session.flush()
+        for membership in item.get("branch_memberships") or [{"branch_key": item.get("branch_key") or "unassigned", "path_order": 0}]:
+            branch = branch_rows.get(str(membership.get("branch_key") or "unassigned"))
+            if branch:
+                session.add(PathPoint(branch_id=branch.branch_id, isolation_point_id=point.isolation_point_id, path_order=int(membership.get("path_order") or 0)))
+    for index, item in enumerate(content.get("steps") or [], 1):
+        session.add(PlanStep(plan_version_id=version.plan_version_id, step_key=str(item["key"]), sequence_no=int(item.get("sequence_no") or index), payload=_jsonable(item)))
+    for item in content.get("findings") or []:
+        session.add(Finding(plan_version_id=version.plan_version_id, finding_key=str(item["key"]), blocks_authorisation=bool(item.get("blocks_authorisation")), payload=_jsonable(item)))
+
+
+def _get_or_create_asset(session, system: str, external_id: str, tag: str, asset_class: str, context: dict):
+    scope_key = _asset_scope_key(system, context)
+    row = session.scalar(select(AssetReference).where(AssetReference.external_system == system, AssetReference.scope_key == scope_key, AssetReference.external_id == external_id))
+    if row is None:
+        row = AssetReference(external_system=system, scope_key=scope_key, external_id=external_id, tag=tag, asset_class=asset_class, context=_jsonable(context or {}))
+        session.add(row)
+        session.flush()
+    return row
+
+
+def _asset_scope_key(system: str, context: dict) -> str:
+    context = context or {}
+    if "unigraph" in system:
+        project_id = str(context.get("unigraph_project_id") or context.get("project_id") or "").strip()
+        if project_id:
+            return f"unigraph:{project_id}"
+    if "hilt" in system or "drawing" in system:
+        return "cnvrt:{project}:collection:{collection}:job:{job}".format(
+            project=str(context.get("cnvrt_project_id") or "unknown"),
+            collection=str(context.get("collection_id") or "unknown"),
+            job=str(context.get("job_id") or "unknown"),
+        )
+    return "context:" + canonical_hash(context)
+
+
+def _append_audit(session, plan_id, version_id, event_type: str, actor_id: str, payload: dict) -> None:
+    previous = session.scalar(select(AuditEvent.event_hash).where(AuditEvent.plan_id == plan_id).order_by(AuditEvent.occurred_at.desc(), AuditEvent.audit_event_id.desc()).limit(1))
+    occurred_at = datetime.now(timezone.utc)
+    event_hash = canonical_hash({"previous_hash": previous, "plan_id": str(plan_id), "plan_version_id": str(version_id) if version_id else None, "event_type": event_type, "actor_id": actor_id, "occurred_at": occurred_at.isoformat(), "payload": payload})
+    session.add(AuditEvent(plan_id=plan_id, plan_version_id=version_id, event_type=event_type, actor_id=actor_id, occurred_at=occurred_at, payload=_jsonable(payload), previous_hash=previous, event_hash=event_hash))
+
+
+def _change_to_dict(row: ChangeRequest) -> dict:
+    return {"change_id": str(row.change_id), "plan_id": str(row.plan_id), "raised_against_version_id": str(row.raised_against_version_id), "change_type": row.change_type, "target_type": row.target_type, "target_id": row.target_id, "proposed_change": row.proposed_change or {}, "justification": row.justification, "state": row.state, "raised_by": row.raised_by, "approved_by": row.approved_by, "created_at": row.created_at, "approved_at": row.approved_at}
+
+
+def _change_to_correction(row: ChangeRequest) -> dict:
+    return {"change_id": str(row.change_id), "change_type": row.change_type, "target_type": row.target_type, "target_id": row.target_id, "proposed_change": row.proposed_change or {}, "justification": row.justification, "raised_by": row.raised_by, "approved_by": row.approved_by}
+
+
+def _uuid(value: str, kind: str) -> UUID:
+    try:
+        return UUID(str(value))
+    except (TypeError, ValueError):
+        raise PlanDomainError(kind, "Identifier is not a valid UUID.", 404) from None

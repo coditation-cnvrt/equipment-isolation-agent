@@ -11,11 +11,19 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import Response, StreamingResponse
 
 from api.models import (
+    ChangeRequestDetail,
+    ChangeRequestList,
     CreateIsolationPlanFromRunRequest,
+    CreateChangeRequest,
+    DerivationAccepted,
+    DerivePlanRequest,
+    DerivedIsolationRunRequest,
     EquipmentListRequest,
     IsolationPlanDetail,
     IsolationPlanList,
     IsolationRunRequest,
+    PlanVersionContent,
+    PlanVersionDiff,
     PlanningCollectionList,
     PlanningDrawingList,
     PlanningProjectList,
@@ -110,6 +118,15 @@ def _require_run_read_auth(authorization: str = "") -> str:
             headers={"WWW-Authenticate": "Bearer"},
         )
     return token
+
+
+def _actor_id(request: Request) -> str:
+    token_data = getattr(request.state, "token_data", None) or {}
+    user = token_data.get("user") if isinstance(token_data, dict) else None
+    actor = (user or {}).get("id") if isinstance(user, dict) else None
+    if actor in {None, ""}:
+        raise HTTPException(status_code=401, detail={"kind": "authenticated_user_missing", "message": "Authenticated CNVRT user identity is required."})
+    return str(actor)
 
 
 @router.get("/health")
@@ -530,6 +547,79 @@ def plan_detail(
             detail={"kind": "unknown_plan", "message": "Unknown plan id."},
         )
     return plan
+
+
+@router.post("/isolation-plans/{plan_id}/changes", response_model=ChangeRequestDetail, status_code=201)
+def create_plan_change(request: Request, plan_id: UUID, request_body: CreateChangeRequest, authorization: str = Header(default="")):
+    _require_run_read_auth(authorization)
+    try:
+        return _plan_repository(request).create_change(str(plan_id), request_body, _actor_id(request))
+    except PlanDomainError as error:
+        _raise_plan_error(error)
+
+
+@router.get("/isolation-plans/{plan_id}/changes", response_model=ChangeRequestList)
+def list_plan_changes(request: Request, plan_id: UUID, authorization: str = Header(default="")):
+    _require_run_read_auth(authorization)
+    try:
+        return {"items": _plan_repository(request).list_changes(str(plan_id))}
+    except PlanDomainError as error:
+        _raise_plan_error(error)
+
+
+@router.post("/isolation-plans/{plan_id}/changes/{change_id}/approve", response_model=ChangeRequestDetail)
+def approve_plan_change(request: Request, plan_id: UUID, change_id: UUID, authorization: str = Header(default="")):
+    _require_run_read_auth(authorization)
+    try:
+        return _plan_repository(request).approve_change(str(plan_id), str(change_id), _actor_id(request))
+    except PlanDomainError as error:
+        _raise_plan_error(error)
+
+
+@router.post("/isolation-plans/{plan_id}/derive", response_model=DerivationAccepted, status_code=202)
+def derive_plan(request: Request, plan_id: UUID, request_body: DerivePlanRequest, authorization: str = Header(default="")):
+    token = _require_run_read_auth(authorization)
+    repository = _plan_repository(request)
+    actor_id = _actor_id(request)
+    prepared = None
+    try:
+        prepared = repository.prepare_derivation(str(plan_id), request_body.parent_plan_version_id, actor_id)
+        derived_request = DerivedIsolationRunRequest.model_validate(prepared["request"])
+        record = _store(request).create(derived_request, token, parent_run_id=prepared["parent_run_id"])
+    except PlanDomainError as error:
+        if prepared is not None:
+            repository.fail_derivation_launch(prepared["manifest_id"], actor_id, {"kind": error.kind, "message": error.message})
+        _raise_plan_error(error)
+    except Exception as error:
+        if prepared is not None:
+            repository.fail_derivation_launch(prepared["manifest_id"], actor_id, {"kind": "derivation_launch_failed", "message": str(error)})
+        LOGGER.exception("Correction derivation launch failed")
+        raise HTTPException(status_code=503, detail={"kind": "derivation_launch_failed", "message": "Unable to launch correction derivation."}) from None
+    return {"manifest_id": prepared["manifest_id"], "parent_plan_version_id": request_body.parent_plan_version_id, "run_id": record.run_id, "status": record.status, "status_url": f"/isolation-runs/{record.run_id}", "events_url": f"/isolation-runs/{record.run_id}/events"}
+
+
+@router.get("/isolation-plans/{plan_id}/versions/{version_id}", response_model=PlanVersionContent)
+def plan_version_detail(request: Request, plan_id: UUID, version_id: UUID, authorization: str = Header(default="")):
+    _require_run_read_auth(authorization)
+    try:
+        item = _plan_repository(request).get_plan_version(str(plan_id), str(version_id))
+    except PlanDomainError as error:
+        _raise_plan_error(error)
+    if item is None:
+        raise HTTPException(status_code=404, detail={"kind": "unknown_plan_version", "message": "Unknown plan version."})
+    return item
+
+
+@router.get("/isolation-plans/{plan_id}/versions/{version_id}/diff", response_model=PlanVersionDiff)
+def plan_version_diff(request: Request, plan_id: UUID, version_id: UUID, authorization: str = Header(default="")):
+    _require_run_read_auth(authorization)
+    try:
+        item = _plan_repository(request).get_plan_version_diff(str(plan_id), str(version_id))
+    except PlanDomainError as error:
+        _raise_plan_error(error)
+    if item is None:
+        raise HTTPException(status_code=404, detail={"kind": "unknown_plan_version", "message": "Unknown plan version."})
+    return item
 
 
 @router.get("/isolation-runs/{run_id}", response_model=RunStatus)

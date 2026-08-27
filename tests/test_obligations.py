@@ -141,6 +141,97 @@ class ObligationTests(unittest.TestCase):
         self.assertEqual(item["manual_candidates"], [])
         self.assertEqual(data["isolation_obligations"]["summary"]["unresolved_count"], 0)
 
+    def test_unavailable_selected_valve_leaves_source_unresolved(self):
+        unavailable = {
+            **_candidate("source-4", "valve-1", [80, 10, 20, 20]),
+            "availability_status": "unavailable",
+            "available_for_isolation": False,
+        }
+        data = analyze_isolation_obligations(
+            {
+                "candidates": [unavailable],
+                "_candidate_pool": [unavailable],
+                "debug": {
+                    "bbox_source_visual_selection_samples": [{
+                        "equipment_tag": "EQ-1",
+                        "source_component": "source-4",
+                        "source_component_tag": "N4_EQ1",
+                        "selected_candidate_ids": ["valve-1"],
+                    }]
+                },
+            },
+            config=None,
+        )
+
+        item = data["isolation_obligations"]["items"][0]
+        self.assertEqual(item["status"], "unresolved")
+        self.assertEqual(item["selected_candidate_ids"], [])
+        self.assertEqual(item["manual_candidates"], [])
+
+    def test_unigraph_split_paths_are_validated_independently(self):
+        data = analyze_isolation_obligations(
+            {
+                "candidates": [{"candidate_id": "valve-a"}],
+                "_candidate_pool": [
+                    _candidate("source-split", "valve-a", [10, 10, 20, 20]),
+                    _candidate("source-split", "valve-b", [40, 10, 20, 20]),
+                ],
+                "unigraph_branch_obligations": [
+                    {
+                        "equipment_tag": "EQ-1",
+                        "source_component": "source-split",
+                        "source_component_tag": "N-SPLIT",
+                        "branch_id": "unigraph:a",
+                        "status": "isolated",
+                        "barrier_id": "valve-a",
+                        "path_node_ids": ["source-split", "junction", "valve-a"],
+                    },
+                    {
+                        "equipment_tag": "EQ-1",
+                        "source_component": "source-split",
+                        "source_component_tag": "N-SPLIT",
+                        "branch_id": "unigraph:b",
+                        "status": "isolated",
+                        "barrier_id": "valve-b",
+                        "path_node_ids": ["source-split", "junction", "valve-b"],
+                    },
+                ],
+                "debug": {},
+            },
+            config=None,
+        )
+
+        items = data["isolation_obligations"]["items"]
+        self.assertEqual([item["status"] for item in items], ["isolated", "unresolved"])
+        self.assertEqual(data["isolation_obligations"]["summary"]["unresolved_count"], 1)
+
+    def test_hilt_context_classification_prevents_graph_fallback_process_blocker(self):
+        data = analyze_isolation_obligations(
+            {
+                "unigraph_branch_obligations": [{
+                    "equipment_tag": "EQ-1",
+                    "source_component": "instrument-source",
+                    "source_component_tag": "PI-1",
+                    "branch_id": "unigraph:instrument",
+                    "status": "isolated",
+                    "barrier_id": "small-valve",
+                    "path_node_ids": ["instrument-source", "small-valve"],
+                }],
+                "boundary_context_sources": [{
+                    "equipment_tag": "EQ-1",
+                    "source_component": "instrument-source",
+                    "source_component_tag": "PI-1",
+                }],
+                "debug": {},
+            },
+            config=None,
+        )
+
+        item = data["isolation_obligations"]["items"][0]
+        self.assertEqual(item["status"], "context")
+        self.assertEqual(item["source_type"], "instrument_context")
+        self.assertEqual(data["isolation_obligations"]["summary"]["process_obligation_count"], 0)
+
     def test_connected_relief_network_is_context_not_five_process_blockers(self):
         data = analyze_isolation_obligations(
             {

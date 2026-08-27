@@ -124,6 +124,7 @@ class SummarizeCandidatesTests(unittest.TestCase):
                 "depth": 2,
                 "source": "N1",
                 "bbox_resolved": True,
+                "availability_status": "available",
             },
         )
 
@@ -154,6 +155,7 @@ class SummarizeValidationTests(unittest.TestCase):
                 "primary_reason_count",
                 "rationale",
                 "terminal",
+                "unavailable_count",
                 "unresolved_evidence_checks",
             ],
         )

@@ -48,7 +48,10 @@ class ApiConfig:
 
 @dataclass(frozen=True)
 class IsolationPolicy:
-    max_traversal_depth: int = 3
+    # Safety ceiling for adaptive branch traversal. Correctness must come from
+    # semantic stops (usable barrier, terminal, cycle), not from reaching this
+    # number. Hitting the ceiling is therefore reported as unresolved.
+    max_traversal_depth: int = 20
     traversal_limit_per_depth: int = 200
     eligible_classes: tuple[str, ...] = (
         "valve",
@@ -137,6 +140,7 @@ class RunConfig:
     policy: IsolationPolicy = field(default_factory=IsolationPolicy)
     work_scope: WorkScope = field(default_factory=WorkScope)
     selected_asset: SelectedAsset | None = None
+    approved_corrections: tuple[dict, ...] = ()
     output_dir: Path = Path("output")
 
     @property

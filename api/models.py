@@ -43,7 +43,14 @@ class IsolationRunRequest(BaseModel):
     unigraph_project_id: str = Field(..., min_length=1)
     collection_name: str = ""
     traversal_source: str = ""
-    max_depth: int | None = None
+    max_depth: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Fail-safe hop ceiling for adaptive UniGraph branch traversal. "
+            "Traversal normally stops semantically at barriers or terminals; reaching this ceiling leaves the path unresolved."
+        ),
+    )
     work_scope: WorkScopeRequest = Field(default_factory=WorkScopeRequest)
     selected_asset: SelectedAssetRequest | None = None
     model: str = ""
@@ -67,6 +74,13 @@ class IsolationRunRequest(BaseModel):
         if self.selected_asset.tag != self.equipment_tag:
             raise ValueError("selected_asset.tag must equal equipment_tag")
         return self
+
+
+class DerivedIsolationRunRequest(IsolationRunRequest):
+    """Server-created request; never accepted by the public run endpoint."""
+
+    approved_corrections: list[dict[str, Any]] = Field(default_factory=list)
+    derivation_context: dict[str, Any] = Field(default_factory=dict)
 
 
 class EquipmentListRequest(BaseModel):
@@ -150,6 +164,9 @@ class RunStatus(BaseModel):
     agent: dict[str, Any] | None = None
     request: dict[str, Any] = Field(default_factory=dict)
     error: dict[str, Any] | None = None
+    parent_run_id: str | None = None
+    derivation_manifest_id: str | None = None
+    produced_plan_version_id: str | None = None
 
 
 class RunList(BaseModel):
@@ -194,6 +211,8 @@ class PlanVersionSummary(BaseModel):
     model_hash: str
     derived_at: datetime
     superseded_at: datetime | None = None
+    normalization_status: Literal["complete", "legacy_incomplete"] = "legacy_incomplete"
+    assurance_status: str | None = None
     source_run: PlanSourceRun
 
 
@@ -218,3 +237,98 @@ class IsolationPlanList(BaseModel):
     limit: int
     offset: int
     total: int
+
+
+CorrectionType = Literal[
+    "accept_manual_candidate",
+    "reject_manual_candidate",
+    "confirm_bypass",
+    "correct_label",
+    "add_manual_isolation_point",
+    "mark_point_unavailable",
+    "mark_point_available",
+]
+
+
+class CreateChangeRequest(BaseModel):
+    raised_against_version_id: str
+    change_type: CorrectionType
+    target_type: Literal["candidate", "isolation_point", "branch"]
+    target_id: str = Field(..., min_length=1)
+    proposed_change: dict[str, Any] = Field(default_factory=dict)
+    justification: str = Field(..., min_length=3, max_length=4000)
+
+    @field_validator("target_id", "justification", mode="before")
+    @classmethod
+    def _strip_change_text(cls, value: str) -> str:
+        return str(value or "").strip()
+
+    @model_validator(mode="after")
+    def _validate_change_payload(self):
+        if self.change_type == "correct_label":
+            label = str(self.proposed_change.get("label") or "").strip()
+            if not label:
+                raise ValueError("proposed_change.label is required for correct_label")
+            self.proposed_change = {**self.proposed_change, "label": label}
+        return self
+
+
+class ChangeRequestDetail(BaseModel):
+    change_id: str
+    plan_id: str
+    raised_against_version_id: str
+    change_type: CorrectionType
+    target_type: str
+    target_id: str
+    proposed_change: dict[str, Any]
+    justification: str
+    state: str
+    raised_by: str
+    approved_by: str | None = None
+    created_at: datetime
+    approved_at: datetime | None = None
+    application_outcome: str | None = None
+    coverage_status: str | None = None
+    coverage_reason: str | None = None
+
+
+class ChangeRequestList(BaseModel):
+    items: list[ChangeRequestDetail]
+
+
+class DerivePlanRequest(BaseModel):
+    parent_plan_version_id: str
+
+
+class DerivationAccepted(BaseModel):
+    manifest_id: str
+    parent_plan_version_id: str
+    run_id: str
+    status: str
+    status_url: str
+    events_url: str
+
+
+class PlanVersionContent(BaseModel):
+    plan_version_id: str
+    plan_id: str
+    parent_plan_version_id: str | None = None
+    version_no: int
+    normalization_status: str
+    assurance_status: str | None = None
+    content: dict[str, Any]
+
+
+class DiffItem(BaseModel):
+    key: str
+    before: Any = None
+    after: Any = None
+    safety_significant: bool
+
+
+class PlanVersionDiff(BaseModel):
+    plan_id: str
+    from_version_id: str | None = None
+    to_version_id: str
+    sections: dict[str, dict[str, list[DiffItem]]]
+    summary: dict[str, int]

@@ -7,6 +7,8 @@ from pathlib import Path
 from bbox import resolve_bboxes
 from boundary import fetch_boundaries
 from candidates import find_candidates
+from correction_targets import enrich_approved_correction_targets
+from domain.corrections import apply_approved_corrections
 from config import JOB_IDS_BY_NAME
 from evidence import build_evidence
 from image import resolve_pid_image
@@ -54,7 +56,7 @@ def parse_args():
     parser.add_argument("--unigraph-api-base-url", default="")
     parser.add_argument("--auth-token", default=os.environ.get("PLANT360_AUTH_TOKEN", ""))
     parser.add_argument("--no-verify-ssl", action="store_true")
-    parser.add_argument("--max-depth", type=int, default=None)
+    parser.add_argument("--max-depth", type=int, default=None, help="Safety hop ceiling for adaptive UniGraph branch traversal")
     parser.add_argument("--output-dir", default="output")
     parser.add_argument("--image-url", default="", help="Optional P&ID image URL for HTML overlay")
     parser.add_argument("--non-intrusive", action="store_true")
@@ -164,6 +166,7 @@ def run(config, image_url=""):
 
     logger.info("[3/15] Selecting deterministic isolation candidates")
     candidate_data = find_candidates(boundary_data, config.policy)
+    candidate_data = enrich_approved_correction_targets(candidate_data, boundary_data, config)
     logger.info(
         "      candidates=%s raw_candidates=%s",
         candidate_data.get("total_candidates"),
@@ -182,6 +185,9 @@ def run(config, image_url=""):
 
     logger.info("[4/15] Resolving candidate bboxes from STLM/HILT")
     bbox_data = resolve_bboxes(candidate_data, config)
+    # HILT topology is authoritative and may replace graph-selected candidates.
+    # Apply review decisions to the candidate set that validation will consume.
+    bbox_data = apply_approved_corrections(bbox_data, config.approved_corrections)
     logger.info(
         "      bbox_resolved=%s stlm_symbols=%s",
         (bbox_data.get("debug") or {}).get("bbox_resolved_count"),

@@ -77,6 +77,10 @@ is required unless a tool or site policy explicitly says so.
 reorder, skip, or invent phases. You MAY reason about WITHIN-phase device ordering \
 (e.g. which valve to close first) using process-flow logic, and you MUST cite the \
 OSHA text you retrieved for any ordering rationale.
+7. A point reported unavailable, faulty, or out of service is NOT an isolation \
+barrier. Do not include it in an isolation order or LOTO action. Inspect the \
+affected branch result and report whether an alternate available barrier was \
+found; an unresolved branch prevents isolation from being demonstrated.
 
 WORKFLOW
 fetch_boundary -> find_candidates -> resolve_bboxes -> analyze_isolation_obligations -> analyze_isolation_schemes_and_relief -> analyze_instrument_context -> build_evidence -> \

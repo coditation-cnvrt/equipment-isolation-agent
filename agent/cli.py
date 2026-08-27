@@ -57,7 +57,7 @@ def parse_args():
         help=f"Gemini model (default: {DEFAULT_MODEL}; override via GEMINI_MODEL env or --model)",
     )
     parser.add_argument("--max-steps", type=int, default=16, help="Cap on agent tool-calling iterations")
-    parser.add_argument("--max-depth", type=int, default=None)
+    parser.add_argument("--max-depth", type=int, default=None, help="Safety hop ceiling for adaptive UniGraph branch traversal")
     parser.add_argument("--output-dir", default="output_agent")
     parser.add_argument("--image-url", default="", help="Optional P&ID image URL for HTML overlay")
     parser.add_argument("--non-intrusive", action="store_true")

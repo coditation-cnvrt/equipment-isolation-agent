@@ -220,9 +220,13 @@ def _selected_barrier_candidates(validation_data: dict) -> list[dict]:
     candidates = validation_data.get("candidates", []) or []
     validation = validation_data.get("isolation_validation") or {}
     barrier_ids = {str(value) for value in validation.get("barrier_candidate_ids") or []}
-    if barrier_ids:
+    if "barrier_candidate_ids" in validation:
         return [candidate for candidate in candidates if str(candidate.get("candidate_id")) in barrier_ids]
-    return list(candidates)
+    return [
+        candidate for candidate in candidates
+        if candidate.get("available_for_isolation") is not False
+        and str(candidate.get("availability_status") or "").lower() != "unavailable"
+    ]
 
 
 def _candidate_node_ids(candidates: list[dict], graph: ProcessGraph) -> set[str]:

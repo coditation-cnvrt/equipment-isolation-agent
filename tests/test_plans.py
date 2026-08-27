@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import HTTPException, Response
 
 from api.models import CreateIsolationPlanFromRunRequest, IsolationPlanDetail
-from api.plans import PlanDomainError, canonical_hash, derivation_status, validate_promotable_result
+from api.plans import PlanDomainError, canonical_hash, derivation_status, normalized_plan_content, plan_content_diff, validate_promotable_result
 from api.routes import create_plan_from_run, list_plans, plan_detail
 
 
@@ -99,6 +99,61 @@ class PlanTests(unittest.TestCase):
         with self.assertRaises(PlanDomainError) as caught:
             validate_promotable_result({"data": []})
         self.assertEqual(caught.exception.kind, "invalid_run_result")
+
+    def test_normalized_content_and_structural_diff_are_plan_owned(self):
+        request = {"equipment_tag": "N7", "work_scope": {"intrusive_work": True}, "selected_asset": {"hilt_entity_id": "hilt-n7", "tag": "N7"}}
+        first = normalized_plan_content(request, {"data": [{"assurance_status": "provisional_unproven_isolation", "isolation_points": [{"uuid": "v1", "tag_number": "XV-1", "branch_id": "b1", "branch_path_node_ids": ["n1", "v1"]}]}]})
+        second = normalized_plan_content(request, {"data": [{"assurance_status": "provisional_unproven_isolation", "isolation_points": [{"uuid": "v1", "tag_number": "XV-101", "branch_id": "b1", "branch_path_node_ids": ["n1", "v1"]}, {"uuid": "v2", "tag_number": "XV-2", "branch_id": "b2"}]}]})
+        self.assertEqual(first["selected_asset"]["hilt_entity_id"], "hilt-n7")
+        diff = plan_content_diff(first, second)
+        self.assertEqual(diff["summary"]["added"], 2)  # one point and one branch
+        self.assertGreaterEqual(diff["summary"]["changed"], 1)
+        self.assertGreater(diff["summary"]["safety_significant"], 0)
+
+    def test_shared_point_preserves_every_source_branch(self):
+        result = {"data": [{
+            "assurance_status": "provisional_unproven_isolation",
+            "isolation_points": [{
+                "uuid": "shared-v1",
+                "tag_number": "XV-SHARED",
+                "branch_id": "branch-a",
+                "branch_path_node_ids": ["a-nozzle", "shared-v1"],
+                "source_paths": [
+                    {"branch_id": "branch-a", "source_component_id": "N-A"},
+                    {"branch_id": "branch-b", "source_component_id": "N-B"},
+                ],
+            }],
+        }]}
+        content = normalized_plan_content({"equipment_tag": "N7"}, result)
+        self.assertEqual([branch["key"] for branch in content["branches"]], ["branch-a", "branch-b"])
+        self.assertEqual(content["points"][0]["branch_keys"], ["branch-a", "branch-b"])
+        self.assertEqual(content["branches"][1]["point_keys"], ["shared-v1"])
+
+    def test_step_normalization_uses_semantic_identity_not_position(self):
+        request = {"equipment_tag": "N7"}
+        first = normalized_plan_content(request, {"data": [{
+            "assurance_status": "provisional_unproven_isolation",
+            "loto_procedure": {"ordered_steps": [
+                {"step": 1, "phase": 3, "device_uuid": "v1", "action": "Close XV-1"},
+                {"step": 2, "phase": 3, "device_uuid": "v2", "action": "Close XV-2"},
+            ]},
+        }]})
+        second = normalized_plan_content(request, {"data": [{
+            "assurance_status": "provisional_unproven_isolation",
+            "loto_procedure": {"ordered_steps": [
+                {"step": 1, "phase": 3, "device_uuid": "v2", "action": "Close XV-2"},
+                {"step": 2, "phase": 3, "device_uuid": "v1", "action": "Close XV-1"},
+            ]},
+        }]})
+
+        self.assertEqual({item["key"] for item in first["steps"]}, {
+            "phase:3:operate_isolation:v1",
+            "phase:3:operate_isolation:v2",
+        })
+        diff = plan_content_diff(first, second)
+        self.assertEqual(diff["summary"]["added"], 0)
+        self.assertEqual(diff["summary"]["removed"], 0)
+        self.assertEqual(diff["summary"]["changed"], 2)
 
     def test_plan_detail_response_contract_accepts_repository_payload(self):
         validated = IsolationPlanDetail.model_validate(_plan())

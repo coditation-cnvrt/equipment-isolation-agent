@@ -129,6 +129,8 @@ def _selected_barriers(candidates):
     selected = []
     seen = set()
     for candidate in candidates or []:
+        if candidate.get("available_for_isolation") is False or str(candidate.get("availability_status") or "").lower() == "unavailable":
+            continue
         barrier_id = str(candidate.get("candidate_id") or candidate.get("visual_id") or "").strip()
         if not barrier_id or barrier_id in seen:
             continue

@@ -43,12 +43,12 @@ def _select_visually_nearest_per_source(candidate_pool, all_candidate_pool=None)
     for candidate in candidate_pool or []:
         if candidate.get("source_context_type"):
             continue
-        by_source.setdefault(_source_key(candidate), []).append(candidate)
+        by_source.setdefault(_selection_source_key(candidate), []).append(candidate)
     all_by_source = {}
     for candidate in all_candidate_pool or []:
         if candidate.get("source_context_type"):
             continue
-        all_by_source.setdefault(_source_key(candidate), []).append(candidate)
+        all_by_source.setdefault(_selection_source_key(candidate), []).append(candidate)
 
     selected = []
     companion_samples = []
@@ -79,7 +79,7 @@ def _select_visually_nearest_per_source(candidate_pool, all_candidate_pool=None)
     for source_key, items in by_source.items():
         items = _dedupe_source_candidates(items)
         min_depth = min(int(item.get("traversal_depth") or 99) for item in items)
-        if min_depth > 2:
+        if min_depth > 2 and not any(item.get("graph_path_complete") for item in items):
             sample = items[0]
             skipped_sources.append(
                 {
@@ -157,6 +157,13 @@ def _select_visually_nearest_per_source(candidate_pool, all_candidate_pool=None)
         "bbox_unselected_source_component_count": len(skipped_sources),
         "bbox_unselected_source_components": skipped_sources[:50],
     }
+
+
+def _selection_source_key(candidate):
+    """Keep independently traversed UniGraph paths separate during selection."""
+    source = _source_key(candidate)
+    graph_path = str(candidate.get("graph_path_key") or "")
+    return (*source, graph_path) if graph_path else source
 
 
 def _parallel_companions(winner, items, used_candidate_ids):

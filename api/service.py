@@ -68,6 +68,7 @@ def config_from_run_request(request, auth_token: str):
         hot_work=scope.hot_work,
         output_dir=Path("."),
     )
+    config = replace(config, approved_corrections=tuple(getattr(request, "approved_corrections", ()) or ()))
     if request.selected_asset is None:
         return config
     context = PlanningContext(

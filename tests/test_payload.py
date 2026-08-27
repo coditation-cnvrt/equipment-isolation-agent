@@ -54,6 +54,7 @@ class PayloadEnvelopeTests(unittest.TestCase):
                 "collection_id",
                 "collection_name",
                 "context_instruments",
+                "correction_coverage",
                 "detected_isolation_schemes",
                 "downstream_impact",
                 "input_details",
@@ -143,6 +144,40 @@ class IsolationPointTests(unittest.TestCase):
         self.assertEqual(point["bbox_match_method"], "hilt_uuid")
         self.assertEqual(point["energy_type"], "process")  # default
         self.assertIn("Candidate vertex id: 7", point["reason"])
+
+    def test_candidate_source_paths_are_preserved_for_plan_normalization(self):
+        source_paths = [
+            {"branch_id": "branch-a", "source_component_id": "N-A"},
+            {"branch_id": "branch-b", "source_component_id": "N-B"},
+        ]
+        record = build_final_payload(
+            {"candidates": [{"candidate_id": "shared-v1", "source_paths": source_paths}]},
+            self.config,
+        )["data"][0]
+        self.assertEqual(record["isolation_points"][0]["source_paths"], source_paths)
+
+    def test_unavailable_status_is_projected_for_ui_and_plan_history(self):
+        record = build_final_payload(
+            {"candidates": [{
+                "candidate_id": "faulty-v1",
+                "availability_status": "unavailable",
+                "available_for_isolation": False,
+                "unavailable_reason": "Valve stem seized",
+            }]},
+            self.config,
+        )["data"][0]
+
+        point = record["isolation_points"][0]
+        self.assertEqual(point["availability_status"], "unavailable")
+        self.assertFalse(point["available_for_isolation"])
+        self.assertEqual(point["unavailable_reason"], "Valve stem seized")
+
+    def test_plan_point_identity_survives_internal_graph_candidate_rebinding(self):
+        record = build_final_payload(
+            {"candidates": [{"candidate_id": "graph-v1", "plan_point_id": "hilt-v1"}]},
+            self.config,
+        )["data"][0]
+        self.assertEqual(record["isolation_points"][0]["uuid"], "hilt-v1")
 
     def test_drawing_identity_falls_back_to_candidate_visual_id_not_source_nozzle(self):
         record = build_final_payload(

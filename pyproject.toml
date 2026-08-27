@@ -30,6 +30,7 @@ py-modules = [
     "boundary",
     "candidates",
     "config",
+    "correction_targets",
     "eval_compare",
     "evidence",
     "flow",

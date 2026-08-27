@@ -21,14 +21,20 @@ def build_evidence(candidate_data, config):
     manual_review_ids = []
     manual_review_labels = []
     unresolved_bbox_ids = []
+    unavailable_ids = []
+    unavailable_labels = []
 
     for candidate in candidates:
+        flags = candidate_flags(candidate, config.policy)
         for path in candidate.get("source_paths") or []:
             key = str(path.get("source_component_id") or path.get("source_component_tag") or "").strip()
             if key:
                 source_keys.add(key)
-                covered_sources.add(key)
-        flags = candidate_flags(candidate, config.policy)
+                if flags["barrier"]:
+                    covered_sources.add(key)
+        if not _available_for_isolation(candidate):
+            unavailable_ids.append(candidate.get("candidate_id"))
+            unavailable_labels.append(_candidate_review_label(candidate))
         if flags["barrier"]:
             barrier_ids.append(candidate.get("candidate_id"))
         if flags["positive"]:
@@ -56,6 +62,8 @@ def build_evidence(candidate_data, config):
                 "barrier_evidence": flags["barrier"],
                 "positive_isolation_evidence": flags["positive"],
                 "verification_evidence": flags["verification"],
+                "availability_status": candidate.get("availability_status") or "available",
+                "available_for_isolation": _available_for_isolation(candidate),
             }
         )
 
@@ -70,6 +78,13 @@ def build_evidence(candidate_data, config):
         labels = ", ".join(label for label in manual_review_labels[:8] if label)
         suffix = f": {labels}" if labels else ""
         missing.append(f"Selected conditional isolation candidate(s) require manual review before acceptance{suffix}.")
+    if unavailable_ids:
+        labels = ", ".join(label for label in unavailable_labels[:8] if label)
+        suffix = f": {labels}" if labels else ""
+        missing.append(
+            "Reported unavailable isolation point(s) were excluded as barriers; every affected branch requires an available alternate isolation point"
+            f"{suffix}."
+        )
 
     obligations = candidate_data.get("isolation_obligations") or {}
     obligation_counts = _obligation_counts(obligations)
@@ -113,6 +128,7 @@ def build_evidence(candidate_data, config):
         "positive_candidate_ids": positive_ids,
         "verification_candidate_ids": verification_ids,
         "manual_review_candidate_ids": manual_review_ids,
+        "unavailable_candidate_ids": unavailable_ids,
         "bypass_candidate_ids": [],
         "unresolved_bbox_candidate_ids": unresolved_bbox_ids,
         "missing_evidence": missing,
@@ -125,6 +141,7 @@ def build_evidence(candidate_data, config):
             "evidence_positive_candidate_count": len(positive_ids),
             "evidence_verification_candidate_count": len(verification_ids),
             "evidence_manual_review_candidate_count": len(manual_review_ids),
+            "evidence_unavailable_candidate_count": len(unavailable_ids),
             "evidence_missing_evidence_count": len(missing),
             "evidence_isolation_obligation_count": obligation_counts.get("total"),
             "evidence_unresolved_isolation_obligation_count": len(unresolved_obligations),
@@ -213,12 +230,21 @@ def _candidate_review_label(candidate):
 
 
 def candidate_flags(candidate, policy=None):
+    if not _available_for_isolation(candidate):
+        return {"barrier": False, "positive": False, "verification": False}
     classification = _candidate_classification(candidate, policy)
     return {
         "barrier": classification.is_barrier,
         "positive": classification.is_positive_isolation,
         "verification": classification.is_verification,
     }
+
+
+def _available_for_isolation(candidate):
+    return not (
+        candidate.get("available_for_isolation") is False
+        or str(candidate.get("availability_status") or "").lower() == "unavailable"
+    )
 
 
 def _candidate_classification(candidate, policy=None):

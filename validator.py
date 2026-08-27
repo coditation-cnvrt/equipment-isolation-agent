@@ -29,6 +29,7 @@ def validate(planner_data):
     positive_ids = evidence.get("positive_candidate_ids") or []
     verification_ids = evidence.get("verification_candidate_ids") or []
     manual_review_ids = evidence.get("manual_review_candidate_ids") or []
+    unavailable_ids = evidence.get("unavailable_candidate_ids") or []
 
     if not candidates:
         status = AssuranceStatus.NOT_ISOLATED
@@ -101,6 +102,7 @@ def validate(planner_data):
         "positive_candidate_ids": positive_ids,
         "verification_candidate_ids": verification_ids,
         "manual_review_candidate_ids": manual_review_ids,
+        "unavailable_candidate_ids": unavailable_ids,
         "bypass_candidate_ids": evidence.get("bypass_candidate_ids") or [],
         "unresolved_bbox_candidate_ids": evidence.get("unresolved_bbox_candidate_ids") or [],
         "unresolved_evidence_checks": unresolved,

@@ -36,7 +36,7 @@ def build_final_payload(validation_data, config, downstream_impact=None):
         isolation_points.append(
             {
                 "equipment_id": candidate.get("equipment_tag"),
-                "uuid": str(candidate.get("candidate_id")),
+                "uuid": str(candidate.get("plan_point_id") or candidate.get("candidate_id")),
                 # The isolation device's exact HILT drawing identity. Keep this
                 # separate from source_visual_id, which identifies the source
                 # nozzle and must never be highlighted as the barrier device.
@@ -52,6 +52,9 @@ def build_final_payload(validation_data, config, downstream_impact=None):
                 "positive_isolation_requires_field_confirmation": requires_positive_field_confirmation(entity_class),
                 "policy_decision": candidate.get("policy_decision") or (candidate.get("classification") or {}).get("decision"),
                 "requires_manual_review": bool(candidate.get("requires_manual_review")),
+                "availability_status": candidate.get("availability_status") or "available",
+                "available_for_isolation": candidate.get("available_for_isolation") is not False,
+                "unavailable_reason": candidate.get("unavailable_reason"),
                 "source_component": candidate.get("source_component_id") or candidate.get("source_component_tag"),
                 "source_component_tag": candidate.get("source_component_tag"),
                 "source_visual_id": candidate.get("source_visual_id"),
@@ -62,7 +65,10 @@ def build_final_payload(validation_data, config, downstream_impact=None):
                 "branch_path_node_ids": candidate.get("branch_path_node_ids") or [],
                 "branch_path_node_classes": candidate.get("branch_path_node_classes") or [],
                 "branch_context_devices": candidate.get("branch_context_devices") or [],
+                "source_paths": candidate.get("source_paths") or [],
                 "reason": f"{candidate.get('reason')}. Candidate vertex id: {candidate.get('candidate_id')}. Source component: {candidate.get('source_component_tag')}.",
+                "provenance": candidate.get("provenance") or "derived",
+                "correction_provenance": candidate.get("correction_provenance"),
             }
         )
     return {
@@ -97,6 +103,7 @@ def build_final_payload(validation_data, config, downstream_impact=None):
                 "isolated_envelope": isolated_envelope,
                 "detected_isolation_schemes": detected_isolation_schemes,
                 "relief_candidates": relief_candidates,
+                "correction_coverage": validation_data.get("correction_coverage") or [],
             }
         ],
     }

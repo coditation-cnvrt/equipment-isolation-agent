@@ -11,6 +11,8 @@ This is decision support for a POC, not a certified LOTO procedure.
 """
 from __future__ import annotations
 
+import hashlib
+
 from domain.display import device_display_label, device_display_name
 from domain.enums import FlowRole
 from domain.isolation_actions import operation_kind, requires_positive_field_confirmation
@@ -29,6 +31,7 @@ def build_loto_procedure(validation_data: dict, config, isolation_order: list | 
     candidates = validation_data.get("candidates", []) or []
     evidence = validation_data.get("evidence_state") or {}
     validation = validation_data.get("isolation_validation") or {}
+    readiness = validation_data.get("plan_readiness") or validation.get("plan_readiness") or {}
     instrument_context = validation_data.get("instrument_context") or {}
     instrument_checks = instrument_context.get("checks") or {}
     detected_schemes = validation_data.get("detected_isolation_schemes") or {}
@@ -38,9 +41,19 @@ def build_loto_procedure(validation_data: dict, config, isolation_order: list | 
     work_scope = (config.work_scope.__dict__ if hasattr(config.work_scope, "__dict__") else {})
     energy_types = sorted({(c.get("energy_type") or ["process"])[0] for c in candidates} or ["process"])
 
-    isolation_devices, positive_devices, field_confirmed_positive_devices = _devices(candidates, config.policy if hasattr(config, "policy") else None)
+    policy = config.policy if hasattr(config, "policy") else None
+    isolation_devices, positive_devices, field_confirmed_positive_devices = _authoritative_devices(
+        candidates,
+        validation,
+        policy,
+    )
     relief_devices, verify_devices = _relief_and_verify(candidates, relief_candidates)
-    supplementary_scheme_devices = _supplementary_scheme_devices(detected_schemes, isolation_devices)
+    supplementary_scheme_devices = _supplementary_scheme_devices(
+        detected_schemes,
+        isolation_devices,
+        candidates,
+        policy,
+    )
     # NOTE: OSHA 1910.147 prescribes only the PHASE order, NOT the within-phase
     # device order. Resolution order:
     #   1. agent-committed order (engineering judgment) -- authoritative if present
@@ -74,6 +87,8 @@ def build_loto_procedure(validation_data: dict, config, isolation_order: list | 
         _phase_6_verification(verify_devices, evidence, instrument_checks),
     ]
 
+    ordered_steps = _ordered_steps(phases, readiness)
+    integrity = _procedure_integrity(validation_data, isolation_devices, ordered_steps)
     procedure = {
         "standard": STANDARD,
         "regulatory_sequence_ref": "1910.147(d)",
@@ -85,7 +100,8 @@ def build_loto_procedure(validation_data: dict, config, isolation_order: list | 
         "within_phase_order_is_regulatory": False,
         "within_phase_order_source": order_source,
         "phases": phases,
-        "ordered_steps": _ordered_steps(phases),
+        "ordered_steps": ordered_steps,
+        "integrity": integrity,
         "release_from_loto_ref": "1910.147(e)",
         "release_note": _release_note(instrument_checks),
         "restoration_checks": instrument_checks.get("restoration_reenergization") or [],
@@ -116,18 +132,25 @@ def _apply_order(devices: list, ordered_uuids: list) -> list:
     return result
 
 
-def _ordered_steps(phases: list) -> list:
+def _ordered_steps(phases: list, readiness: dict | None = None) -> list:
     """Flatten the procedure into a single numbered, ordered action list a field
     engineer can follow top-to-bottom. The PHASE order is OSHA-fixed; the within-
     Phase-3/4 device order is the agent's engineering judgment (OSHA is silent on it)."""
     steps = []
     n = 0
+    requirements_by_phase = {}
+    for requirement in (
+        list((readiness or {}).get("pre_job_review_items") or [])
+        + list((readiness or {}).get("field_execution_hold_points") or [])
+    ):
+        phase = int(requirement.get("loto_phase") or 1)
+        requirements_by_phase.setdefault(phase, []).append(requirement)
     for phase in phases:
         phase_num = phase.get("phase")
         ref = phase.get("ref")
         title = phase.get("title")
         if phase_num in (3, 4):
-            devices = (
+            devices = _dedupe_devices(
                 (phase.get("devices") or [])
                 + (phase.get("field_confirmed_positive_devices") or [])
                 + (phase.get("supplementary_scheme_devices") or [])
@@ -138,49 +161,126 @@ def _ordered_steps(phases: list) -> list:
             for device in devices:
                 n += 1
                 action = _device_action(phase_num, device)
-                steps.append(_step(n, phase_num, ref, title, action, device))
+                steps.append(
+                    _step(
+                        n,
+                        phase_num,
+                        ref,
+                        title,
+                        action,
+                        device,
+                        step_type="operate_isolation" if phase_num == 3 else "apply_lock_tag",
+                        importance="hold_point" if device.get("operation_kind") == "field_confirmed_positive_isolation" else "operational",
+                    )
+                )
         elif phase_num == 5:
             reliefs = phase.get("relief_devices") or []
             if reliefs:
                 for device in reliefs:
                     n += 1
-                    steps.append(_step(n, phase_num, ref, title, f"Bleed/vent/drain: open {device.get('tag') or device.get('uuid')} to relieve stored energy.", device))
+                    steps.append(_step(n, phase_num, ref, title, f"Open {device.get('tag') or device.get('uuid')} under the site procedure to relieve stored energy.", device, step_type="relieve_energy", importance="operational"))
             else:
                 n += 1
-                steps.append(_step(n, phase_num, ref, title, "Relieve stored/residual energy. FIELD GAP: no bleed/vent/drain on P&ID -- field-locate one.", field_gap=True))
+                steps.append(_step(n, phase_num, ref, title, "Relieve stored/residual energy. FIELD GAP: no bleed/vent/drain on P&ID -- field-locate one.", field_gap=True, step_type="field_gap", importance="hold_point"))
             for check in phase.get("instrument_checks") or []:
                 n += 1
-                steps.append(_step(n, phase_num, ref, title, _instrument_action(check), instrument=check))
+                steps.append(_step(n, phase_num, ref, title, _instrument_action(check), instrument=check, step_type="instrument_check", importance="hold_point"))
         elif phase_num == 6:
             verifies = phase.get("verify_devices") or []
             if verifies:
                 for device in verifies:
                     n += 1
-                    steps.append(_step(n, phase_num, ref, title, f"Verify zero energy at {device.get('tag') or device.get('uuid')} (gauge/indicator/test point).", device))
+                    steps.append(_step(n, phase_num, ref, title, f"Verify zero or the site-approved safe-energy threshold at {device.get('tag') or device.get('uuid')}; confirm a stable hold and no reaccumulation.", device, step_type="verify_energy", importance="hold_point"))
             elif not (phase.get("instrument_checks") or []):
                 n += 1
-                steps.append(_step(n, phase_num, ref, title, "Verify isolation & de-energization. FIELD GAP: no gauge/test point on P&ID -- field-verify zero energy.", field_gap=True))
+                steps.append(_step(n, phase_num, ref, title, "Verify isolation & de-energization. FIELD GAP: no gauge/test point on P&ID -- field-verify zero energy.", field_gap=True, step_type="field_gap", importance="hold_point"))
             for check in phase.get("instrument_checks") or []:
                 n += 1
-                steps.append(_step(n, phase_num, ref, title, _instrument_action(check), instrument=check, advisory=True))
+                steps.append(_step(n, phase_num, ref, title, _instrument_action(check), instrument=check, advisory=True, step_type="instrument_check", importance="hold_point"))
         else:
             n += 1
-            steps.append(_step(n, phase_num, ref, title, f"{title}."))
+            phase_actions = phase.get("field_action_required") or []
+            action = str(phase_actions[0]) if phase_actions else f"{title}."
+            steps.append(_step(n, phase_num, ref, title, action, step_type="preparation" if phase_num == 1 else "shutdown", importance="operational"))
+            for action in phase_actions[1:]:
+                n += 1
+                steps.append(_step(n, phase_num, ref, title, str(action), step_type="preparation" if phase_num == 1 else "shutdown", importance="operational"))
             for check in phase.get("instrument_checks") or []:
                 n += 1
-                steps.append(_step(n, phase_num, ref, title, _instrument_action(check), instrument=check, advisory=True))
+                steps.append(_step(n, phase_num, ref, title, _instrument_action(check), instrument=check, advisory=True, step_type="instrument_check", importance="supporting"))
             for check in phase.get("secondary_context_checks") or []:
                 n += 1
-                steps.append(_step(n, phase_num, ref, title, _secondary_context_action(check), secondary_context=check, advisory=True))
+                steps.append(_step(n, phase_num, ref, title, _secondary_context_action(check), secondary_context=check, advisory=True, step_type="context_review", importance="supporting"))
+        represented_targets = {
+            str((step.get("target") or {}).get("drawing_entity_id") or "")
+            for step in steps
+            if step.get("phase") == phase_num
+        }
+        for requirement in requirements_by_phase.get(phase_num, []):
+            target = (requirement.get("evidence_targets") or [{}])[0] or {}
+            target_id = str(target.get("entity_id") or "")
+            if target_id and target_id in represented_targets:
+                continue
+            n += 1
+            steps.append(_requirement_step(n, phase_num, ref, title, requirement, target))
     return steps
 
 
-def _step(n, phase, ref, title, action, device=None, field_gap=False, instrument=None, secondary_context=None, advisory=False):
-    step = {"step": n, "phase": phase, "ref": ref, "title": title, "action": action}
+def _requirement_step(n, phase, ref, title, requirement, target):
+    requirement_id = str(requirement.get("requirement_id") or requirement.get("reason_id") or f"phase-{phase}-hold-{n}")
+    action = str(requirement.get("instruction") or requirement.get("required_action") or "Complete the required field review before continuing.")
+    target_id = target.get("entity_id")
+    step = {
+        "step": n,
+        "step_id": f"phase:{phase}:hold_point:{requirement_id}",
+        "phase": phase,
+        "ref": ref,
+        "title": title,
+        "action": action,
+        "step_type": "field_gap" if not requirement.get("method_identified", True) else "context_review",
+        "importance": "hold_point",
+        "requirement_id": requirement_id,
+        "field_gap": not requirement.get("method_identified", True),
+        "target": {
+            "drawing_entity_id": target_id,
+            "tag": target.get("tag"),
+            "entity_class": target.get("entity_class"),
+        },
+        "locatable": bool(target_id),
+    }
+    if target.get("acceptance"):
+        step["acceptance_criteria"] = target.get("acceptance")
+    if target.get("verification_instruction"):
+        step["limitation"] = target.get("verification_instruction")
+    return step
+
+
+def _step(n, phase, ref, title, action, device=None, field_gap=False, instrument=None, secondary_context=None, advisory=False, step_type=None, importance=None):
+    step_type = (step_type or "field_gap") if field_gap else (step_type or "context_review")
+    target_key = "general"
+    step = {
+        "step": n,
+        "phase": phase,
+        "ref": ref,
+        "title": title,
+        "action": action,
+        "step_type": step_type,
+        "importance": importance or ("supporting" if advisory else "operational"),
+    }
     if device:
         step["device_uuid"] = device.get("uuid")
         step["device_tag"] = device.get("tag")
         step["source"] = device.get("source_component")
+        step["covered_branch_ids"] = device.get("covered_branch_ids") or []
+        step["covered_branches"] = device.get("covered_branches") or []
+        step["target"] = {
+            "candidate_id": device.get("uuid"),
+            "drawing_entity_id": device.get("drawing_entity_id"),
+            "tag": device.get("tag"),
+            "entity_class": device.get("entity_class"),
+        }
+        step["locatable"] = bool(device.get("drawing_entity_id") or device.get("bbox_present"))
+        target_key = str(device.get("uuid") or device.get("drawing_entity_id") or "device")
     if instrument:
         step["instrument_id"] = instrument.get("instrument_id")
         step["instrument_tag"] = instrument.get("tag")
@@ -190,6 +290,14 @@ def _step(n, phase, ref, title, action, device=None, field_gap=False, instrument
             if instrument.get(key):
                 step[key] = instrument.get(key)
         step["advisory"] = True
+        step["target"] = {
+            "instrument_id": instrument.get("instrument_id"),
+            "drawing_entity_id": instrument.get("instrument_id"),
+            "tag": instrument.get("tag"),
+            "entity_class": instrument.get("instrument_type"),
+        }
+        step["locatable"] = bool(instrument.get("instrument_id"))
+        target_key = str(instrument.get("instrument_id") or instrument.get("tag") or "instrument")
     if secondary_context:
         step["secondary_context_source"] = secondary_context.get("source_component")
         step["secondary_context_tag"] = secondary_context.get("source_component_tag")
@@ -198,10 +306,15 @@ def _step(n, phase, ref, title, action, device=None, field_gap=False, instrument
             if secondary_context.get(key):
                 step[key] = secondary_context.get(key)
         step["advisory"] = True
+        target_key = str(secondary_context.get("source_component") or secondary_context.get("source_component_tag") or "context")
     if field_gap:
         step["field_gap"] = True
+        step["locatable"] = False
     if advisory:
         step["advisory"] = True
+    if target_key == "general":
+        target_key = hashlib.sha256(str(action).strip().lower().encode("utf-8")).hexdigest()[:12]
+    step["step_id"] = f"phase:{phase}:{step_type}:{target_key}"
     return step
 
 
@@ -234,9 +347,9 @@ def _device_action(phase_num, device):
     kind = device.get("operation_kind") or operation_kind(device.get("entity_class"))
     if phase_num == 3:
         if kind == "electrical_isolation":
-            return f"Open/de-energize and lock {label} {source_suffix}"
+            return f"Open and de-energize {label} using the approved shutdown procedure {source_suffix}"
         if kind == "installed_positive_isolation":
-            return f"Install/verify positive isolation at {label} {source_suffix}"
+            return f"Field-confirm {label} and place or verify it in the approved isolating position {source_suffix}"
         if kind == "field_confirmed_positive_isolation":
             return (
                 f"Field-verify flange/line-break point {label}; install an approved blind/spade "
@@ -247,8 +360,8 @@ def _device_action(phase_num, device):
         if kind == "control_context":
             return f"Field-verify control valve {label}; do not use it as an isolation point unless site procedure explicitly approves it {source_suffix}"
         if kind == "valve_isolation":
-            return f"Close & lock {label} {source_suffix}"
-        return f"Isolate and lock/tag {label} {source_suffix}"
+            return f"Close {label} to its required isolating position {source_suffix}"
+        return f"Operate {label} to its required isolating state {source_suffix}"
 
     if kind == "electrical_isolation":
         return f"Affix lock/tag to {label} in the de-energized/open position {source_suffix}"
@@ -281,10 +394,50 @@ def _devices(candidates, policy):
     return isolation, positive, field_confirmed_positive
 
 
+def _authoritative_devices(candidates, validation, policy):
+    """Return only current, validator-accepted devices for operational LOTO steps.
+
+    Older/offline callers may not carry validator id lists; for those payloads the
+    deterministic candidate classification remains the compatibility fallback.
+    """
+    validation = validation or {}
+    obligations = validation.get("isolation_obligations") or {}
+    accepted_ids = {str(value) for value in validation.get("barrier_candidate_ids") or [] if value is not None}
+    barrier_selection_present = "barrier_candidate_ids" in validation
+    if not barrier_selection_present:
+        for obligation in obligations.get("items") or []:
+            if str(obligation.get("status") or "").lower() not in {"isolated", "covered"}:
+                continue
+            accepted_ids.update(str(value) for value in obligation.get("selected_candidate_ids") or [] if value is not None)
+    has_authoritative_selection = barrier_selection_present or bool((obligations.get("items") or []))
+
+    selected = []
+    for candidate in candidates or []:
+        if not _candidate_available(candidate):
+            continue
+        aliases = _candidate_aliases(candidate)
+        if has_authoritative_selection and not aliases.intersection(accepted_ids):
+            continue
+        if candidate_flags(candidate, policy)["barrier"]:
+            selected.append(candidate)
+
+    isolation, positive, _ = _devices(selected, policy)
+    field_confirmed = []
+    for candidate in candidates or []:
+        if not _candidate_available(candidate):
+            continue
+        if operation_kind(((candidate.get("properties") or {}).get("entity_class") or candidate.get("candidate_label"))) != "field_confirmed_positive_isolation":
+            continue
+        field_confirmed.append(_device_summary(candidate))
+    return isolation, positive, field_confirmed
+
+
 def _relief_and_verify(candidates, relief_candidates=None):
     relief = []
     verify = []
     for candidate in candidates:
+        if candidate.get("available_for_isolation") is False or str(candidate.get("availability_status") or "").lower() == "unavailable":
+            continue
         # Normalize spaces to underscores so the canonical 'test_point' keyword
         # matches both 'test_point' and 'test point' source classes.
         entity_text = _entity_text(candidate).replace(" ", "_")
@@ -324,8 +477,10 @@ def _device_summary(candidate):
     entity_class = props.get("entity_class") or candidate.get("candidate_label")
     tag = candidate.get("tag_number") or _first(props, ("tag", "name"))
     kind = operation_kind(entity_class)
+    covered_branches = _candidate_branches(candidate)
     return {
         "uuid": str(candidate.get("candidate_id")),
+        "drawing_entity_id": candidate.get("visual_node_id") or candidate.get("visual_id"),
         "tag": tag,
         "entity_class": entity_class,
         "display_label": tag or device_display_name(entity_class),
@@ -337,7 +492,62 @@ def _device_summary(candidate):
         "source_flow_role": candidate.get("source_flow_role") or "unknown",
         "operation_kind": kind,
         "positive_isolation_requires_field_confirmation": requires_positive_field_confirmation(entity_class),
+        "availability_status": candidate.get("availability_status") or "available",
+        "available_for_isolation": _candidate_available(candidate),
+        "covered_branches": covered_branches,
+        "covered_branch_ids": [branch["id"] for branch in covered_branches],
     }
+
+
+def _candidate_available(candidate):
+    return not (
+        candidate.get("available_for_isolation") is False
+        or str(candidate.get("availability_status") or "").lower() == "unavailable"
+    )
+
+
+def _candidate_aliases(candidate):
+    return {
+        str(value)
+        for value in (
+            candidate.get("candidate_id"),
+            candidate.get("plan_point_id"),
+            candidate.get("visual_node_id"),
+            candidate.get("visual_id"),
+            candidate.get("cnvrt_id"),
+        )
+        if value not in (None, "")
+    }
+
+
+def _candidate_branches(candidate):
+    branches = []
+
+    def add(source):
+        branch_id = source.get("branch_id") or source.get("source_component_id") or source.get("source_component_tag")
+        label = source.get("source_component_tag") or source.get("source_component") or source.get("source_component_id") or branch_id
+        if branch_id in (None, ""):
+            return
+        item = {"id": str(branch_id), "label": str(label or branch_id)}
+        if item not in branches:
+            branches.append(item)
+
+    add(candidate)
+    for source in candidate.get("source_paths") or []:
+        add(source)
+    return branches
+
+
+def _dedupe_devices(devices):
+    result = []
+    seen = set()
+    for device in devices or []:
+        key = str(device.get("uuid") or device.get("drawing_entity_id") or "")
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        result.append(device)
+    return result
 
 
 _FLOW_ROLE_RANK = {
@@ -516,37 +726,106 @@ def _group_by_source(devices):
     return groups
 
 
-def _supplementary_scheme_devices(detected_schemes, isolation_devices):
+def _supplementary_scheme_devices(detected_schemes, isolation_devices, candidates=None, policy=None):
+    """Return accepted scheme devices that are not already represented.
+
+    Scheme topology is descriptive evidence, not an authority to resurrect a
+    corrected/unavailable device or promote an unselected device into LOTO.
+    """
     known = {str(device.get("uuid")) for device in isolation_devices}
+    accepted_by_alias = {}
+    accepted_canonical = {str(device.get("uuid")) for device in isolation_devices}
+    for candidate in candidates or []:
+        if (
+            not _candidate_available(candidate)
+            or not candidate_flags(candidate, policy)["barrier"]
+            or str(candidate.get("candidate_id")) not in accepted_canonical
+        ):
+            continue
+        for alias in _candidate_aliases(candidate):
+            accepted_by_alias[alias] = candidate
     result = []
     for scheme in (detected_schemes or {}).get("items") or []:
         for device in scheme.get("devices") or []:
             device_id = str(device.get("id") or "")
             if not device_id or device_id in known:
                 continue
-            kind = operation_kind(device.get("entity_class"))
+            candidate = accepted_by_alias.get(device_id)
+            if candidate is None:
+                continue
+            summary = _device_summary(candidate)
+            if str(summary.get("uuid")) in known:
+                continue
+            kind = summary.get("operation_kind")
             if kind == "field_confirmed_positive_isolation":
                 continue
             known.add(device_id)
-            result.append(
-                {
-                    "uuid": device_id,
-                    "tag": device.get("tag"),
-                    "entity_class": device.get("entity_class"),
-                    "display_label": device.get("tag") or device_display_name(device.get("entity_class")),
-                    "method": "close and lock valve" if "valve" in str(device.get("entity_class") or "").lower() else "isolate and lock/tag",
-                    "source_component": scheme.get("source_component_tag") or scheme.get("source_component"),
-                    "traversal_depth": None,
-                    "energy_type": "process",
-                    "bbox_present": bool(device.get("bbox")),
-                    "source_flow_role": "unknown",
-                    "operation_kind": kind,
-                    "positive_isolation_requires_field_confirmation": requires_positive_field_confirmation(device.get("entity_class")),
-                    "scheme_type": scheme.get("scheme_type"),
-                    "supplementary_scheme_device": True,
-                }
-            )
+            result.append({
+                **summary,
+                "scheme_type": scheme.get("scheme_type"),
+                "supplementary_scheme_device": True,
+            })
     return result
+
+
+def _procedure_integrity(validation_data, isolation_devices, ordered_steps):
+    validation = validation_data.get("isolation_validation") or {}
+    candidates = validation_data.get("candidates") or []
+    alias_to_id = {}
+    unavailable = set()
+    for candidate in candidates:
+        canonical = str(candidate.get("candidate_id") or "")
+        for alias in _candidate_aliases(candidate):
+            alias_to_id[alias] = canonical or alias
+            if not _candidate_available(candidate):
+                unavailable.add(alias)
+
+    expected = {
+        alias_to_id.get(str(value), str(value))
+        for value in validation.get("barrier_candidate_ids") or []
+        if value is not None
+    }
+    branch_missing = []
+    for obligation in ((validation.get("isolation_obligations") or {}).get("items") or []):
+        if str(obligation.get("status") or "").lower() not in {"isolated", "covered"}:
+            continue
+        selected = {
+            alias_to_id.get(str(value), str(value))
+            for value in obligation.get("selected_candidate_ids") or []
+            if value is not None
+        }
+        expected.update(selected)
+        if not selected:
+            branch_missing.append(str(obligation.get("branch_id") or obligation.get("source_component") or "unknown"))
+
+    actual = {str(device.get("uuid")) for device in isolation_devices if device.get("uuid") not in (None, "")}
+    phase3 = {
+        str((step.get("target") or {}).get("candidate_id") or step.get("device_uuid"))
+        for step in ordered_steps
+        if step.get("phase") == 3 and step.get("importance") == "operational"
+    }
+    phase4 = {
+        str((step.get("target") or {}).get("candidate_id") or step.get("device_uuid"))
+        for step in ordered_steps
+        if step.get("phase") == 4 and step.get("importance") == "operational"
+    }
+    issues = []
+    for missing in sorted(expected - actual):
+        issues.append({"code": "authoritative_barrier_missing", "target_id": missing, "message": "An authoritative barrier is missing from the procedure device set."})
+    for missing in sorted(actual - phase3):
+        issues.append({"code": "phase_3_action_missing", "target_id": missing, "message": "An authoritative barrier has no equipment-isolation action."})
+    for missing in sorted(actual - phase4):
+        issues.append({"code": "phase_4_action_missing", "target_id": missing, "message": "An authoritative barrier has no lock/tag action."})
+    for target in sorted((phase3 | phase4) & unavailable):
+        issues.append({"code": "unavailable_device_in_procedure", "target_id": target, "message": "An unavailable device appears in an operational procedure step."})
+    for branch_id in branch_missing:
+        issues.append({"code": "covered_branch_has_no_barrier", "branch_id": branch_id, "message": "A covered branch has no selected barrier identity."})
+    return {
+        "status": "blocked" if issues else "valid",
+        "issues": issues,
+        "authoritative_barrier_count": len(expected or actual),
+        "operational_device_count": len(actual),
+    }
 
 
 def _entity_text(candidate):

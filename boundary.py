@@ -1,5 +1,7 @@
 from gremlin_python.process.graph_traversal import __
 
+from domain.classification import classify_candidate
+from domain.enums import IsolationDecision
 from graph_client import GraphClient, normalize_vertex, props_only, vertex_id, vertex_label
 
 
@@ -30,7 +32,12 @@ def fetch_boundaries(config):
             component_boundaries = []
 
             for component in components:
-                boundary, hit_limit = _component_boundary(g, component, config.policy)
+                boundary, hit_limit = _component_boundary(
+                    g,
+                    component,
+                    config.policy,
+                    getattr(config, "approved_corrections", ()) or (),
+                )
                 traversal_limit_hit = traversal_limit_hit or hit_limit
                 component_boundaries.append(boundary)
 
@@ -187,7 +194,7 @@ def _dedupe_vertices(vertices):
     return result
 
 
-def _component_boundary(g, component, policy):
+def _component_boundary(g, component, policy, corrections=()):
     component_id = vertex_id(component)
     component_edge_labels = g.V(component_id).bothE().label().dedup().toList()
     component_neighbors = (
@@ -200,30 +207,39 @@ def _component_boundary(g, component, policy):
     )
     component_neighbors = [normalize_vertex(row) for row in component_neighbors]
 
-    traversal_by_id = {}
-    limit_hit = False
-    for depth in range(1, policy.max_traversal_depth + 1):
+    unavailable_identities = _final_unavailable_identities(corrections)
+
+    def expand(vertex_ids):
+        if not vertex_ids:
+            return {}
         rows = (
-            g.V(component_id)
-            .repeat(__.both(*policy.candidate_edge_labels).simplePath())
-            .times(depth)
-            .dedup()
-            .limit(policy.traversal_limit_per_depth)
-            .valueMap(True)
+            g.V(*vertex_ids)
+            .as_("origin")
+            .bothE(*policy.candidate_edge_labels)
+            .as_("edge")
+            .otherV()
+            .hasLabel("Component")
+            .as_("target")
+            .select("origin", "edge", "target")
+            .by(__.id_())
+            .by(__.label())
+            .by(__.valueMap(True))
             .toList()
         )
-        limit_hit = limit_hit or len(rows) >= policy.traversal_limit_per_depth
+        adjacency = {str(value): [] for value in vertex_ids}
         for row in rows:
-            vertex = normalize_vertex(row)
-            key = vertex_id(vertex)
-            if key in traversal_by_id:
-                continue
-            traversal_by_id[key] = {
-                "id": key,
-                "label": vertex_label(vertex),
-                "properties": props_only(vertex),
-                "traversal_depth": depth,
-            }
+            target = normalize_vertex(row.get("target") or {})
+            adjacency.setdefault(str(row.get("origin")), []).append(
+                {"vertex": target, "edge_label": str(row.get("edge") or "")}
+            )
+        return adjacency
+
+    traversal_sample, graph_branches, limit_hit = _walk_component_topology(
+        component_id,
+        expand,
+        policy,
+        unavailable_identities,
+    )
 
     return (
         {
@@ -242,7 +258,134 @@ def _component_boundary(g, component, policy):
                 }
                 for vertex in component_neighbors
             ],
-            "traversal_sample": list(traversal_by_id.values()),
+            "traversal_sample": traversal_sample,
+            "graph_branches": graph_branches,
         },
         limit_hit,
     )
+
+
+def _walk_component_topology(start_id, expand, policy, unavailable_identities=()):
+    """Cycle-safe, path-preserving BFS over UniGraph component connectivity.
+
+    Each path stops at its first usable barrier. An unavailable barrier is
+    retained for audit but treated as pass-through. Limits are fail-safe:
+    unfinished paths are returned as unresolved rather than silently accepted.
+    """
+    start = str(start_id)
+    frontier = [{"current": start, "path": (start,), "edges": ()}]
+    samples = []
+    branches = []
+    limit_hit = False
+
+    for depth in range(1, int(policy.max_traversal_depth) + 1):
+        if not frontier:
+            break
+        adjacency = expand([state["current"] for state in frontier])
+        next_frontier = []
+        for state in frontier:
+            neighbors = [
+                item
+                for item in adjacency.get(str(state["current"]), [])
+                if str(vertex_id(item["vertex"])) not in state["path"]
+            ]
+            if not neighbors:
+                if len(state["path"]) > 1:
+                    branches.append(_graph_branch(state["path"], state["edges"], "unresolved", reason="terminal_without_barrier"))
+                continue
+            for item in neighbors:
+                vertex = item["vertex"]
+                target_id = str(vertex_id(vertex))
+                path = (*state["path"], target_id)
+                edges = (*state["edges"], item.get("edge_label") or "")
+                selectable = _selectable_barrier_vertex(vertex, policy)
+                unavailable = selectable and _vertex_matches_identities(vertex, unavailable_identities)
+                sample = {
+                    "id": vertex_id(vertex),
+                    "label": vertex_label(vertex),
+                    "properties": props_only(vertex),
+                    "traversal_depth": depth,
+                    "graph_path_ids": list(path),
+                    "graph_path_edge_labels": list(edges),
+                    "graph_path_key": ">".join(path),
+                    "graph_path_status": "unavailable_pass_through" if unavailable else "barrier" if selectable else "transit",
+                    "graph_path_complete": bool(selectable and not unavailable),
+                }
+                if unavailable:
+                    sample.update(availability_status="unavailable", available_for_isolation=False)
+                samples.append(sample)
+                if selectable and not unavailable:
+                    branches.append(_graph_branch(path, edges, "isolated", barrier_id=target_id))
+                else:
+                    next_frontier.append({"current": target_id, "path": path, "edges": edges})
+
+        if len(next_frontier) > int(policy.traversal_limit_per_depth):
+            limit_hit = True
+            next_frontier = next_frontier[: int(policy.traversal_limit_per_depth)]
+        # Exact path dedupe prevents duplicate Gremlin edges from multiplying a
+        # state while retaining distinct split paths and reconvergence evidence.
+        frontier = list({state["path"]: state for state in next_frontier}.values())
+
+    if frontier:
+        limit_hit = True
+        branches.extend(
+            _graph_branch(state["path"], state["edges"], "unresolved", reason="safety_limit_reached")
+            for state in frontier
+        )
+    return samples, _dedupe_graph_branches(branches), limit_hit
+
+
+def _selectable_barrier_vertex(vertex, policy):
+    classification = classify_candidate(props_only(vertex), vertex_label(vertex), policy)
+    return classification.decision in {
+        IsolationDecision.AUTOMATIC,
+        IsolationDecision.CONDITIONAL_MANUAL_REVIEW,
+    }
+
+
+def _vertex_matches_identities(vertex, identities):
+    properties = props_only(vertex)
+    values = {str(vertex_id(vertex))}
+    values.update(
+        str(properties.get(key) or "").strip()
+        for key in ("node_id", "source_id", "uuid", "cnvrt_id")
+    )
+    return bool(values.intersection(identities))
+
+
+def _final_unavailable_identities(corrections):
+    unavailable = set()
+    for correction in corrections or ():
+        kind = str(correction.get("change_type") or "")
+        if kind not in {"mark_point_unavailable", "mark_point_available"}:
+            continue
+        proposed = correction.get("proposed_change") or {}
+        identities = {
+            str(correction.get("target_id") or "").strip(),
+            str(proposed.get("drawing_entity_id") or "").strip(),
+        }
+        identities.discard("")
+        if kind == "mark_point_unavailable":
+            unavailable.update(identities)
+        else:
+            unavailable.difference_update(identities)
+    return unavailable
+
+
+def _graph_branch(path, edges, status, *, barrier_id="", reason=""):
+    return {
+        "branch_id": "unigraph:" + ">".join(path),
+        "path_node_ids": list(path),
+        "path_edge_labels": list(edges),
+        "status": status,
+        "barrier_id": barrier_id,
+        "reason": reason,
+    }
+
+
+def _dedupe_graph_branches(branches):
+    result = {}
+    for branch in branches:
+        key = (tuple(branch.get("path_node_ids") or ()), branch.get("status"), branch.get("barrier_id"))
+        result[key] = branch
+    return list(result.values())

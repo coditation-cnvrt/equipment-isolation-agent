@@ -25,7 +25,7 @@ BRANCH_CONTEXT_VALVE_CLASSES = {"check_valve", "control_valve"}
 TRAVERSABLE_CONNECTION_CLASSES = {"flange", "flanged_joint"}
 
 
-def resolve_nozzle_isolation(hilt_payload: dict, equipment_tag: str, y_flip: float | None = None, policy=None) -> dict:
+def resolve_nozzle_isolation(hilt_payload: dict, equipment_tag: str, y_flip: float | None = None, policy=None, unavailable_ids=None) -> dict:
     """Walk the HILT piping graph to find the valve isolating each equipment nozzle.
 
     ``y_flip`` is the image-height constant H such that image_y = H - hilt_y (HILT
@@ -53,7 +53,10 @@ def resolve_nozzle_isolation(hilt_payload: dict, equipment_tag: str, y_flip: flo
 
     result: dict[str, list] = {}
     for tag, nozzle_id in nozzles.items():
-        result[tag] = _nearest_valves(nozzle_id, adj, node_by_id, max_hops=24, y_flip=y_flip, policy=policy)
+        result[tag] = _nearest_valves(
+            nozzle_id, adj, node_by_id, max_hops=24, y_flip=y_flip,
+            policy=policy, unavailable_ids=unavailable_ids,
+        )
     return result
 
 
@@ -63,6 +66,7 @@ def resolve_source_branch_isolation(
     y_flip: float | None = None,
     policy=None,
     max_hops: int = 24,
+    unavailable_ids=None,
 ) -> list[dict]:
     """Resolve required isolation per process branch from concrete HILT source UUIDs.
 
@@ -95,6 +99,7 @@ def resolve_source_branch_isolation(
             max_hops=max_hops,
             y_flip=y_flip,
             policy=policy,
+            unavailable_ids=unavailable_ids,
         )
         if not branches:
             continue
@@ -156,18 +161,22 @@ def _hilt_index(graph):
     return node_by_id, adj
 
 
-def _nearest_valves(start, adj, node_by_id, max_hops, y_flip=None, policy=None):
+def _nearest_valves(start, adj, node_by_id, max_hops, y_flip=None, policy=None, unavailable_ids=None):
     return [
         branch["valve"]
-        for branch in _nearest_branch_devices(start, adj, node_by_id, max_hops=max_hops, y_flip=y_flip, policy=policy)
+        for branch in _nearest_branch_devices(
+            start, adj, node_by_id, max_hops=max_hops, y_flip=y_flip,
+            policy=policy, unavailable_ids=unavailable_ids,
+        )
         if branch.get("status") == "isolated" and branch.get("valve")
     ]
 
 
-def _nearest_branch_devices(start, adj, node_by_id, max_hops, y_flip=None, policy=None):
+def _nearest_branch_devices(start, adj, node_by_id, max_hops, y_flip=None, policy=None, unavailable_ids=None):
     """BFS from a nozzle over process lines; record the first valve on each branch.
     Valves are leaves (we do not traverse through them) -- the nearest valve on a
     branch is that branch's isolation point."""
+    unavailable = {str(value) for value in (unavailable_ids or ()) if value not in (None, "")}
     seen = {start}
     queue = deque([(start, 0, [start], [])])
     found: list[dict] = []
@@ -186,6 +195,15 @@ def _nearest_branch_devices(start, adj, node_by_id, max_hops, y_flip=None, polic
             expanded = True
             branch_role = _branch_device_role(nbr, node_by_id, policy)
             if branch_role == "required_isolation":
+                if nbr in unavailable:
+                    unavailable_device = _valve_summary(nbr, node_by_id, hops + 1, new_path, y_flip)
+                    unavailable_device.update(
+                        availability_status="unavailable",
+                        available_for_isolation=False,
+                        reason="Approved correction reports this device faulty or out of service; traversal continued to seek an alternate barrier.",
+                    )
+                    queue.append((nbr, hops + 1, new_path, context_devices + [unavailable_device]))
+                    continue
                 if nbr not in found_ids:
                     found_ids.add(nbr)
                     found.append(

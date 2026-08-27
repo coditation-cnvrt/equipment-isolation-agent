@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from bbox import (
+    _apply_availability_to_candidate_pool,
     _context_item_has_signal_line,
     _hilt_context_sources,
     _resolve_candidate_bboxes,
@@ -130,6 +131,31 @@ class IsolationPolicyTests(unittest.TestCase):
         branches = result[0]["branches"]
         self.assertEqual([branch["status"] for branch in branches], ["isolated", "isolated"])
         self.assertEqual({branch["valve"]["valve_id"] for branch in branches}, {"V1", "V2"})
+
+    def test_hilt_topology_crosses_unavailable_valve_to_find_alternate_barrier(self):
+        payload = {
+            "hilt_graph": {
+                "nodes": [
+                    _hilt_node("S1", "equipment_nozzle", ""),
+                    _hilt_node("V1", "gate_valve", "XV-FAULTY"),
+                    _hilt_node("V2", "gate_valve", "XV-ALTERNATE"),
+                ],
+                "links": [_hilt_link("S1", "V1"), _hilt_link("V1", "V2")],
+            }
+        }
+
+        result = resolve_source_branch_isolation(
+            payload,
+            [{"equipment_tag": "T-1", "source_component_id": "SRC1", "source_visual_id": "S1"}],
+            policy=IsolationPolicy(),
+            unavailable_ids={"V1"},
+        )
+
+        branch = result[0]["branches"][0]
+        self.assertEqual(branch["status"], "isolated")
+        self.assertEqual(branch["valve"]["valve_id"], "V2")
+        self.assertEqual(branch["context_devices"][0]["valve_id"], "V1")
+        self.assertEqual(branch["context_devices"][0]["availability_status"], "unavailable")
 
     def test_hilt_topology_crosses_companion_nozzle_attachment_into_process_network(self):
         payload = {
@@ -415,6 +441,36 @@ class IsolationPolicyTests(unittest.TestCase):
         )
         self.assertEqual([item["candidate_id"] for item in selectable_with_conditional], ["auto", "manual"])
 
+    def test_unavailable_candidate_is_removed_before_visual_selection(self):
+        pool = [
+            {"candidate_id": "faulty", "visual_id": "drawing-faulty", "policy_decision": "automatic"},
+            {"candidate_id": "next", "visual_id": "drawing-next", "policy_decision": "automatic"},
+        ]
+        corrections = [{
+            "change_type": "mark_point_unavailable",
+            "target_id": "faulty",
+            "justification": "stem seized",
+            "proposed_change": {"drawing_entity_id": "drawing-faulty"},
+        }]
+
+        projected = _apply_availability_to_candidate_pool(pool, corrections)
+        selectable = _selectable_candidate_pool(projected, IsolationPolicy())
+
+        self.assertFalse(projected[0]["available_for_isolation"])
+        self.assertEqual([item["candidate_id"] for item in selectable], ["next"])
+
+    def test_return_to_service_restores_candidate_before_selection(self):
+        pool = [{"candidate_id": "v1", "policy_decision": "automatic"}]
+        corrections = [
+            {"change_type": "mark_point_unavailable", "target_id": "v1", "justification": "repair"},
+            {"change_type": "mark_point_available", "target_id": "v1", "justification": "tested"},
+        ]
+
+        projected = _apply_availability_to_candidate_pool(pool, corrections)
+
+        self.assertTrue(projected[0]["available_for_isolation"])
+        self.assertEqual(_selectable_candidate_pool(projected, IsolationPolicy()), projected)
+
     def test_candidate_bbox_falls_back_to_exact_hilt_uuid(self):
         hilt = {
             "hilt_graph": {
@@ -502,6 +558,16 @@ class IsolationPolicyTests(unittest.TestCase):
         self.assertEqual(validation["assurance_status"], "not_isolated")
         self.assertTrue(validation["isolation_validation"]["terminal"])
         self.assertIn("No selected candidate has deterministic isolation barrier evidence", validation["isolation_validation"]["rationale"])
+
+    def test_unavailable_valve_is_excluded_from_evidence_and_validation(self):
+        candidate = find_candidates(_boundary_with_candidate("gate_valve"), IsolationPolicy())["candidates"][0]
+        candidate.update(availability_status="unavailable", available_for_isolation=False, unavailable_reason="stem seized")
+        data = build_evidence({"candidates": [candidate], "debug": {}}, RunConfig(equipment_tag="T-1"))
+        validation = validate({**data, "required_evidence_checks": []})
+
+        self.assertEqual(data["evidence_state"]["barrier_candidate_ids"], [])
+        self.assertEqual(data["evidence_state"]["unavailable_candidate_ids"], ["V1"])
+        self.assertEqual(validation["assurance_status"], "not_isolated")
 
 
 def _boundary_with_candidate(entity_class):

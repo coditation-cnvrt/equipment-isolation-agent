@@ -130,6 +130,18 @@ def resolve_bboxes(candidate_data, config):
     candidate_pool = _attach_hilt_source_context(candidate_pool, hilt_source_context)
     flow_roles = classify_nozzle_flow(hilt_payload) if hilt_payload else {}
     candidate_pool = _attach_flow_roles(candidate_pool, flow_roles)
+    # Availability changes must participate in candidate selection itself.  If
+    # they are applied only after this stage, removing the selected point leaves
+    # the source uncovered even when the fresh graph traversal found a usable
+    # point immediately behind it.
+    candidate_pool = _apply_availability_to_candidate_pool(
+        candidate_pool,
+        getattr(config, "approved_corrections", ()) or (),
+    )
+    unavailable_hilt_ids = _unavailable_hilt_target_ids(
+        candidate_pool,
+        getattr(config, "approved_corrections", ()) or (),
+    )
     # Resolve concrete HILT branches before marking companion lines as context.
     # Certain equipment symbols use a companion edge only to attach a nozzle to
     # the first flange; hilt_topology admits that edge solely when the flange has
@@ -141,6 +153,7 @@ def resolve_bboxes(candidate_data, config):
             _hilt_source_entries(candidate_pool),
             y_flip=y_flip_h,
             policy=config.policy,
+            unavailable_ids=unavailable_hilt_ids,
         )
         if hilt_payload and y_flip_h is not None
         else []
@@ -190,7 +203,13 @@ def resolve_bboxes(candidate_data, config):
     # can pick a geographically-near but topologically-wrong valve). HILT uses a
     # CAD y-axis (bottom-left); calibrate the flip to image coords via STLM nozzles.
     hilt_isolation_map = (
-        resolve_nozzle_isolation(hilt_payload, config.equipment_tag, y_flip=y_flip_h, policy=config.policy)
+        resolve_nozzle_isolation(
+            hilt_payload,
+            config.equipment_tag,
+            y_flip=y_flip_h,
+            policy=config.policy,
+            unavailable_ids=unavailable_hilt_ids,
+        )
         if hilt_payload and y_flip_h is not None
         else {}
     )
@@ -237,6 +256,7 @@ def resolve_bboxes(candidate_data, config):
                 if branch.get("status") == "isolated"
             ),
             "hilt_topology_authoritative_count": sum(1 for c in candidates if c.get("connectivity_source") == "hilt_topology"),
+            "unavailable_hilt_target_count": len(unavailable_hilt_ids),
             "hilt_y_flip_calibrated": y_flip_h,
         }
     )
@@ -254,6 +274,72 @@ def resolve_bboxes(candidate_data, config):
         "_stlm_payload": stlm_payload,
         "debug": debug,
     }
+
+
+def _unavailable_hilt_target_ids(candidate_pool, corrections):
+    """Resolve final unavailable state to exact HILT identities before topology selection."""
+    unavailable = set()
+    for correction in corrections or ():
+        kind = str(correction.get("change_type") or "")
+        if kind not in {"mark_point_unavailable", "mark_point_available"}:
+            continue
+        target_id = str(correction.get("target_id") or "").strip()
+        proposed = correction.get("proposed_change") or {}
+        identities = {
+            str(proposed.get("drawing_entity_id") or "").strip(),
+        }
+        for candidate in candidate_pool or []:
+            values = {
+                str(candidate.get(key) or "").strip()
+                for key in ("candidate_id", "visual_node_id", "visual_id", "cnvrt_id")
+            }
+            if target_id and target_id in values:
+                identities.update(
+                    str(candidate.get(key) or "").strip()
+                    for key in ("visual_node_id", "visual_id")
+                )
+        identities.discard("")
+        if kind == "mark_point_unavailable":
+            unavailable.update(identities)
+        else:
+            unavailable.difference_update(identities)
+    return unavailable
+
+
+def _apply_availability_to_candidate_pool(candidate_pool, corrections):
+    """Project cumulative availability state onto fresh graph candidates.
+
+    Corrections use either the UniGraph candidate id or the drawing identity.
+    All exact usages of the same physical point are updated so selection can
+    continue through an unavailable point and choose a later barrier.
+    """
+    result = [dict(candidate) for candidate in candidate_pool or []]
+    for correction in corrections or ():
+        kind = str(correction.get("change_type") or "")
+        if kind not in {"mark_point_unavailable", "mark_point_available"}:
+            continue
+        proposed = correction.get("proposed_change") or {}
+        targets = {
+            str(correction.get("target_id") or "").strip(),
+            str(proposed.get("drawing_entity_id") or "").strip(),
+        }
+        targets.discard("")
+        for candidate in result:
+            identities = {
+                str(candidate.get(key) or "").strip()
+                for key in ("candidate_id", "visual_node_id", "visual_id", "cnvrt_id", "plan_point_id")
+            }
+            if not targets.intersection(identities):
+                continue
+            if kind == "mark_point_unavailable":
+                candidate["availability_status"] = "unavailable"
+                candidate["available_for_isolation"] = False
+                candidate["unavailable_reason"] = str(correction.get("justification") or "").strip()
+            else:
+                candidate["availability_status"] = "available"
+                candidate["available_for_isolation"] = True
+                candidate.pop("unavailable_reason", None)
+    return result
 
 
 def _resolve_candidate_bboxes(candidates, symbol_by_id, nozzle_symbol_by_parent_and_id, hilt_node_by_id=None):
@@ -704,5 +790,3 @@ def _mark_source_context(candidates, context_sources):
 
 
 _norm = normalize_tag
-
-

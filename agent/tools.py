@@ -18,6 +18,8 @@ from typing import Callable
 from bbox import resolve_bboxes
 from boundary import fetch_boundaries
 from candidates import find_candidates
+from correction_targets import enrich_approved_correction_targets
+from domain.corrections import apply_approved_corrections
 from domain.topology import normalize_tag
 from evidence import build_evidence
 from impact import analyze_downstream_impact as _analyze_downstream_impact
@@ -100,6 +102,7 @@ def t_find_candidates(session: AgentSession, **_) -> dict:
     if fatal:
         return fatal
     data = find_candidates(session.boundary_data, session.config.policy)
+    data = enrich_approved_correction_targets(data, session.boundary_data, session.config)
     session.candidate_data = data
     return _summarize_candidates(data)
 
@@ -109,6 +112,9 @@ def t_resolve_bboxes(session: AgentSession, **_) -> dict:
         return {"error": "call find_candidates first"}
     inferred = session.infer_job_from_candidates()
     data = resolve_bboxes(session.candidate_data, session.config)
+    # HILT topology is authoritative and may replace graph-selected candidates.
+    # Apply review decisions only after that final candidate set exists.
+    data = apply_approved_corrections(data, session.config.approved_corrections)
     session.bbox_data = data
     summary = _summarize_bbox(data)
     summary["job_id_used"] = session.config.resolved_job_id or ""
@@ -351,7 +357,16 @@ def t_set_isolation_order(session: AgentSession, ordered_uuids: list | None = No
     # Validate against the candidates LOTO actually uses (bbox-selected), which may
     # differ from the graph-ranked find_candidates set after visual selection.
     loto_source = session.validation_data or session.bbox_data or session.candidate_data
-    valid_uuids = {str(c.get("candidate_id")) for c in (loto_source.get("candidates") or [])}
+    validation = loto_source.get("isolation_validation") or {}
+    barrier_ids = {str(value) for value in validation.get("barrier_candidate_ids") or []}
+    has_barrier_selection = "barrier_candidate_ids" in validation
+    valid_uuids = {
+        str(c.get("candidate_id"))
+        for c in (loto_source.get("candidates") or [])
+        if c.get("available_for_isolation") is not False
+        and str(c.get("availability_status") or "").lower() != "unavailable"
+        and (not has_barrier_selection or str(c.get("candidate_id")) in barrier_ids)
+    }
     ordered = [str(u) for u in (ordered_uuids or []) if str(u) in valid_uuids]
     known = [u for u in ordered if u in valid_uuids]
     session.isolation_order = ordered
@@ -360,7 +375,11 @@ def t_set_isolation_order(session: AgentSession, ordered_uuids: list | None = No
         source = session.validation_data or session.evidence_data
         if session.instrument_context:
             source["instrument_context"] = session.instrument_context
+        if session.relief_analysis:
+            source.update(session.relief_analysis)
         session.loto_procedure = _build_loto_procedure(source, session.config, isolation_order=ordered)
+        if session.final_payload:
+            session.final_payload.setdefault("data", [{}])[0]["loto_procedure"] = session.loto_procedure
     return {
         "accepted_order": ordered,
         "valid_count": len(known),

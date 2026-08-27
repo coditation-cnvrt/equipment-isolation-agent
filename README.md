@@ -340,12 +340,39 @@ GET  /isolation-runs/{run_id}/trace
 POST /isolation-plans/from-run
 GET  /isolation-plans?equipment_tag=&job_id=&cnvrt_project_id=&collection_id=&unigraph_project_id=
 GET  /isolation-plans/{plan_id}
+GET  /isolation-plans/{plan_id}/versions/{version_id}
+GET  /isolation-plans/{plan_id}/versions/{version_id}/diff
+POST /isolation-plans/{plan_id}/changes
+GET  /isolation-plans/{plan_id}/changes
+POST /isolation-plans/{plan_id}/changes/{change_id}/approve
+POST /isolation-plans/{plan_id}/derive
 ```
 
 `POST /isolation-plans/from-run` idempotently promotes a succeeded persisted run
-to an immutable advisory draft (`isolation_plan` + version 1 + run link). The
+to an immutable, normalized advisory draft (`isolation_plan` + version 1 + run
+link, scope, assets, branches, points, steps, findings, and input snapshots). The
 latest draft is not active or authorised, and reopening it does not invoke the
 agent.
+
+Corrections never edit a version or its run result. A reviewer submits a typed
+change against the latest version, an authenticated reviewer approves it, and
+`/derive` locks every outstanding approved change before launching a complete
+child run. Advisory plans record audited self-approval; stricter plan modes
+require separation of duties. Successful runs create the next immutable plan version;
+failed runs remain in the parent-run tree and leave approved changes available
+for retry. The diff endpoint compares the complete child projection with its
+parent. See `docs/openapi.json` for the checked-in API contract.
+
+Supported draft-review corrections are accepting or rejecting a conditional
+manual-review candidate, confirming a bypass point, correcting a display label,
+adding a graph-identified manual point, reporting an isolation point unavailable
+(faulty, bypassed, or out of service), and returning a repaired point to service.
+An unavailable device remains visible for audit but contributes no barrier or
+LOTO action. HILT traversal continues through it to seek an alternate eligible
+barrier; without one, the affected process branch becomes unresolved and
+`validate()` reports that isolation is not demonstrated. Applied corrections are
+replayed in later derivations until a later correction explicitly changes their
+state. `validate()` remains authoritative.
 
 PostgreSQL is the API's sole persistence layer for run requests, status, events,
 results, traces, plans, and versions. The API writes no local run files. Drawing
