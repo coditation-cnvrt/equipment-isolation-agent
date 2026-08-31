@@ -3,24 +3,24 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from bbox import (
+from equipment_isolation.presentation.bbox import (
     _apply_availability_to_candidate_pool,
     _context_item_has_signal_line,
     _hilt_context_sources,
     _resolve_candidate_bboxes,
 )
-from bbox_util import _selectable_candidate_pool
-from hilt_index import _hilt_nodes_by_id
-from stlm_payload import _image_dimensions
-from visual_selection import (
+from equipment_isolation.presentation.bbox_util import _selectable_candidate_pool
+from equipment_isolation.integrations.hilt_index import _hilt_nodes_by_id
+from equipment_isolation.integrations.stlm_payload import _image_dimensions
+from equipment_isolation.presentation.visual_selection import (
     _select_visually_nearest_per_source,
     _sources_owning_isolation_valve,
 )
-from candidates import find_candidates
-from config import IsolationPolicy, RunConfig, apply_project_profile, load_project_profile
-from evidence import build_evidence
-from hilt_topology import resolve_nozzle_isolation, resolve_source_branch_isolation
-from validator import validate
+from equipment_isolation.core.candidates import find_candidates
+from equipment_isolation.config import IsolationPolicy, RunConfig, apply_project_profile, load_project_profile
+from equipment_isolation.core.evidence import build_evidence
+from equipment_isolation.integrations.hilt_topology import resolve_nozzle_isolation, resolve_source_branch_isolation
+from equipment_isolation.core.validator import validate
 
 
 class IsolationPolicyTests(unittest.TestCase):

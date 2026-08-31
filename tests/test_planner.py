@@ -1,7 +1,7 @@
 import unittest
 
-from config import RunConfig
-from planner import plan_requests
+from equipment_isolation.config import RunConfig
+from equipment_isolation.core.planner import plan_requests
 
 
 class PlannerDrawingEvidenceTests(unittest.TestCase):

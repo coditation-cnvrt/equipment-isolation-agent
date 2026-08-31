@@ -5,9 +5,9 @@ from uuid import UUID
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from api.models import CreateChangeRequest, DerivePlanRequest
-from api.plans import PlanDomainError
-from api.routes import approve_plan_change, create_plan_change, derive_plan, list_plan_changes
+from equipment_isolation.api.models import CreateChangeRequest, DerivePlanRequest
+from equipment_isolation.api.plans import PlanDomainError
+from equipment_isolation.api.routes import approve_plan_change, create_plan_change, derive_plan, list_plan_changes
 
 
 PLAN_ID = UUID("5fbaf888-bf86-4b23-b428-a609156c2f14")
@@ -116,6 +116,17 @@ class PlanCorrectionRouteTests(unittest.TestCase):
         )
         self.assertEqual(unavailable.change_type, "mark_point_unavailable")
         self.assertEqual(restored.change_type, "mark_point_available")
+        self.assertEqual(unavailable.proposed_change["operational_status"], "unavailable")
+        self.assertEqual(restored.proposed_change["operational_status"], "available")
+        with self.assertRaisesRegex(ValidationError, "operational_status"):
+            CreateChangeRequest(
+                raised_against_version_id=VERSION_ID,
+                change_type="mark_point_unavailable",
+                target_type="isolation_point",
+                target_id="v1",
+                proposed_change={"operational_status": "available"},
+                justification="Valve stem seized",
+            )
 
     def test_authenticated_actor_is_recorded_and_listed(self):
         request = self.request("7")

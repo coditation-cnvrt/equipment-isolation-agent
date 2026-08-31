@@ -4,7 +4,7 @@ Usage:
     uv run python scripts/verify_wheel.py dist/equipment_isolation-*.whl
 
 The wheel is extracted into a temporary directory and imported with an isolated
-Python path. This catches missing root modules and package data while ensuring
+Python path. This catches missing application modules and package data while ensuring
 application migrations do not leak into Alembic's third-party namespace.
 """
 from __future__ import annotations
@@ -17,27 +17,49 @@ from pathlib import Path
 
 
 REQUIRED_MEMBERS = {
-    "agent/docs/osha_1910_147.md",
-    "api/migrations/__init__.py",
-    "api/migrations/alembic.ini",
-    "api/migrations/env.py",
-    "api/migrations/script.py.mako",
-    "api/migrations/versions/__init__.py",
-    "api/migrations/versions/0001_current_schema.py",
-    "api/migrations/versions/0002_plan_corrections.py",
-    "api/migrations/versions/0003_scoped_asset_identity.py",
-    "api/migrations/versions/0004_plan_feedback_framework.py",
-    "api/migrations/versions/0005_feedback_constraint_names.py",
-    "config.py",
-    "domain/instrument_catalog.json",
-    "domain/feedback.py",
-    "instrument_context.py",
+    "agent.py",
+    "api.py",
+    "eval_compare.py",
+    "run.py",
+    "equipment_isolation/agent/docs/osha_1910_147.md",
+    "equipment_isolation/api/migrations/__init__.py",
+    "equipment_isolation/api/migrations/alembic.ini",
+    "equipment_isolation/api/migrations/env.py",
+    "equipment_isolation/api/migrations/script.py.mako",
+    "equipment_isolation/api/migrations/versions/__init__.py",
+    "equipment_isolation/api/migrations/versions/0001_current_schema.py",
+    "equipment_isolation/api/migrations/versions/0002_plan_corrections.py",
+    "equipment_isolation/api/migrations/versions/0003_scoped_asset_identity.py",
+    "equipment_isolation/api/migrations/versions/0004_plan_feedback_framework.py",
+    "equipment_isolation/api/migrations/versions/0005_feedback_constraint_names.py",
+    "equipment_isolation/config.py",
+    "equipment_isolation/domain/instrument_catalog.json",
+    "equipment_isolation/domain/feedback.py",
+    "equipment_isolation/core/instrument_context.py",
 }
 FORBIDDEN_MEMBERS = {
     "alembic/env.py",
     "alembic/versions/0001_current_schema.py",
+    "bbox.py",
+    "boundary.py",
+    "candidates.py",
+    "config.py",
+    "graph_client.py",
+    "instrument_context.py",
+    "loto.py",
+    "payload.py",
+    "validator.py",
+    "viewer.py",
 }
-FORBIDDEN_PREFIXES = ("tests/", "scripts/", "hilt-viewer-poc/")
+FORBIDDEN_PREFIXES = (
+    "agent/",
+    "api/",
+    "domain/",
+    "pipeline/",
+    "tests/",
+    "scripts/",
+    "hilt-viewer-poc/",
+)
 
 
 def verify_wheel(wheel_path: Path) -> None:
@@ -73,12 +95,18 @@ def verify_wheel(wheel_path: Path) -> None:
 import sys
 sys.path.insert(0, {str(install_root)!r})
 
-from agent.osha import list_osha_topics
-from agent.runner import run_agent_pipeline
-from api.db import migration_head_revision
-from api.service import execute_agent_request
-from instrument_context import load_instrument_catalog
-from run import main
+from importlib.metadata import distribution
+
+from agent import main as legacy_agent_main
+from api import main as legacy_api_main
+from eval_compare import main as legacy_eval_main
+from run import main as legacy_run_main
+from equipment_isolation.agent.osha import list_osha_topics
+from equipment_isolation.agent.runner import run_agent_pipeline
+from equipment_isolation.api.db import migration_head_revision
+from equipment_isolation.api.service import execute_agent_request
+from equipment_isolation.core.instrument_context import load_instrument_catalog
+from equipment_isolation.runner import main
 
 assert migration_head_revision() == "0005_feedback_constraint_names"
 assert list_osha_topics()
@@ -86,6 +114,21 @@ assert load_instrument_catalog().get("version")
 assert callable(run_agent_pipeline)
 assert callable(execute_agent_request)
 assert callable(main)
+assert callable(legacy_agent_main)
+assert callable(legacy_api_main)
+assert callable(legacy_eval_main)
+assert callable(legacy_run_main)
+scripts = {{
+    entry.name: entry.value
+    for entry in distribution("equipment-isolation").entry_points
+    if entry.group == "console_scripts"
+}}
+assert scripts == {{
+    "equipment-isolation": "equipment_isolation.runner:main",
+    "equipment-isolation-agent": "equipment_isolation.agent.cli:main",
+    "equipment-isolation-api": "equipment_isolation.api.__main__:main",
+    "equipment-isolation-eval": "equipment_isolation.evaluation:main",
+}}
 print("Installed-wheel runtime resources: OK")
 """
             completed = subprocess.run(

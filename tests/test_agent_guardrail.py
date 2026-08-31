@@ -11,7 +11,7 @@ import os
 import unittest
 from unittest import mock
 
-import agent.loop as loop
+import equipment_isolation.agent.loop as loop
 
 
 class _StubSession:

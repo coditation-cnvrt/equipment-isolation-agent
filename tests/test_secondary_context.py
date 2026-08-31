@@ -1,6 +1,6 @@
 import unittest
 
-from secondary_context import build_secondary_energy_context
+from equipment_isolation.core.secondary_context import build_secondary_energy_context
 
 
 class SecondaryContextTests(unittest.TestCase):

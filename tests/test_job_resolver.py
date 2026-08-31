@@ -4,8 +4,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from config import ApiConfig, RunConfig
-from job_resolver import resolve_job_from_boundary
+from equipment_isolation.config import ApiConfig, RunConfig
+from equipment_isolation.integrations.job_resolver import resolve_job_from_boundary
 
 
 def boundary(pnid="Janusz-2"):
@@ -48,7 +48,7 @@ class JobResolverTests(unittest.TestCase):
             "/projects/277/collections/206/jobs?name=Janusz-2"
         ] = {"results": [{"id": 2481, "name": "Janusz-2", "project": 277, "collection": 206}]}
 
-        with tempfile.TemporaryDirectory() as tmp, patch("job_resolver.Plant360Client", FakePlant360Client):
+        with tempfile.TemporaryDirectory() as tmp, patch("equipment_isolation.integrations.job_resolver.Plant360Client", FakePlant360Client):
             resolved, debug = resolve_job_from_boundary(
                 config(cnvrt_project_id="277", collection_id="206"),
                 boundary(),
@@ -61,7 +61,7 @@ class JobResolverTests(unittest.TestCase):
         self.assertEqual(FakePlant360Client.paths, ["/projects/277/collections/206/jobs?name=Janusz-2"])
 
     def test_boundary_job_reference_resolves_when_job_is_in_metadata_map(self):
-        with tempfile.TemporaryDirectory() as tmp, patch("job_resolver.Plant360Client", FakePlant360Client):
+        with tempfile.TemporaryDirectory() as tmp, patch("equipment_isolation.integrations.job_resolver.Plant360Client", FakePlant360Client):
             resolved, debug = resolve_job_from_boundary(
                 config(
                     cnvrt_project_id="277",
@@ -78,7 +78,7 @@ class JobResolverTests(unittest.TestCase):
         self.assertEqual(FakePlant360Client.paths, [])
 
     def test_boundary_job_reference_outside_metadata_map_is_fatal_for_configured_collection(self):
-        with tempfile.TemporaryDirectory() as tmp, patch("job_resolver.Plant360Client", FakePlant360Client):
+        with tempfile.TemporaryDirectory() as tmp, patch("equipment_isolation.integrations.job_resolver.Plant360Client", FakePlant360Client):
             resolved, debug = resolve_job_from_boundary(
                 config(
                     cnvrt_project_id="277",
@@ -94,7 +94,7 @@ class JobResolverTests(unittest.TestCase):
         self.assertEqual(debug["job_resolution_error"], "job_name_not_found_in_configured_collection")
 
     def test_configured_collection_miss_is_fatal_and_does_not_scan_global_jobs(self):
-        with tempfile.TemporaryDirectory() as tmp, patch("job_resolver.Plant360Client", FakePlant360Client):
+        with tempfile.TemporaryDirectory() as tmp, patch("equipment_isolation.integrations.job_resolver.Plant360Client", FakePlant360Client):
             resolved, debug = resolve_job_from_boundary(
                 config(cnvrt_project_id="277", collection_id="206"),
                 boundary(),
@@ -114,7 +114,7 @@ class JobResolverTests(unittest.TestCase):
                 }
             }
         }
-        with tempfile.TemporaryDirectory() as tmp, patch("job_resolver.Plant360Client", FakePlant360Client):
+        with tempfile.TemporaryDirectory() as tmp, patch("equipment_isolation.integrations.job_resolver.Plant360Client", FakePlant360Client):
             cache_path = Path(tmp) / "jobs.json"
             cache_path.write_text(json.dumps(cache_payload), encoding="utf-8")
             resolved, debug = resolve_job_from_boundary(
@@ -135,7 +135,7 @@ class JobResolverTests(unittest.TestCase):
                 }
             }
         }
-        with tempfile.TemporaryDirectory() as tmp, patch("job_resolver.Plant360Client", FakePlant360Client):
+        with tempfile.TemporaryDirectory() as tmp, patch("equipment_isolation.integrations.job_resolver.Plant360Client", FakePlant360Client):
             cache_path = Path(tmp) / "jobs.json"
             cache_path.write_text(json.dumps(cache_payload), encoding="utf-8")
             resolved, debug = resolve_job_from_boundary(
@@ -153,7 +153,7 @@ class JobResolverTests(unittest.TestCase):
             "count": 1,
             "results": [{"id": 999, "name": "Janusz-2"}],
         }
-        with tempfile.TemporaryDirectory() as tmp, patch("job_resolver.Plant360Client", FakePlant360Client):
+        with tempfile.TemporaryDirectory() as tmp, patch("equipment_isolation.integrations.job_resolver.Plant360Client", FakePlant360Client):
             resolved, debug = resolve_job_from_boundary(
                 config(cnvrt_project_id="", collection_id="206"),
                 boundary(),

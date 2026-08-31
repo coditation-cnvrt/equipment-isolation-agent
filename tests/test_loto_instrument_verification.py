@@ -1,6 +1,6 @@
 import unittest
 
-from loto import _open_gaps, _ordered_steps, _phase_6_verification
+from equipment_isolation.core.loto import _open_gaps, _ordered_steps, _phase_6_verification
 
 
 class LotoInstrumentVerificationTests(unittest.TestCase):

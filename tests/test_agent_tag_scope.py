@@ -11,7 +11,7 @@ agent to the same guarantee.
 import unittest
 from unittest import mock
 
-from config import RunConfig
+from equipment_isolation.config import RunConfig
 
 
 class _Session:
@@ -22,7 +22,7 @@ class _Session:
 
 def _fetch(session, **kwargs):
     """Call t_fetch_boundary with the graph and job resolution stubbed out."""
-    import agent.tools as tools
+    import equipment_isolation.agent.tools as tools
 
     with mock.patch.object(tools, "fetch_boundaries", return_value={"equipment_boundaries": []}), \
          mock.patch.object(tools, "resolve_job_from_boundary", side_effect=lambda c, d: (c, {})):

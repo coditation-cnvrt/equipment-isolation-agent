@@ -1,8 +1,8 @@
 import argparse
 import unittest
 
-from config import ApiConfig, RunConfig
-from pipeline.config_builder import build_run_config
+from equipment_isolation.config import ApiConfig, RunConfig
+from equipment_isolation.pipeline.config_builder import build_run_config
 
 
 class ConfigBuilderTests(unittest.TestCase):
@@ -47,7 +47,7 @@ class ConfigBuilderTests(unittest.TestCase):
         self.assertEqual(str(config.output_dir), "runs/abc")
 
     def test_agent_cli_adapter_uses_shared_builder_defaults(self):
-        from agent.cli import build_config
+        from equipment_isolation.agent.cli import build_config
 
         args = argparse.Namespace(
             equipment="P3",

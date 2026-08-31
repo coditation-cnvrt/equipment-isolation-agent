@@ -1,6 +1,6 @@
 """Golden-output regression harness for the deterministic pipeline.
 
-Runs `python -m run` for a fixed set of representative equipment tags and compares
+Runs the deterministic runner for a fixed set of representative equipment tags and compares
 the resulting UI JSON payload against a stored golden copy. This is the safety net
 for refactors that must not change pipeline behavior (e.g. consolidating shared
 logic, splitting bbox.py). It needs live JanusGraph + Plant360 access, so it is a
@@ -55,7 +55,16 @@ def run_pipeline(tag: str, out_dir: Path) -> dict:
     tag_dir = out_dir / tag
     tag_dir.mkdir(parents=True, exist_ok=True)
     result = subprocess.run(
-        [sys.executable, "-m", "run", "--equipment", tag, "--quiet", "--output-dir", str(tag_dir)],
+        [
+            sys.executable,
+            "-m",
+            "equipment_isolation.runner",
+            "--equipment",
+            tag,
+            "--quiet",
+            "--output-dir",
+            str(tag_dir),
+        ],
         cwd=REPO_ROOT,
         check=False,
         capture_output=True,

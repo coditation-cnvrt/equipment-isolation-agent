@@ -1,8 +1,8 @@
 import unittest
 from types import SimpleNamespace
 
-from instrument_context import analyze_hilt_instrument_context, parse_instrument_tag
-from loto import build_loto_procedure
+from equipment_isolation.core.instrument_context import analyze_hilt_instrument_context, parse_instrument_tag
+from equipment_isolation.core.loto import build_loto_procedure
 
 
 class InstrumentContextTests(unittest.TestCase):

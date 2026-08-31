@@ -2,9 +2,9 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from agent.tools import t_find_candidates, t_resolve_bboxes
-from domain.corrections import apply_approved_corrections
-from evidence import candidate_flags
+from equipment_isolation.agent.tools import t_find_candidates, t_resolve_bboxes
+from equipment_isolation.domain.corrections import apply_approved_corrections
+from equipment_isolation.core.evidence import candidate_flags
 
 
 def candidate(candidate_id="v1", decision="conditional_manual_review"):
@@ -39,14 +39,14 @@ class CorrectionApplicationTests(unittest.TestCase):
         )
         graph_result = {"candidates": [candidate()], "_candidate_pool": [candidate()], "debug": {}}
         hilt_result = {"candidates": [candidate()], "_candidate_pool": [candidate()], "debug": {}}
-        with mock.patch("agent.tools._fatal_job_resolution", return_value={}), mock.patch(
-            "agent.tools.find_candidates", return_value=graph_result
-        ), mock.patch("agent.tools._summarize_candidates", return_value={}):
+        with mock.patch("equipment_isolation.agent.tools._fatal_job_resolution", return_value={}), mock.patch(
+            "equipment_isolation.agent.tools.find_candidates", return_value=graph_result
+        ), mock.patch("equipment_isolation.agent.tools._summarize_candidates", return_value={}):
             t_find_candidates(session)
         self.assertEqual(session.candidate_data["candidates"][0]["tag_number"], "XV-1")
 
-        with mock.patch("agent.tools.resolve_bboxes", return_value=hilt_result), mock.patch(
-            "agent.tools._summarize_bbox", return_value={}
+        with mock.patch("equipment_isolation.agent.tools.resolve_bboxes", return_value=hilt_result), mock.patch(
+            "equipment_isolation.agent.tools._summarize_bbox", return_value={}
         ):
             t_resolve_bboxes(session)
         self.assertEqual(session.bbox_data["candidates"][0]["tag_number"], "XV-AUTHORITATIVE")
@@ -81,14 +81,15 @@ class CorrectionApplicationTests(unittest.TestCase):
         self.assertEqual([item["candidate_id"] for item in result["candidates"]], ["graph-v2"])
         self.assertEqual(result["correction_coverage"][0]["status"], "applied")
 
-    def test_manual_addition_does_not_duplicate_candidate_already_rediscovered(self):
+    def test_manual_addition_is_rejected_when_candidate_is_already_rediscovered(self):
         rediscovered = {**candidate("graph-v2"), "visual_node_id": "hilt-v2"}
         result = apply_approved_corrections(
             {"candidates": [rediscovered], "_candidate_pool": [rediscovered], "debug": {}},
             [correction("add_manual_isolation_point", "hilt-v2")],
         )
         self.assertEqual([item["candidate_id"] for item in result["candidates"]], ["graph-v2"])
-        self.assertEqual(result["correction_coverage"][0]["status"], "applied")
+        self.assertEqual(result["correction_coverage"][0]["status"], "failed")
+        self.assertIn("already present", result["correction_coverage"][0]["reason"])
 
     def test_manual_addition_rejects_ambiguous_drawing_identity(self):
         pool = [
@@ -109,6 +110,32 @@ class CorrectionApplicationTests(unittest.TestCase):
         self.assertEqual(point["candidate_id"], "v1")
         self.assertEqual(point["tag_number"], "XV-101")
         self.assertTrue(point["required_branch_isolation"])
+        self.assertEqual(point["policy_decision"], "automatic")
+        self.assertFalse(point["requires_manual_review"])
+
+    def test_bypass_confirmation_cannot_reinclude_an_accepted_point(self):
+        result = apply_approved_corrections(
+            {"candidates": [candidate(decision="automatic")], "debug": {}},
+            [correction("confirm_bypass")],
+        )
+        self.assertEqual(result["correction_coverage"][0]["status"], "failed")
+        self.assertIn("not valid", result["correction_coverage"][0]["reason"])
+
+    def test_availability_transitions_are_idempotent_after_early_topology_projection(self):
+        unavailable = candidate(decision="automatic")
+        unavailable.update(availability_status="unavailable", available_for_isolation=False)
+        unavailable_result = apply_approved_corrections(
+            {"candidates": [unavailable], "debug": {}},
+            [correction("mark_point_unavailable")],
+        )
+        available_result = apply_approved_corrections(
+            {"candidates": [candidate(decision="automatic")], "debug": {}},
+            [correction("mark_point_available")],
+        )
+        self.assertEqual(unavailable_result["correction_coverage"][0]["status"], "applied")
+        self.assertEqual(available_result["correction_coverage"][0]["status"], "applied")
+        self.assertIn("projected", unavailable_result["correction_coverage"][0]["reason"])
+        self.assertIn("projected", available_result["correction_coverage"][0]["reason"])
 
     def test_feedback_category_mismatch_cannot_reach_candidate_logic(self):
         mismatched = correction("correct_label", label="XV-101")

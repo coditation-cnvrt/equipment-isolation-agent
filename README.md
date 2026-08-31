@@ -4,10 +4,10 @@ Equipment isolation planner for LOTO (lock-out/tag-out). It resolves an
 isolation boundary from graph traversal and Plant360 APIs, validates assurance
 status, and builds an OSHA 1910.147(d) LOTO procedure.
 
-Two runners share the same deterministic domain modules:
+Two runners share the same deterministic application package:
 
-- **Deterministic runner (`run.py`)** — no LLM calls; pure graph traversal + APIs.
-- **Agentic runner (`agent/`)** — a Gemini LLM orchestrates the same deterministic
+- **Deterministic runner (`equipment_isolation.runner`)** — no LLM calls; pure graph traversal + APIs.
+- **Agentic runner (`equipment_isolation.agent`)** — a Gemini LLM orchestrates the same deterministic
   stages as tools (see [Agentic Runner](#agentic-runner-gemini-orchestrated)).
 
 > See `AGENTS.md` for the full command table, per-file architecture map, pipeline
@@ -36,20 +36,20 @@ below.
 ## Run
 
 ```bash
-uv run python -m run --equipment BT-11 --job-name pnid_2_bio_final --job-id 2100
+uv run equipment-isolation --equipment BT-11 --job-name pnid_2_bio_final --job-id 2100
 ```
 
 List available equipment tags from JanusGraph:
 
 ```bash
-uv run python -m run --list-equipment
+uv run equipment-isolation --list-equipment
 ```
 
 The list includes graph id, tag, name, entity class, job id, and PNID/job name
 when the equipment can be matched to STLM data. Limit it for quick browsing:
 
 ```bash
-uv run python -m run --list-equipment --equipment-limit 20
+uv run equipment-isolation --list-equipment --equipment-limit 20
 ```
 
 For bbox resolution, provide a Plant360 API token via `--auth-token` or the
@@ -79,30 +79,25 @@ impact → LOTO procedure → build final payload → download P&ID image → wr
 + HTML viewer.
 
 ```text
-run.py            CLI entrypoint, orchestrates the deterministic pipeline
-config.py         Runtime config dataclasses
-graph_client.py   Gremlin connection and vertex helpers
-boundary.py       Equipment/nozzle boundary traversal
-candidates.py     Deterministic isolation candidate selection
-bbox.py           STLM bbox resolver (merges AUTHORITATIVE HILT topology picks)
-hilt_topology.py  HILT nozzle<->valve connectivity resolver (AUTHORITATIVE)
-obligations.py    Process/isolation obligation analysis
-relief.py         Isolation scheme + relief-point detection
-impact.py         Downstream impact analysis
-instrument_context.py  Instrument context classification (advisory only)
-evidence.py       Evidence classification
-planner.py        Deterministic evidence-check rules
-validator.py      Assurance status validator (AUTHORITATIVE)
-loto.py           OSHA 1910.147(d) LOTO procedure sequencer
-output.py         UI payload and HTML overlay writer
-viewer.py         HTML overlay renderer
-image.py          P&ID image download
-domain/           Shared domain types: enums, models, classification, serialization
+equipment_isolation/
+├── runner.py        deterministic 15-stage runner
+├── config.py        runtime configuration dataclasses
+├── core/            isolation selection, analysis, LOTO, and validation
+├── integrations/    JanusGraph, UniGraph, HILT, STLM, and CNVRT clients
+├── presentation/    payload, bbox, overlay, and viewer rendering
+├── domain/          shared enums, models, identity, and feedback rules
+├── pipeline/        shared configuration and pipeline orchestration
+├── agent/           Gemini tool orchestrator over deterministic stages
+└── api/             FastAPI service, persistence, and packaged migrations
 ```
+
+The root `run.py`, `agent.py`, `api.py`, and `eval_compare.py` files are thin
+compatibility launchers. Application code must import through
+`equipment_isolation.*`.
 
 ## Agentic Runner (Gemini-orchestrated)
 
-The `agent/` package adds a runner where a Gemini LLM is the **orchestrator**. It
+The `equipment_isolation.agent` package adds a runner where a Gemini LLM is the **orchestrator**. It
 runs a tool-calling loop and decides which deterministic stage to call next. The
 deterministic modules above are shared with the agent and exposed as tools; the
 deterministic `validate()` remains the **authoritative** source of
@@ -118,7 +113,7 @@ verification in phase 6. Historical payloads are not assigned reconstructed
 readiness states.
 
 ```bash
-uv run python -m agent --equipment BT-11 --job-name pnid_2_bio_final --job-id 2100
+uv run equipment-isolation-agent --equipment BT-11 --job-name pnid_2_bio_final --job-id 2100
 ```
 
 Agent tools: `fetch_boundary`, `find_candidates`, `resolve_bboxes`,
@@ -224,7 +219,7 @@ uv run alembic check
 ```
 
 After editing ORM metadata, generate a candidate migration under
-`api/migrations/versions/`, review both directions, and inspect the SQL before
+`equipment_isolation/api/migrations/versions/`, review both directions, and inspect the SQL before
 applying it. The root `alembic.ini` is the CLI entry point; runtime startup
 resolves the same application-owned migration package through Python package
 resources, so installed wheels do not depend on a source checkout.
@@ -311,7 +306,7 @@ Optional connection-pool settings are `POSTGRES_POOL_MAX_SIZE` (default `8`) and
 ### Start the API
 
 ```bash
-uv run python -m api
+uv run equipment-isolation-api
 ```
 
 By default, the server listens on `0.0.0.0:8088`. Override with `EIA_HOST` and
@@ -430,5 +425,5 @@ uv run python -m unittest tests.test_relief       # a single module
 Compare the agent against the deterministic baseline across equipment:
 
 ```bash
-uv run python eval_compare.py BT-11 C-02
+uv run equipment-isolation-eval BT-11 C-02
 ```

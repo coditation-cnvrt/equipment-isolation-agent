@@ -1,6 +1,6 @@
 import unittest
 
-from validator import validate
+from equipment_isolation.core.validator import validate
 
 
 class ValidatorTests(unittest.TestCase):

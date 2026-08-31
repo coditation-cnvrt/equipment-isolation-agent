@@ -2,8 +2,8 @@ import unittest
 
 from unittest import mock
 
-from boundary import _fetch_selected_equipment_vertices, _verify_selected_asset
-from domain.identity import PlanningContext, SelectedAsset, SelectionSource
+from equipment_isolation.core.boundary import _fetch_selected_equipment_vertices, _verify_selected_asset
+from equipment_isolation.domain.identity import PlanningContext, SelectedAsset, SelectionSource
 
 
 class BoundaryIdentityTests(unittest.TestCase):

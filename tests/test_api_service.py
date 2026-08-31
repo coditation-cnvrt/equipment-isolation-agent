@@ -2,13 +2,13 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from api.service import list_project_equipment
+from equipment_isolation.api.service import list_project_equipment
 
 
 class EquipmentServiceTests(unittest.TestCase):
-    @patch("api.service.list_equipment")
-    @patch("api.service.Plant360Client")
-    @patch("api.service.config_from_equipment_request")
+    @patch("equipment_isolation.api.service.list_equipment")
+    @patch("equipment_isolation.api.service.Plant360Client")
+    @patch("equipment_isolation.api.service.config_from_equipment_request")
     def test_listing_validates_mapping_without_loading_pnid_reviews(
         self, config_from_request, client_class, list_equipment
     ):
@@ -36,9 +36,9 @@ class EquipmentServiceTests(unittest.TestCase):
         )
         list_equipment.assert_called_once_with(graph, 0)
 
-    @patch("api.service.list_equipment")
-    @patch("api.service.Plant360Client")
-    @patch("api.service.config_from_equipment_request")
+    @patch("equipment_isolation.api.service.list_equipment")
+    @patch("equipment_isolation.api.service.Plant360Client")
+    @patch("equipment_isolation.api.service.config_from_equipment_request")
     def test_listing_accepts_project_export_collection_fallback(
         self, config_from_request, client_class, list_equipment
     ):
@@ -66,9 +66,9 @@ class EquipmentServiceTests(unittest.TestCase):
         self.assertEqual(items, [{"id": "asset-1", "job_id": "2509"}])
         list_equipment.assert_called_once_with(graph, 0)
 
-    @patch("api.service.list_equipment")
-    @patch("api.service.Plant360Client")
-    @patch("api.service.config_from_equipment_request")
+    @patch("equipment_isolation.api.service.list_equipment")
+    @patch("equipment_isolation.api.service.Plant360Client")
+    @patch("equipment_isolation.api.service.config_from_equipment_request")
     def test_listing_rejects_unmapped_unigraph_project(
         self, config_from_request, client_class, list_equipment
     ):

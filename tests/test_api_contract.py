@@ -7,9 +7,9 @@ from unittest import mock
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from api.app import _validate_server_side_environment
-from api.models import EquipmentListRequest, IsolationRunRequest, RunStatus, SelectedAssetRequest
-from api.routes import (
+from equipment_isolation.api.app import _validate_server_side_environment
+from equipment_isolation.api.models import EquipmentListRequest, IsolationRunRequest, RunStatus, SelectedAssetRequest
+from equipment_isolation.api.routes import (
     create_run,
     equipment,
     health,
@@ -23,7 +23,7 @@ from api.routes import (
     run_result,
     run_status,
 )
-from api.service import (
+from equipment_isolation.api.service import (
     config_from_run_request,
     get_cnvrt_hilt_graph,
     get_hilt_ui_symbols,
@@ -32,7 +32,7 @@ from api.service import (
     list_cnvrt_projects,
     list_unigraph_projects,
 )
-from api.runs import RunRecord, RunStore, _error_detail
+from equipment_isolation.api.runs import RunRecord, RunStore, _error_detail
 
 
 def _payload(tag="P3"):
@@ -246,7 +246,7 @@ class ApiContractTests(unittest.TestCase):
 
     def test_create_run_can_use_server_side_plant360_token(self):
         os.environ["PLANT360_AUTH_TOKEN"] = "server-token"
-        with mock.patch("api.service.run_agent_pipeline", side_effect=lambda config, **_: _Result(config)):
+        with mock.patch("equipment_isolation.api.service.run_agent_pipeline", side_effect=lambda config, **_: _Result(config)):
             accepted = self._submit(token="")
             done = self._wait(accepted.run_id)
         self.assertEqual(done["status"], "succeeded")
@@ -288,7 +288,7 @@ class ApiContractTests(unittest.TestCase):
 
     def test_equipment_lookup_uses_explicit_project_context(self):
         os.environ["PLANT360_AUTH_TOKEN"] = "server-token"
-        with mock.patch("api.routes.list_project_equipment", return_value=[{"tag": "P3"}]):
+        with mock.patch("equipment_isolation.api.routes.list_project_equipment", return_value=[{"tag": "P3"}]):
             response = equipment(
                 EquipmentListRequest(
                     cnvrt_project_id="277",
@@ -300,7 +300,7 @@ class ApiContractTests(unittest.TestCase):
 
     def test_planning_context_projects_forwards_bearer_token(self):
         projects = [{"id": "277", "name": "Aker", "status": "ready"}]
-        with mock.patch("api.routes.list_cnvrt_projects", return_value=projects) as project_lookup:
+        with mock.patch("equipment_isolation.api.routes.list_cnvrt_projects", return_value=projects) as project_lookup:
             response = planning_context_projects(authorization=self._read_auth("user-token"))
 
         self.assertEqual(response, {"items": projects})
@@ -314,7 +314,7 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(caught.exception.detail["kind"], "missing_auth_token")
 
     def test_planning_context_projects_hides_upstream_failure(self):
-        with mock.patch("api.routes.list_cnvrt_projects", side_effect=RuntimeError("CNVRT details")):
+        with mock.patch("equipment_isolation.api.routes.list_cnvrt_projects", side_effect=RuntimeError("CNVRT details")):
             with self.assertRaises(HTTPException) as caught:
                 planning_context_projects(authorization=self._read_auth())
         self.assertEqual(caught.exception.status_code, 502)
@@ -331,7 +331,7 @@ class ApiContractTests(unittest.TestCase):
             ],
         }
         with mock.patch.dict(os.environ, {"CNVRT_API_BASE_URL": "https://cnvrt.internal.example/"}):
-            with mock.patch("api.service.Plant360Client", return_value=client) as client_class:
+            with mock.patch("equipment_isolation.api.service.Plant360Client", return_value=client) as client_class:
                 projects = list_cnvrt_projects("user-token")
 
         self.assertEqual(
@@ -359,7 +359,7 @@ class ApiContractTests(unittest.TestCase):
                 "results": [{"id": 277, "name": "Aker", "status": "created"}],
             },
         ]
-        with mock.patch("api.service.Plant360Client", return_value=client):
+        with mock.patch("equipment_isolation.api.service.Plant360Client", return_value=client):
             projects = list_cnvrt_projects("user-token")
 
         self.assertEqual([project["id"] for project in projects], ["314", "277"])
@@ -367,7 +367,7 @@ class ApiContractTests(unittest.TestCase):
 
     def test_planning_context_collections_forwards_project_and_bearer_token(self):
         collections = [{"id": "206", "name": "Unit"}]
-        with mock.patch("api.routes.list_cnvrt_collections", return_value=collections) as collection_lookup:
+        with mock.patch("equipment_isolation.api.routes.list_cnvrt_collections", return_value=collections) as collection_lookup:
             response = planning_context_collections(277, authorization=self._read_auth("user-token"))
 
         self.assertEqual(response, {"items": collections})
@@ -382,7 +382,7 @@ class ApiContractTests(unittest.TestCase):
                 {"id": 207, "name": "Utilities"},
             ],
         }
-        with mock.patch("api.service.Plant360Client", return_value=client):
+        with mock.patch("equipment_isolation.api.service.Plant360Client", return_value=client):
             collections = list_cnvrt_collections(277, "user-token")
 
         self.assertEqual(
@@ -403,7 +403,7 @@ class ApiContractTests(unittest.TestCase):
             },
             {"next": None, "results": [{"id": 207, "name": "Utilities"}]},
         ]
-        with mock.patch("api.service.Plant360Client", return_value=client):
+        with mock.patch("equipment_isolation.api.service.Plant360Client", return_value=client):
             collections = list_cnvrt_collections(277, "user-token")
 
         self.assertEqual([collection["id"] for collection in collections], ["206", "207"])
@@ -422,7 +422,7 @@ class ApiContractTests(unittest.TestCase):
                 "input_file_type": "pdf",
             }
         ]
-        with mock.patch("api.routes.list_cnvrt_drawings", return_value=drawings) as drawing_lookup:
+        with mock.patch("equipment_isolation.api.routes.list_cnvrt_drawings", return_value=drawings) as drawing_lookup:
             response = planning_context_drawings(277, 206, authorization=self._read_auth("user-token"))
 
         self.assertEqual(response, {"items": drawings})
@@ -430,7 +430,7 @@ class ApiContractTests(unittest.TestCase):
 
     def test_planning_context_hilt_graph_forwards_job_and_bearer_token(self):
         payload = {"hilt_graph": {"nodes": [], "links": [], "imageSize": {"width": 1, "height": 1}}}
-        with mock.patch("api.routes.get_cnvrt_hilt_graph", return_value=payload) as graph_lookup:
+        with mock.patch("equipment_isolation.api.routes.get_cnvrt_hilt_graph", return_value=payload) as graph_lookup:
             response = planning_context_hilt_graph(2100, authorization=self._read_auth("user-token"))
 
         self.assertEqual(response, payload)
@@ -438,7 +438,7 @@ class ApiContractTests(unittest.TestCase):
 
     def test_planning_context_symbols_forwards_hilt_symbol_project_and_bearer_token(self):
         payload = [{"pid_entity_type": "equipment", "pid_entity_class": "pump", "svg": "<svg/>"}]
-        with mock.patch("api.routes.get_hilt_ui_symbols", return_value=payload) as symbol_lookup:
+        with mock.patch("equipment_isolation.api.routes.get_hilt_ui_symbols", return_value=payload) as symbol_lookup:
             response = planning_context_symbols(274, authorization=self._read_auth("user-token"))
 
         self.assertEqual(response, payload)
@@ -448,7 +448,7 @@ class ApiContractTests(unittest.TestCase):
         client = mock.Mock()
         client.hilt_graph.return_value = {"hilt_graph": {"nodes": [], "links": []}}
         client.get_json.return_value = []
-        with mock.patch("api.service.Plant360Client", return_value=client):
+        with mock.patch("equipment_isolation.api.service.Plant360Client", return_value=client):
             self.assertIn("hilt_graph", get_cnvrt_hilt_graph(2100, "user-token"))
             self.assertEqual(get_hilt_ui_symbols(274, "user-token"), [])
 
@@ -470,7 +470,7 @@ class ApiContractTests(unittest.TestCase):
                 }
             ],
         }
-        with mock.patch("api.service.Plant360Client", return_value=client):
+        with mock.patch("equipment_isolation.api.service.Plant360Client", return_value=client):
             drawings = list_cnvrt_drawings(277, 206, "user-token")
 
         self.assertEqual(
@@ -498,7 +498,7 @@ class ApiContractTests(unittest.TestCase):
                 "has_taxonomy": True,
             }
         ]
-        with mock.patch("api.routes.list_unigraph_projects", return_value=projects) as project_lookup:
+        with mock.patch("equipment_isolation.api.routes.list_unigraph_projects", return_value=projects) as project_lookup:
             response = planning_context_unigraph_projects(277, 206, authorization=self._read_auth("user-token"))
 
         self.assertEqual(response, {"items": projects})
@@ -530,7 +530,7 @@ class ApiContractTests(unittest.TestCase):
             {"collections": [{"cnvrt_collection_id": 207}]},
         ]
         with mock.patch.dict(os.environ, {"UNIGRAPH_API_BASE_URL": "https://unigraph.internal.example/"}):
-            with mock.patch("api.service.Plant360Client", return_value=client) as client_class:
+            with mock.patch("equipment_isolation.api.service.Plant360Client", return_value=client) as client_class:
                 projects = list_unigraph_projects(277, 206, "user-token")
 
         self.assertEqual(client_class.call_args.args[0].base_url, "https://unigraph.internal.example")
@@ -547,7 +547,7 @@ class ApiContractTests(unittest.TestCase):
         )
 
     def test_run_lifecycle_returns_payload_unmodified(self):
-        with mock.patch("api.service.run_agent_pipeline", side_effect=lambda config, **_: _Result(config)):
+        with mock.patch("equipment_isolation.api.service.run_agent_pipeline", side_effect=lambda config, **_: _Result(config)):
             accepted = self._submit()
             self.assertIn(accepted.status, {"queued", "running"})
             done = self._wait(accepted.run_id)
@@ -560,7 +560,7 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(result["data"][0]["isolation_points"], [{"uuid": "u1"}])
 
     def test_run_status_is_lightweight_and_result_endpoint_returns_payload(self):
-        with mock.patch("api.service.run_agent_pipeline", side_effect=lambda config, **_: _Result(config)):
+        with mock.patch("equipment_isolation.api.service.run_agent_pipeline", side_effect=lambda config, **_: _Result(config)):
             accepted = self._submit()
             done = self._wait(accepted.run_id)
 
@@ -571,7 +571,7 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(result["data"][0]["selected_equipment"], ["P3"])
 
     def test_run_status_response_model_does_not_serialize_result(self):
-        with mock.patch("api.service.run_agent_pipeline", side_effect=lambda config, **_: _Result(config)):
+        with mock.patch("equipment_isolation.api.service.run_agent_pipeline", side_effect=lambda config, **_: _Result(config)):
             accepted = self._submit()
             done = self._wait(accepted.run_id)
 
@@ -579,7 +579,7 @@ class ApiContractTests(unittest.TestCase):
         self.assertNotIn("result", public_status)
 
     def test_list_runs_returns_lightweight_summaries(self):
-        with mock.patch("api.service.run_agent_pipeline", side_effect=lambda config, **_: _Result(config)):
+        with mock.patch("equipment_isolation.api.service.run_agent_pipeline", side_effect=lambda config, **_: _Result(config)):
             accepted = self._submit()
             self._wait(accepted.run_id)
 
@@ -590,7 +590,7 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(response["items"][0]["request"]["job_id"], "")
 
     def test_list_runs_filters_by_persisted_planning_context(self):
-        with mock.patch("api.service.run_agent_pipeline", side_effect=lambda config, **_: _Result(config)):
+        with mock.patch("equipment_isolation.api.service.run_agent_pipeline", side_effect=lambda config, **_: _Result(config)):
             accepted = self._submit({"job_id": "2151", "job_name": "Drawing A"})
             self._wait(accepted.run_id)
 
@@ -609,7 +609,7 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(missing["items"], [])
 
     def test_failed_run_records_structured_error(self):
-        with mock.patch("api.service.run_agent_pipeline", side_effect=RuntimeError("boom")):
+        with mock.patch("equipment_isolation.api.service.run_agent_pipeline", side_effect=RuntimeError("boom")):
             accepted = self._submit()
             done = self._wait(accepted.run_id)
         self.assertEqual(done["status"], "failed")
@@ -618,7 +618,7 @@ class ApiContractTests(unittest.TestCase):
 
     def test_not_ok_run_persists_error_event(self):
         with mock.patch(
-            "api.runs.execute_agent_request",
+            "equipment_isolation.api.runs.execute_agent_request",
             return_value={"ok": False, "error": {"kind": "pipeline_error", "message": "not ok"}, "trace": []},
         ):
             accepted = self._submit()
@@ -644,7 +644,7 @@ class ApiContractTests(unittest.TestCase):
             time.sleep(0.2)
             return SlowResult(config)
 
-        with mock.patch("api.service.run_agent_pipeline", side_effect=slow):
+        with mock.patch("equipment_isolation.api.service.run_agent_pipeline", side_effect=slow):
             accepted = self._submit()
             with self.assertRaises(HTTPException) as caught:
                 run_result(self.request, accepted.run_id, authorization=self._read_auth())
@@ -676,7 +676,7 @@ class ApiContractTests(unittest.TestCase):
             time.sleep(2)
             return _Result(config)
 
-        with mock.patch("api.service.run_agent_pipeline", side_effect=stuck):
+        with mock.patch("equipment_isolation.api.service.run_agent_pipeline", side_effect=stuck):
             accepted = self._submit()
             done = self._wait(accepted.run_id)
         self.assertEqual(done["status"], "failed")
@@ -695,7 +695,7 @@ class ApiContractTests(unittest.TestCase):
                 time.sleep(1.5)
             return _Result(config)
 
-        with mock.patch("api.service.run_agent_pipeline", side_effect=first_slow_then_fast):
+        with mock.patch("equipment_isolation.api.service.run_agent_pipeline", side_effect=first_slow_then_fast):
             first = self._submit()
             second = self._submit(body={"equipment_tag": "P4"})
             first_done = self._wait(first.run_id)
@@ -707,7 +707,7 @@ class ApiContractTests(unittest.TestCase):
 
     def test_token_does_not_leak_to_status_result_or_trace(self):
         sentinel = "secret-token-123"
-        with mock.patch("api.service.run_agent_pipeline", side_effect=lambda config, **_: _Result(config)):
+        with mock.patch("equipment_isolation.api.service.run_agent_pipeline", side_effect=lambda config, **_: _Result(config)):
             accepted = self._submit(token=sentinel)
             status = self._wait(accepted.run_id)
             result = str(run_result(self.request, accepted.run_id, authorization=self._read_auth(sentinel)))

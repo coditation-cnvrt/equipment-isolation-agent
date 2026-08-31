@@ -1,8 +1,8 @@
 import unittest
 from unittest.mock import patch
 
-from config import ApiConfig, GraphConfig, RunConfig
-from unigraph_metadata import enrich_config_from_unigraph
+from equipment_isolation.config import ApiConfig, GraphConfig, RunConfig
+from equipment_isolation.integrations.unigraph_metadata import enrich_config_from_unigraph
 
 
 class FakePlant360Client:
@@ -60,7 +60,7 @@ class UnigraphMetadataTests(unittest.TestCase):
         )
 
     def test_loads_job_map_from_configured_unigraph_collection(self):
-        with patch("unigraph_metadata.Plant360Client", FakePlant360Client):
+        with patch("equipment_isolation.integrations.unigraph_metadata.Plant360Client", FakePlant360Client):
             config, debug = enrich_config_from_unigraph(self.config())
 
         self.assertEqual(debug["status"], "completed")
@@ -83,21 +83,21 @@ class UnigraphMetadataTests(unittest.TestCase):
             }
         )
 
-        with patch("unigraph_metadata.Plant360Client", FakePlant360Client):
+        with patch("equipment_isolation.integrations.unigraph_metadata.Plant360Client", FakePlant360Client):
             _config, debug = enrich_config_from_unigraph(self.config(project_id="20"))
 
         self.assertEqual(debug["status"], "completed")
         self.assertEqual(debug["selected_collection"]["id"], "74")
 
     def test_wrong_unigraph_project_for_cnvrt_project_is_fatal(self):
-        with patch("unigraph_metadata.Plant360Client", FakePlant360Client):
+        with patch("equipment_isolation.integrations.unigraph_metadata.Plant360Client", FakePlant360Client):
             _config, debug = enrich_config_from_unigraph(self.config(project_id="99"))
 
         self.assertTrue(debug["fatal"])
         self.assertEqual(debug["error"], "configured_unigraph_project_not_linked_to_cnvrt_project")
 
     def test_missing_configured_collection_is_fatal(self):
-        with patch("unigraph_metadata.Plant360Client", FakePlant360Client):
+        with patch("equipment_isolation.integrations.unigraph_metadata.Plant360Client", FakePlant360Client):
             _config, debug = enrich_config_from_unigraph(self.config(collection_id="999"))
 
         self.assertTrue(debug["fatal"])
@@ -111,7 +111,7 @@ class UnigraphMetadataTests(unittest.TestCase):
         }
         FakePlant360Client.responses["/api/projects/15/collections/57/pnids"] = {"pnids": [{"id": 223}]}
 
-        with patch("unigraph_metadata.Plant360Client", FakePlant360Client):
+        with patch("equipment_isolation.integrations.unigraph_metadata.Plant360Client", FakePlant360Client):
             config, debug = enrich_config_from_unigraph(self.config())
 
         self.assertEqual(debug["status"], "completed")

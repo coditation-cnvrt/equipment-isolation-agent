@@ -5,7 +5,7 @@ from unittest import mock
 import httpx
 from fastapi import FastAPI, Request
 
-from api.auth import CnvrtAuthMiddleware
+from equipment_isolation.api.auth import CnvrtAuthMiddleware
 
 
 class _AsyncClient:
@@ -48,7 +48,7 @@ class CnvrtAuthMiddlewareTests(unittest.TestCase):
                 "authorization": request.headers.get("Authorization"),
             }
 
-        self.patch = mock.patch("api.auth.AsyncClient", _AsyncClient)
+        self.patch = mock.patch("equipment_isolation.api.auth.AsyncClient", _AsyncClient)
         self.patch.start()
         self.app = app
 

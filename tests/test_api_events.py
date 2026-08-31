@@ -2,8 +2,8 @@ import json
 import unittest
 from types import SimpleNamespace
 
-from api.events import compact_event, sse_frame
-from api.runs import event_stream
+from equipment_isolation.api.events import compact_event, sse_frame
+from equipment_isolation.api.runs import event_stream
 
 
 class _EventRepository:

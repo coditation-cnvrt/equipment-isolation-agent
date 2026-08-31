@@ -1,8 +1,8 @@
 import unittest
 from dataclasses import replace
 
-from boundary import _walk_component_topology
-from config import IsolationPolicy
+from equipment_isolation.core.boundary import _walk_component_topology
+from equipment_isolation.config import IsolationPolicy
 
 
 def vertex(identifier, entity_class):

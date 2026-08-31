@@ -6,9 +6,9 @@ from uuid import UUID
 
 from fastapi import HTTPException, Response
 
-from api.models import CreateIsolationPlanFromRunRequest, IsolationPlanDetail
-from api.plans import PlanDomainError, canonical_hash, derivation_status, normalized_plan_content, plan_content_diff, validate_promotable_result
-from api.routes import create_plan_from_run, list_plans, plan_detail
+from equipment_isolation.api.models import CreateIsolationPlanFromRunRequest, IsolationPlanDetail
+from equipment_isolation.api.plans import PlanDomainError, canonical_hash, derivation_status, normalized_plan_content, plan_content_diff, validate_promotable_result
+from equipment_isolation.api.routes import create_plan_from_run, list_plans, plan_detail
 
 
 PLAN_ID = "5fbaf888-bf86-4b23-b428-a609156c2f14"
@@ -129,6 +129,29 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(content["points"][0]["branch_keys"], ["branch-a", "branch-b"])
         self.assertEqual(content["branches"][1]["point_keys"], ["shared-v1"])
 
+    def test_normalized_points_record_authoritative_feedback_state(self):
+        result = {"data": [{
+            "assurance_status": "provisional_unproven_isolation",
+            "isolation_points": [
+                {"uuid": "accepted", "tag_number": "XV-1"},
+                {"uuid": "manual", "tag_number": "XV-2", "requires_manual_review": True},
+                {"uuid": "rejected", "tag_number": "XV-3"},
+                {"uuid": "unavailable", "tag_number": "XV-4", "available_for_isolation": False},
+            ],
+            "isolation_validation": {
+                "barrier_candidate_ids": ["accepted"],
+                "manual_review_candidate_ids": ["manual"],
+            },
+        }]}
+        content = normalized_plan_content({"equipment_tag": "N7"}, result)
+        states = {point["key"]: point["feedback_state"] for point in content["points"]}
+        self.assertEqual(states, {
+            "accepted": "accepted",
+            "manual": "manual_review",
+            "rejected": "excluded",
+            "unavailable": "unavailable",
+        })
+
     def test_step_normalization_uses_semantic_identity_not_position(self):
         request = {"equipment_tag": "N7"}
         first = normalized_plan_content(request, {"data": [{
@@ -217,7 +240,7 @@ class PlanTests(unittest.TestCase):
 
     def test_baseline_migration_contains_bridge_constraints(self):
         migration = (
-            files("api.migrations.versions")
+            files("equipment_isolation.api.migrations.versions")
             .joinpath("0001_current_schema.py")
             .read_text(encoding="utf-8")
         )

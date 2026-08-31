@@ -1,6 +1,6 @@
 import unittest
 
-from obligations import analyze_isolation_obligations
+from equipment_isolation.core.obligations import analyze_isolation_obligations
 
 
 class ObligationTests(unittest.TestCase):

@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from agent import cli
+from equipment_isolation.agent import cli
 
 
 class AgentCliTests(unittest.TestCase):
@@ -17,8 +17,8 @@ class AgentCliTests(unittest.TestCase):
             os.environ["GEMINI_API_KEY"] = "gemini-key"
             argv = ["agent", "--equipment", "P3", "--output-dir", tmp, "--quiet"]
             with mock.patch.object(sys, "argv", argv), \
-                 mock.patch("agent.cli.build_config", return_value=SimpleNamespace(equipment_tag="P3")), \
-                 mock.patch("agent.cli.run_agent_pipeline", side_effect=RuntimeError("Configured project metadata failed for equipment P3")), \
+                 mock.patch("equipment_isolation.agent.cli.build_config", return_value=SimpleNamespace(equipment_tag="P3")), \
+                 mock.patch("equipment_isolation.agent.cli.run_agent_pipeline", side_effect=RuntimeError("Configured project metadata failed for equipment P3")), \
                  mock.patch("sys.stderr"):
                 with self.assertRaises(SystemExit) as caught:
                     cli.main()

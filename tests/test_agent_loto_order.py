@@ -1,8 +1,8 @@
 import unittest
 
-from agent.session import AgentSession
-from agent.tools import t_set_isolation_order
-from config import RunConfig
+from equipment_isolation.agent.session import AgentSession
+from equipment_isolation.agent.tools import t_set_isolation_order
+from equipment_isolation.config import RunConfig
 
 
 def _candidate(candidate_id, available=True):

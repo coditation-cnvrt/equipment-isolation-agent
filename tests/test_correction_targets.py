@@ -2,8 +2,8 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from config import IsolationPolicy
-from correction_targets import _bfs_nearest_sources, enrich_approved_correction_targets
+from equipment_isolation.config import IsolationPolicy
+from equipment_isolation.core.correction_targets import _bfs_nearest_sources, enrich_approved_correction_targets
 
 
 TARGET = "04b611df-474b-452a-8a72-fb72f3aa641c"
@@ -47,7 +47,7 @@ class CorrectionTargetLookupTests(unittest.TestCase):
         self.assertEqual(result["source_ids"], ["100"])
         self.assertEqual(result["paths"]["100"], ["217240", "10", "20", "30", "40", "50", "100"])
 
-    @mock.patch("correction_targets._resolve_target_from_graph")
+    @mock.patch("equipment_isolation.core.correction_targets._resolve_target_from_graph")
     def test_approved_exact_target_is_added_to_candidate_pool(self, resolve):
         resolve.return_value = {
             "status": "resolved",
@@ -75,7 +75,7 @@ class CorrectionTargetLookupTests(unittest.TestCase):
         self.assertTrue(candidate["manual_target_lookup"])
         self.assertEqual(result["correction_target_resolution"][0]["status"], "resolved")
 
-    @mock.patch("correction_targets._resolve_target_from_graph")
+    @mock.patch("equipment_isolation.core.correction_targets._resolve_target_from_graph")
     def test_failed_or_ambiguous_lookup_does_not_fabricate_candidate(self, resolve):
         resolve.return_value = {"status": "ambiguous", "reason": "Exact target identity matched multiple UniGraph vertices."}
         result = enrich_approved_correction_targets({"candidates": [], "_candidate_pool": [], "debug": {}}, boundary(), config())

@@ -2,7 +2,7 @@ import json
 import unittest
 from pathlib import Path
 
-from api.app import app
+from equipment_isolation.api.app import app
 
 
 class OpenApiSpecTests(unittest.TestCase):

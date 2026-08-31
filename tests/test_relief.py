@@ -1,7 +1,7 @@
 import unittest
 
-from config import RunConfig
-from relief import analyze_isolation_schemes_and_relief
+from equipment_isolation.config import RunConfig
+from equipment_isolation.core.relief import analyze_isolation_schemes_and_relief
 
 
 class ReliefAndSchemeTests(unittest.TestCase):

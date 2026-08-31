@@ -6,16 +6,16 @@
 uv sync  # installs deps to .venv/
 
 # Run isolation for equipment (deterministic baseline, no LLM)
-uv run python -m run --equipment BT-11 --job-name pnid_2_bio_final --job-id 2100
+uv run equipment-isolation --equipment BT-11 --job-name pnid_2_bio_final --job-id 2100
 
 # Run the AGENTIC (Gemini-orchestrated) isolation runner
-uv run python -m agent --equipment BT-11 --job-name pnid_2_bio_final --job-id 2100
+uv run equipment-isolation-agent --equipment BT-11 --job-name pnid_2_bio_final --job-id 2100
 
 # Run the HTTP API for CNVRT integration
-uv run python -m api
+uv run equipment-isolation-api
 
 # List available equipment from JanusGraph
-uv run python -m run --list-equipment
+uv run equipment-isolation --list-equipment
 
 # Run unit tests (stdlib unittest — pytest is NOT installed)
 uv run python -m unittest discover -s tests
@@ -24,7 +24,7 @@ uv run python -m unittest discover -s tests
 uv run python -m unittest tests.test_isolation_policy
 
 # Compare agent vs deterministic baseline across equipment
-uv run python eval_compare.py BT-11 C-02
+uv run equipment-isolation-eval BT-11 C-02
 ```
 
 ## Environment
@@ -38,17 +38,17 @@ uv run python eval_compare.py BT-11 C-02
   `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`,
   `POSTGRES_PASSWORD`, `POSTGRES_SSLMODE`. Alembic migrations are the
   authoritative schema source; run `uv run alembic upgrade head` before startup.
-- `GEMINI_API_KEY` is required by the agentic runner (`python -m agent`); the deterministic `run.py` does not need it
-- `.env` is loaded by a hand-rolled parser in `run.py`/`agent/cli.py` (`load_dotenv`) — not python-dotenv
+- `GEMINI_API_KEY` is required by the agentic runner (`equipment-isolation-agent`); the deterministic runner does not need it
+- `.env` is loaded by `equipment_isolation.pipeline.env.load_dotenv` — not python-dotenv
 
 ## Key Commands
 
 | Task | Command |
 |------|---------|
 | Install deps | `uv sync` |
-| Run isolation (deterministic) | `uv run python -m run --equipment <TAG> [--job-name <NAME>] [--job-id <ID>]` |
-| Run isolation (agentic / Gemini) | `uv run python -m agent --equipment <TAG> [--model gemini-2.5-flash] [--max-steps 16]` |
-| Run API service | `uv run python -m api` |
+| Run isolation (deterministic) | `uv run equipment-isolation --equipment <TAG> [--job-name <NAME>] [--job-id <ID>]` |
+| Run isolation (agentic / Gemini) | `uv run equipment-isolation-agent --equipment <TAG> [--model gemini-2.5-flash] [--max-steps 16]` |
+| Run API service | `uv run equipment-isolation-api` |
 | Apply database migrations | `uv run alembic upgrade head` |
 | Show database revision | `uv run alembic current` |
 | Show migration head | `uv run alembic heads` |
@@ -57,9 +57,9 @@ uv run python eval_compare.py BT-11 C-02
 | Preview upgrade SQL | `uv run alembic upgrade head --sql` |
 | Verify ORM on disposable PostgreSQL | `uv run python scripts/verify_postgres_orm.py` |
 | Verify installed-wheel resources | `uv build --wheel && uv run python scripts/verify_wheel.py dist/equipment_isolation-*.whl` |
-| List equipment | `uv run python -m run --list-equipment [--equipment-limit N]` |
+| List equipment | `uv run equipment-isolation --list-equipment [--equipment-limit N]` |
 | Run tests | `uv run python -m unittest discover -s tests` |
-| Eval agent vs baseline | `uv run python eval_compare.py <TAG>...` (or `--limit N`) |
+| Eval agent vs baseline | `uv run equipment-isolation-eval <TAG>...` (or `--limit N`) |
 | API auth | `PLANT360_AUTH_TOKEN=xxx` env or `--auth-token xxx` |
 | Project context | Edit `project_config.json` or `--project-profile <NAME>` |
 | Custom graph host/source | `--host <IP> --port <PORT> --project-id <UNIGRAPH_ID>`; traversal source defaults to `graph<UNIGRAPH_ID>_traversal` |
@@ -68,10 +68,10 @@ uv run python eval_compare.py BT-11 C-02
 
 ## Database Migration Workflow
 
-- Alembic migrations under `api/migrations/versions/` are the authoritative
+- Alembic migrations under `equipment_isolation/api/migrations/versions/` are the authoritative
   schema history. The root `alembic.ini` supports repository CLI commands;
   runtime migration-head checks load the application-owned migration package
-  through `importlib.resources`. SQLAlchemy models in `api/db_models.py` define
+  through `importlib.resources`. SQLAlchemy models in `equipment_isolation/api/db_models.py` define
   the current runtime schema and stay internal to the repository layer.
 - After changing ORM metadata, run
   `uv run alembic revision --autogenerate -m "<description>"`, then explicitly
@@ -101,51 +101,29 @@ uv run python eval_compare.py BT-11 C-02
 ## Architecture
 
 ```
-run.py            CLI entrypoint, orchestrates 15-step deterministic pipeline
-config.py         Frozen dataclasses: GraphConfig, ApiConfig, IsolationPolicy, WorkScope, RunConfig
-graph_client.py   Gremlin connection (DriverRemoteConnection), vertex helpers
-boundary.py       Equipment/nozzle graph traversal
-candidates.py     Deterministic isolation candidate selection
-bbox.py           STLM bbox resolver (merges AUTHORITATIVE HILT topology picks)
-hilt_topology.py  HILT piping-topology resolver (AUTHORITATIVE nozzle<->valve connectivity)
-obligations.py    Process/isolation obligation analysis
-relief.py         Isolation scheme + relief-point detection
-impact.py         Downstream impact analysis over HILT process-line graph
-instrument_context.py  Instrument context classification (advisory, never upgrades status)
-job_resolver.py   Job/P&ID resolution from boundary context
-unigraph_metadata.py  Unigraph project metadata enrichment + job-id loading
-flow.py           HILT flow-direction classifier (nozzle inlet/outlet)
-evidence.py       Evidence classification (barrier/positive/verification)
-planner.py        Required evidence checks (deterministic rules)
-validator.py      Assurance status validation (AUTHORITATIVE)
-loto.py           OSHA 1910.147(d) LOTO procedure sequencer (fixed phase order)
-output.py         Final UI JSON payload builder
-viewer.py         HTML overlay renderer (bbox/overlay canvas)
-image.py          P&ID image download
-domain/           Shared domain layer: enums, models, classification, serialization
-eval_compare.py   Eval harness: agent vs deterministic baseline across equipment
-api/              FastAPI service for CNVRT integration; calls shared config + agent runner
-
-agent/            AGENTIC runner — Gemini orchestrates deterministic stages as tools
-  session.py      AgentSession: server-side pipeline state + audit trace
-  tools.py        Tool wrappers (compact summaries) + dispatch registry
-  prompts.py      System prompt (role, workflow, authoritative-validate rule)
-  loop.py         Gemini tool-calling loop (ReAct) with max_steps + guardrail
-  osha.py         Keyword RAG retriever over the bundled OSHA 1910.147 reference
-  docs/           Bundled OSHA 29 CFR 1910.147 reference
-  cli.py          `python -m agent` entrypoint
-  __main__.py     module runner
+equipment_isolation/
+├── runner.py        deterministic 15-stage runner
+├── evaluation.py    agent-versus-baseline harness
+├── config.py        GraphConfig, ApiConfig, IsolationPolicy, WorkScope, RunConfig
+├── core/            boundary, candidates, evidence, obligations, LOTO, validation
+├── integrations/    JanusGraph, UniGraph, HILT, STLM, CNVRT, image/job clients
+├── presentation/    bbox resolution, payload construction, overlays, viewer
+├── domain/          shared enums, models, classification, identity, feedback
+├── pipeline/        shared config builder, metadata stages, equipment listing
+├── agent/           Gemini orchestration, tools, session, OSHA reference
+└── api/             FastAPI routes, PostgreSQL repository, packaged migrations
 ```
 
-API design rule: `api/` must call `pipeline.config_builder.build_run_config`
-and `agent.runner.run_agent_pipeline`; it must not assemble its own `RunConfig`
+API design rule: `equipment_isolation.api` must call
+`equipment_isolation.pipeline.config_builder.build_run_config` and
+`equipment_isolation.agent.runner.run_agent_pipeline`; it must not assemble its own `RunConfig`
 or duplicate the agent post-run payload merge.
 
 API requests must supply project context explicitly: `cnvrt_project_id`,
 `collection_id`, and `unigraph_project_id`. The API must not rely on
 `project_config.json` / `active_profile`; those are CLI/dev conveniences only.
 
-### Agentic design (agent/)
+### Agentic design (`equipment_isolation.agent`)
 
 The LLM is the **orchestrator**: it runs a tool-calling loop and decides which
 deterministic stage to call next. The deterministic modules are preserved
@@ -167,7 +145,7 @@ Available agent tools: `fetch_boundary`, `find_candidates`, `resolve_bboxes`,
 `build_loto_procedure`, `set_isolation_order`, `analyze_downstream_impact`,
 `finalize_plan`.
 
-## Pipeline Steps (run.py)
+## Pipeline Steps (`equipment_isolation.runner`)
 
 15 deterministic stages: (1) resolve Unigraph project metadata, (2) fetch
 boundary from JanusGraph + resolve job, (3) select candidates, (4) resolve
@@ -182,7 +160,7 @@ HTML viewer.
 - Project context defaults from `project_config.json`; active profile is `aker_277` (`cnvrt_project_id=277`, `collection_id=206`, Unigraph `project_id=15`, traversal source `graph15_traversal`, host `44.217.77.13:18182`)
 - Use `--project-profile biodiesel_graph9` to run the older biodiesel/FT-18 context
 - API base URL: `https://api.plant360.ai:8080`; Unigraph metadata API base: `https://api.plant360.ai/plantgraph`
-- Fallback `JOB_IDS_BY_NAME` hardcoded in `config.py` (pnid_1_bio_final=2099, pnid_2_bio_final=2100, etc.)
+- Fallback `JOB_IDS_BY_NAME` lives in `equipment_isolation/config.py` (pnid_1_bio_final=2099, pnid_2_bio_final=2100, etc.)
 - Default output dir: `output/` (deterministic), `output_agent/` (agentic), repo-relative and git-ignored
 - Agent default model: `gemini-2.5-flash` (override via `GEMINI_MODEL` env or `--model`)
 - The API writes no local run files; PostgreSQL is authoritative for run and plan state
@@ -205,7 +183,7 @@ HTML viewer uses a blank canvas unless `--image-url` or the API image download s
 
 ## Gotchas
 
-- **No lint/type-check/CI** — `tests/` has unit tests (run via `unittest`, NOT pytest); `eval_compare.py` is the agent-vs-baseline regression check; no other automation
+- **No lint/type-check/CI** — `tests/` has unit tests (run via `unittest`, NOT pytest); `equipment-isolation-eval` is the agent-vs-baseline regression check; no other automation
 - **Tests are pure-logic** — they run offline in <1s and do NOT hit the graph or API
 - **Graph connection required** to actually run the pipeline — JanusGraph must be reachable at configured host/port
 - **API auth needed** for bboxes/P&ID image — without `PLANT360_AUTH_TOKEN`, bboxes stay empty
@@ -216,9 +194,10 @@ HTML viewer uses a blank canvas unless `--image-url` or the API image download s
 
 ## File Ownership
 
-- Deterministic pipeline code at project root (no subpackage); shared domain types in `domain/`
-- Agentic code in the `agent/` package
-- Single-module imports use absolute names (e.g., `from bbox import ...`)
+- All application code lives under the `equipment_isolation` package and uses
+  package-qualified imports. Root Python files are compatibility launchers only.
+- Deterministic logic belongs in `core/`, external systems in `integrations/`,
+  and payload/viewer concerns in `presentation/`.
 - Runtime persistence uses synchronous SQLAlchemy ORM sessions over the psycopg
   PostgreSQL driver. ORM entities must not leak into routes, Pydantic contracts,
   or deterministic safety-domain logic. Alembic owns schema history and every

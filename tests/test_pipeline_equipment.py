@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from pipeline.equipment import _job_id_from_pnid_reference, add_equipment_jobs, add_equipment_jobs_from_metadata
+from equipment_isolation.pipeline.equipment import _job_id_from_pnid_reference, add_equipment_jobs, add_equipment_jobs_from_metadata
 
 
 class EquipmentDrawingResolutionTests(unittest.TestCase):
@@ -22,7 +22,7 @@ class EquipmentDrawingResolutionTests(unittest.TestCase):
     def test_stlm_fallback_does_not_scan_drawings_when_jobs_are_resolved(self):
         items = [{"tag": "P3", "job_id": "2151", "job_name": "P3 source drawing"}]
 
-        with patch("pipeline.equipment.Plant360Client") as client:
+        with patch("equipment_isolation.pipeline.equipment.Plant360Client") as client:
             result = add_equipment_jobs(
                 items,
                 SimpleNamespace(auth_token="token"),

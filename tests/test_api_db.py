@@ -7,7 +7,7 @@ from importlib.resources import files
 from types import SimpleNamespace
 from unittest import mock
 
-from api.db import (
+from equipment_isolation.api.db import (
     PostgresConfig,
     PostgresRunRepository,
     _asset_scope_key,
@@ -16,9 +16,9 @@ from api.db import (
     migration_head_revision,
     postgres_config_from_env,
 )
-from api.db_models import Base, IsolationRun
-from api.models import IsolationRunRequest
-from api.runs import RunStore, event_stream
+from equipment_isolation.api.db_models import Base, IsolationRun
+from equipment_isolation.api.models import IsolationRunRequest
+from equipment_isolation.api.runs import RunStore, event_stream
 from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
 
@@ -110,7 +110,7 @@ class ApiDbTests(unittest.TestCase):
 
         @contextmanager
         def patched_inspection():
-            with mock.patch("api.db.inspect", return_value=inspector), mock.patch(
+            with mock.patch("equipment_isolation.api.db.inspect", return_value=inspector), mock.patch(
                 "alembic.runtime.migration.MigrationContext.configure",
                 return_value=migration_context,
             ):
@@ -122,7 +122,7 @@ class ApiDbTests(unittest.TestCase):
         self.assertEqual(migration_head_revision(), "0005_feedback_constraint_names")
 
     def test_migration_config_and_template_are_package_resources(self):
-        migration_package = files("api.migrations")
+        migration_package = files("equipment_isolation.api.migrations")
         self.assertTrue(migration_package.joinpath("alembic.ini").is_file())
         self.assertTrue(migration_package.joinpath("script.py.mako").is_file())
         self.assertTrue(
@@ -270,7 +270,7 @@ class ApiDbTests(unittest.TestCase):
             agent_result = {"steps_used": 1, "forced": [], "assurance_status": "not_isolated"}
             trace = [{"tool": "validate"}]
 
-        with mock.patch("api.service.run_agent_pipeline", return_value=_Result()):
+        with mock.patch("equipment_isolation.api.service.run_agent_pipeline", return_value=_Result()):
             record = store.create(request, "token")
             for _ in range(100):
                 snapshot = store.snapshot(store.get(record.run_id))
@@ -326,7 +326,7 @@ class ApiDbTests(unittest.TestCase):
             return {"ok": True, "payload": {"data": []}, "agent": {}, "trace": []}
 
         try:
-            with mock.patch("api.runs.execute_agent_request", side_effect=stuck):
+            with mock.patch("equipment_isolation.api.runs.execute_agent_request", side_effect=stuck):
                 running = store.create(first, "token")
                 queued = store.create(second, "token")
                 self.assertTrue(started.wait(1))

@@ -8,7 +8,7 @@ stable when the functions move to their own module.
 """
 import unittest
 
-from agent.summaries import (
+from equipment_isolation.agent.summaries import (
     _looks_like_uuid,
     _short,
     _summarize_boundary,

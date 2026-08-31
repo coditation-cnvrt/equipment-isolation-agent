@@ -10,7 +10,7 @@ that seam.
 """
 import unittest
 
-from agent.tools import DISPATCH, TOOL_NAMES, TOOL_SPECS
+from equipment_isolation.agent.tools import DISPATCH, TOOL_NAMES, TOOL_SPECS
 
 # Frozen from AGENTS.md "Available agent tools". Update deliberately: adding or
 # renaming a tool is a change to the agent's contract, not an implementation detail.

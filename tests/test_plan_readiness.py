@@ -1,7 +1,7 @@
 import unittest
 
-from domain.plan_readiness import build_plan_readiness
-from validator import validate
+from equipment_isolation.domain.plan_readiness import build_plan_readiness
+from equipment_isolation.core.validator import validate
 
 
 class PlanReadinessTests(unittest.TestCase):

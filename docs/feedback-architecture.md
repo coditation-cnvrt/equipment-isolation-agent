@@ -20,6 +20,13 @@ Existing supported actions map as follows:
 - `input_correction`: `correct_label`, `mark_point_unavailable`, `mark_point_available`.
 - `manual_observation`: `accept_manual_candidate`, `reject_manual_candidate`, `confirm_bypass`, `add_manual_isolation_point`.
 
+Point actions are state transitions, not a generic menu. Accepted barriers may
+be relabelled or reported unavailable; manual-review candidates may be accepted,
+accepted specifically for an alternate flow path, or rejected; excluded points
+cannot be rejected again; and unavailable points may only be relabelled or
+returned to service. Availability is independent of selection, so a known
+excluded candidate may still be reported physically unavailable.
+
 No requirement-deviation or execution-failure subtype is currently registered. Merely storing one of those category names cannot affect deterministic validation.
 
 ## Persistence
@@ -34,6 +41,10 @@ Feedback has no expiry date in the current increment. Later temporal plant-state
 - Category/subtype mismatches are rejected at the API and domain boundaries.
 - Unsupported subtypes cannot enter a derivation request.
 - Feedback targets the latest normalized plan version when submitted.
+- Feedback must be valid for the target's state in that version; no-op inclusion,
+  exclusion, availability, and missing-point requests are rejected.
+- Only one submitted or approved feedback record may be open for a target's
+  selection, availability, label, or addition behavior at a time.
 - Review decisions are append-only; projection fields on `plan_feedback` are compatibility/read-model fields.
 - Derivation always reruns the complete authoritative pipeline.
 - Failed or stale application is recorded, never silently treated as applied.

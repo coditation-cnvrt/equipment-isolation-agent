@@ -1,7 +1,7 @@
 import unittest
 
-from config import GraphConfig, RunConfig
-from domain.identity import (
+from equipment_isolation.config import GraphConfig, RunConfig
+from equipment_isolation.domain.identity import (
     DrawingEntityReference,
     ExternalIdentity,
     GeometryFallback,
@@ -11,7 +11,7 @@ from domain.identity import (
     SelectedAsset,
     SelectionSource,
 )
-from domain.models import BBox
+from equipment_isolation.domain.models import BBox
 
 
 class IdentityContractTests(unittest.TestCase):

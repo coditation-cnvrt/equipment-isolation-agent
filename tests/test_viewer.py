@@ -2,8 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from output import write_viewer
-from viewer import render_viewer_html
+from equipment_isolation.presentation.output import write_viewer
+from equipment_isolation.presentation.viewer import render_viewer_html
 
 
 def payload(**data_overrides):

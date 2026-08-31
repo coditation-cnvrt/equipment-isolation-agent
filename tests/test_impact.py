@@ -1,6 +1,6 @@
 import unittest
 
-from impact import analyze_hilt_downstream_impact
+from equipment_isolation.core.impact import analyze_hilt_downstream_impact
 
 
 def node(node_id, entity_class, tag, entity_type="component", bbox=None):

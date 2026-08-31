@@ -6,8 +6,8 @@ live JanusGraph, so this is the only offline guard on the payload envelope.
 """
 import unittest
 
-from config import RunConfig
-from output import build_final_payload
+from equipment_isolation.config import RunConfig
+from equipment_isolation.presentation.output import build_final_payload
 
 
 def _config(**overrides):

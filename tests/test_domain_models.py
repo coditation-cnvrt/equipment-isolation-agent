@@ -1,12 +1,12 @@
 import unittest
 
-from config import IsolationPolicy
-from domain.classification import class_matches, classify_candidate
-from domain.enums import ImpactSeverity, IsolationDecision
-from domain.models import BBox, DownstreamImpactWarning, IsolationCandidate
-from domain.serialization import to_jsonable
-from domain.topology import nozzle_belongs_to_equipment
-from evidence import candidate_flags
+from equipment_isolation.config import IsolationPolicy
+from equipment_isolation.domain.classification import class_matches, classify_candidate
+from equipment_isolation.domain.enums import ImpactSeverity, IsolationDecision
+from equipment_isolation.domain.models import BBox, DownstreamImpactWarning, IsolationCandidate
+from equipment_isolation.domain.serialization import to_jsonable
+from equipment_isolation.domain.topology import nozzle_belongs_to_equipment
+from equipment_isolation.core.evidence import candidate_flags
 
 
 class NozzleEquipmentMatchTests(unittest.TestCase):

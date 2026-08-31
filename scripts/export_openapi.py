@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from api.app import app
+from equipment_isolation.api.app import app
 
 
 def main() -> int:

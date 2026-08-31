@@ -1,6 +1,6 @@
 import unittest
 
-from domain.isolation_actions import (
+from equipment_isolation.domain.isolation_actions import (
     is_installed_positive_isolation,
     is_operable_barrier,
     operation_kind,

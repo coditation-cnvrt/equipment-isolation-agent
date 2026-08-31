@@ -1,7 +1,7 @@
 import unittest
 
-from config import RunConfig
-from loto import build_loto_procedure
+from equipment_isolation.config import RunConfig
+from equipment_isolation.core.loto import build_loto_procedure
 
 
 def candidate(candidate_id, entity_class, source="N1", tag=None):

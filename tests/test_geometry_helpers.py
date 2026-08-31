@@ -13,15 +13,15 @@ copies must NOT be merged.
 """
 import unittest
 
-import bbox
-import bbox_geometry
-import hilt_index
-import impact
-import instrument_context
-import obligations
-import relief
-import viewer
-from domain.topology import normalize_tag, tag_prefix
+from equipment_isolation.presentation import bbox
+from equipment_isolation.presentation import bbox_geometry
+from equipment_isolation.integrations import hilt_index
+from equipment_isolation.core import impact
+from equipment_isolation.core import instrument_context
+from equipment_isolation.core import obligations
+from equipment_isolation.core import relief
+from equipment_isolation.presentation import viewer
+from equipment_isolation.domain.topology import normalize_tag, tag_prefix
 
 # Shared edge cases for bbox-shaped inputs.
 BBOX_CASES = [
@@ -210,8 +210,8 @@ class NormTests(unittest.TestCase):
     NORM_CASES = ["N-1", "n 1", "N_1", " N1 ", "", None, 0, "Valve-A B"]
 
     def test_the_six_normalize_tag_shims_are_all_equivalent(self):
-        import flow
-        import hilt_topology
+        from equipment_isolation.core import flow
+        from equipment_isolation.integrations import hilt_topology
 
         shims = [
             bbox._norm,
@@ -228,7 +228,7 @@ class NormTests(unittest.TestCase):
                     self.assertEqual(shim(case), expected)
 
     def test_run_norm_is_a_different_function(self):
-        import run
+        from equipment_isolation import runner as run
 
         # normalize_tag folds separators; run._norm does not. Merging would change
         # job-name / unit-name matching.
@@ -236,8 +236,8 @@ class NormTests(unittest.TestCase):
         self.assertNotEqual(run._norm("N-1"), run._norm("n 1"))
 
     def test_candidates_norm_normalizes_class_not_tag(self):
-        import candidates
-        from domain.classification import normalize_class
+        from equipment_isolation.core import candidates
+        from equipment_isolation.domain.classification import normalize_class
 
         for case in ("Ball Valve", "check-valve", None):
             with self.subTest(case=case):

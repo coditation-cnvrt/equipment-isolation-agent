@@ -26,11 +26,12 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, func, inspect, select
 
-from api.database import database_url, postgres_config_from_env
-from api.db import PostgresRunRepository, _get_or_create_asset
-from api.db_models import PathPoint
-from api.models import CreateChangeRequest
-from pipeline.env import load_dotenv
+from equipment_isolation.api.database import database_url, postgres_config_from_env
+from equipment_isolation.api.db import PostgresRunRepository, _get_or_create_asset
+from equipment_isolation.api.db_models import PathPoint
+from equipment_isolation.api.models import CreateChangeRequest
+from equipment_isolation.api.plans import PlanDomainError
+from equipment_isolation.pipeline.env import load_dotenv
 
 
 APP_TABLES = (
@@ -230,6 +231,51 @@ def _repository_smoke(repository: PostgresRunRepository) -> None:
     _require(len(revised["versions"]) == 2 and revised["versions"][0]["parent_plan_version_id"] == plan["latest_plan_version_id"], "Child plan version lineage failed")
     _require(repository.get_run(child.run_id)["parent_run_id"] == run_id, "Child run lineage failed")
     _require(repository.list_changes(plan["plan_id"])[0]["state"] == "applied", "Correction application ledger failed")
+    try:
+        repository.create_change(
+            plan["plan_id"],
+            CreateChangeRequest(
+                raised_against_version_id=revised["latest_plan_version_id"],
+                change_type="add_manual_isolation_point",
+                target_type="isolation_point",
+                target_id="manual-v2",
+                justification="Attempted duplicate point proposal.",
+            ),
+            "reviewer-1",
+        )
+    except PlanDomainError as error:
+        _require(error.kind == "point_already_present", "Duplicate point returned the wrong transition error")
+    else:
+        raise RuntimeError("Existing plan point was accepted as a missing point")
+    repository.create_change(
+        plan["plan_id"],
+        CreateChangeRequest(
+            raised_against_version_id=revised["latest_plan_version_id"],
+            change_type="correct_label",
+            target_type="candidate",
+            target_id="manual-v2",
+            proposed_change={"label": "XV-MANUAL-1"},
+            justification="First pending label correction.",
+        ),
+        "reviewer-1",
+    )
+    try:
+        repository.create_change(
+            plan["plan_id"],
+            CreateChangeRequest(
+                raised_against_version_id=revised["latest_plan_version_id"],
+                change_type="correct_label",
+                target_type="candidate",
+                target_id="manual-v2",
+                proposed_change={"label": "XV-MANUAL-2"},
+                justification="Conflicting pending label correction.",
+            ),
+            "reviewer-2",
+        )
+    except PlanDomainError as error:
+        _require(error.kind == "feedback_transition_pending", "Pending feedback returned the wrong transition error")
+    else:
+        raise RuntimeError("Conflicting open feedback was accepted")
     diff = repository.get_plan_version_diff(plan["plan_id"], revised["latest_plan_version_id"])
     _require(diff["summary"]["added"] > 0 and diff["summary"]["safety_significant"] > 0, "Structural version diff failed")
     with repository._session_factory.begin() as session:
@@ -240,7 +286,7 @@ def _repository_smoke(repository: PostgresRunRepository) -> None:
 
 
 async def _lifespan_smoke() -> None:
-    from api.app import create_app
+    from equipment_isolation.api.app import create_app
 
     app = create_app()
     async with app.router.lifespan_context(app):

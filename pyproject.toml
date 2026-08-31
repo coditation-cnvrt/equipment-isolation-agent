@@ -15,6 +15,12 @@ dependencies = [
     "uvicorn[standard]>=0.32",
 ]
 
+[project.scripts]
+equipment-isolation = "equipment_isolation.runner:main"
+equipment-isolation-agent = "equipment_isolation.agent.cli:main"
+equipment-isolation-api = "equipment_isolation.api.__main__:main"
+equipment-isolation-eval = "equipment_isolation.evaluation:main"
+
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
@@ -23,47 +29,18 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 py-modules = [
-    "api_client",
-    "bbox",
-    "bbox_geometry",
-    "bbox_util",
-    "boundary",
-    "candidates",
-    "config",
-    "correction_targets",
+    "agent",
+    "api",
     "eval_compare",
-    "evidence",
-    "flow",
-    "graph_client",
-    "hilt_index",
-    "hilt_merge",
-    "hilt_topology",
-    "image",
-    "impact",
-    "instrument_context",
-    "job_resolver",
-    "loto",
-    "obligations",
-    "output",
-    "payload",
-    "planner",
-    "relief",
     "run",
-    "secondary_context",
-    "stlm_payload",
-    "unigraph_metadata",
-    "validator",
-    "viewer",
-    "viewer_overlays",
-    "visual_selection",
 ]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["agent*", "api*", "domain*", "pipeline*"]
+include = ["equipment_isolation*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-"agent.docs" = ["*.md"]
-"api.migrations" = ["alembic.ini", "script.py.mako"]
-domain = ["instrument_catalog.json"]
+"equipment_isolation.agent.docs" = ["*.md"]
+"equipment_isolation.api.migrations" = ["alembic.ini", "script.py.mako"]
+"equipment_isolation.domain" = ["instrument_catalog.json"]
