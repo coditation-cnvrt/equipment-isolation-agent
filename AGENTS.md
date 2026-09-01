@@ -12,7 +12,7 @@ uv run equipment-isolation --equipment BT-11 --job-name pnid_2_bio_final --job-i
 uv run equipment-isolation-agent --equipment BT-11 --job-name pnid_2_bio_final --job-id 2100
 
 # Run the HTTP API for CNVRT integration
-uv run equipment-isolation-api
+uv run fastapi dev --port 8088
 
 # List available equipment from JanusGraph
 uv run equipment-isolation --list-equipment
@@ -48,7 +48,8 @@ uv run equipment-isolation-eval BT-11 C-02
 | Install deps | `uv sync` |
 | Run isolation (deterministic) | `uv run equipment-isolation --equipment <TAG> [--job-name <NAME>] [--job-id <ID>]` |
 | Run isolation (agentic / Gemini) | `uv run equipment-isolation-agent --equipment <TAG> [--model gemini-2.5-flash] [--max-steps 16]` |
-| Run API service | `uv run equipment-isolation-api` |
+| Run API service (development) | `uv run fastapi dev --port 8088` |
+| Run API service (production) | `uv run fastapi run --port 8088` |
 | Apply database migrations | `uv run alembic upgrade head` |
 | Show database revision | `uv run alembic current` |
 | Show migration head | `uv run alembic heads` |

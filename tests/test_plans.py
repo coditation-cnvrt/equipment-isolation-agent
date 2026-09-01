@@ -56,6 +56,12 @@ def _plan():
         "created_at": now,
         "latest_plan_version_id": VERSION_ID,
         "latest_version": version,
+        "freshness": {
+            "status": "fresh",
+            "reason": None,
+            "evaluated_at": now,
+            "changes": [],
+        },
         "versions": [version],
     }
 

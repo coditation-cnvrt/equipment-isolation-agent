@@ -102,6 +102,119 @@ class EquipmentListRequest(BaseModel):
         return value
 
 
+class AssetConditionAssetRequest(BaseModel):
+    """Exact source identity for a physical asset; labels are descriptive only."""
+
+    external_system: Literal["cnvrt_drawing_entity", "unigraph_candidate"]
+    external_id: str = Field(..., min_length=1)
+    tag: str = Field(..., min_length=1)
+    asset_class: str = ""
+    cnvrt_project_id: str = Field(..., min_length=1)
+    collection_id: str = Field(..., min_length=1)
+    unigraph_project_id: str = Field(..., min_length=1)
+    job_id: str = ""
+
+    @field_validator(
+        "external_id",
+        "tag",
+        "cnvrt_project_id",
+        "collection_id",
+        "unigraph_project_id",
+        mode="before",
+    )
+    @classmethod
+    def _strip_required_identity(cls, value: str) -> str:
+        value = str(value or "").strip()
+        if not value:
+            raise ValueError("field is required")
+        return value
+
+    @model_validator(mode="after")
+    def _drawing_identity_requires_job(self):
+        self.job_id = str(self.job_id or "").strip()
+        if self.external_system == "cnvrt_drawing_entity" and not self.job_id:
+            raise ValueError("job_id is required for a CNVRT drawing entity")
+        return self
+
+    def context(self) -> dict[str, str]:
+        return {
+            "cnvrt_project_id": self.cnvrt_project_id,
+            "collection_id": self.collection_id,
+            "unigraph_project_id": self.unigraph_project_id,
+            "job_id": self.job_id,
+        }
+
+
+class CreateAssetConditionRequest(BaseModel):
+    asset: AssetConditionAssetRequest
+    condition_type: Literal["unavailable"] = "unavailable"
+    reason_code: str | None = None
+    notes: str = Field(..., min_length=3, max_length=4000)
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    source_system: str | None = None
+    source_reference: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("notes", mode="before")
+    @classmethod
+    def _strip_notes(cls, value: str) -> str:
+        return str(value or "").strip()
+
+
+class AssetConditionActionRequest(BaseModel):
+    reason: str = Field(..., min_length=3, max_length=4000)
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def _strip_reason(cls, value: str) -> str:
+        return str(value or "").strip()
+
+
+class AssetConditionAssetDetail(BaseModel):
+    asset_ref_id: str
+    external_system: str
+    scope_key: str
+    external_id: str
+    tag: str
+    asset_class: str
+    context: dict[str, Any]
+
+
+class AssetConditionEventDetail(BaseModel):
+    event_id: str
+    event_type: Literal["reported", "confirmed", "cleared"]
+    actor_id: str
+    occurred_at: datetime
+    payload: dict[str, Any]
+
+
+class AssetConditionDetail(BaseModel):
+    condition_id: str
+    condition_type: Literal["unavailable"]
+    state: Literal["active", "cleared"]
+    reason_code: str | None = None
+    notes: str
+    evidence: dict[str, Any]
+    source_system: str | None = None
+    source_reference: dict[str, Any]
+    reported_by: str
+    reported_at: datetime
+    confirmed_by: str | None = None
+    confirmed_at: datetime | None = None
+    cleared_by: str | None = None
+    cleared_at: datetime | None = None
+    clear_reason: str | None = None
+    asset: AssetConditionAssetDetail
+    events: list[AssetConditionEventDetail] = Field(default_factory=list)
+
+
+class AssetConditionList(BaseModel):
+    items: list[AssetConditionDetail]
+    limit: int
+    offset: int
+    total: int
+
+
 class PlanningProject(BaseModel):
     id: str
     name: str
@@ -218,6 +331,20 @@ class PlanVersionSummary(BaseModel):
     source_run: PlanSourceRun
 
 
+class PlanFreshnessChange(BaseModel):
+    change_type: Literal["became_unavailable", "returned_to_service"]
+    condition_id: str
+    occurred_at: datetime
+    asset: AssetConditionAssetDetail
+
+
+class PlanFreshness(BaseModel):
+    status: Literal["fresh", "stale", "unknown"]
+    reason: Literal["asset_condition_changed"] | None = None
+    evaluated_at: datetime
+    changes: list[PlanFreshnessChange] = Field(default_factory=list)
+
+
 class IsolationPlanSummary(BaseModel):
     plan_id: str
     plan_number: str
@@ -228,6 +355,7 @@ class IsolationPlanSummary(BaseModel):
     created_at: datetime
     latest_plan_version_id: str
     latest_version: PlanVersionSummary
+    freshness: PlanFreshness
 
 
 class IsolationPlanDetail(IsolationPlanSummary):
@@ -345,6 +473,7 @@ class ChangeRequestList(BaseModel):
 
 class DerivePlanRequest(BaseModel):
     parent_plan_version_id: str
+    trigger: Literal["corrections", "asset_conditions"] = "corrections"
 
 
 class DerivationAccepted(BaseModel):

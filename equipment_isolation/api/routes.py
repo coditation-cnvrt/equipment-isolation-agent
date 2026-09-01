@@ -4,16 +4,20 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import Response, StreamingResponse
 
 from equipment_isolation.api.models import (
+    AssetConditionActionRequest,
+    AssetConditionDetail,
+    AssetConditionList,
     ChangeRequestDetail,
     ChangeRequestList,
     CreateIsolationPlanFromRunRequest,
+    CreateAssetConditionRequest,
     CreateChangeRequest,
     DerivationAccepted,
     DerivePlanRequest,
@@ -33,8 +37,10 @@ from equipment_isolation.api.models import (
     RunStatus,
 )
 from equipment_isolation.api.plans import PlanDomainError
+from equipment_isolation.api.events import asset_condition_event_stream
 from equipment_isolation.api.runs import RunStore, event_stream
 from equipment_isolation.api.service import (
+    authorize_planning_context,
     list_cnvrt_collections,
     list_cnvrt_drawings,
     get_cnvrt_drawing_image,
@@ -129,6 +135,40 @@ def _actor_id(request: Request) -> str:
     return str(actor)
 
 
+def _authorize_asset_scope(context: dict, authorization: str) -> None:
+    token = _require_run_read_auth(authorization)
+    try:
+        authorize_planning_context(context, token)
+    except PermissionError:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "kind": "asset_condition_scope_forbidden",
+                "message": "The authenticated user cannot access this equipment scope.",
+            },
+        ) from None
+    except Exception:
+        LOGGER.exception("Asset-condition scope authorization failed")
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "kind": "asset_condition_scope_authorization_failed",
+                "message": "Unable to verify access to this equipment scope.",
+            },
+        ) from None
+
+
+def _authorized_asset_condition(request: Request, condition_id: UUID, authorization: str):
+    item = _plan_repository(request).get_asset_condition(str(condition_id))
+    if item is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"kind": "unknown_asset_condition", "message": "Unknown asset condition."},
+        )
+    _authorize_asset_scope((item.get("asset") or {}).get("context") or {}, authorization)
+    return item
+
+
 @router.get("/health")
 def health():
     return {
@@ -155,6 +195,142 @@ def equipment(
             },
         )
     return {"items": list_project_equipment(request_body, token)}
+
+
+@router.post(
+    "/asset-conditions",
+    response_model=AssetConditionDetail,
+    status_code=201,
+)
+def create_asset_condition(
+    request: Request,
+    request_body: CreateAssetConditionRequest,
+    authorization: str = Header(default=""),
+):
+    _authorize_asset_scope(request_body.asset.context(), authorization)
+    try:
+        return _plan_repository(request).create_asset_condition(
+            request_body, _actor_id(request)
+        )
+    except PlanDomainError as error:
+        _raise_plan_error(error)
+
+
+@router.get("/asset-conditions", response_model=AssetConditionList)
+def list_asset_conditions(
+    request: Request,
+    cnvrt_project_id: str,
+    collection_id: str,
+    unigraph_project_id: str,
+    job_id: str = "",
+    state: Literal["active", "cleared", "all"] = "active",
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    authorization: str = Header(default=""),
+):
+    _authorize_asset_scope(
+        {
+            "cnvrt_project_id": cnvrt_project_id,
+            "collection_id": collection_id,
+            "unigraph_project_id": unigraph_project_id,
+            "job_id": job_id,
+        },
+        authorization,
+    )
+    items, total = _plan_repository(request).list_asset_conditions(
+        cnvrt_project_id=cnvrt_project_id,
+        collection_id=collection_id,
+        unigraph_project_id=unigraph_project_id,
+        job_id=job_id,
+        state=state,
+        limit=limit,
+        offset=offset,
+    )
+    return {
+        "items": items,
+        "limit": limit,
+        "offset": offset,
+        "total": total,
+    }
+
+
+@router.get("/asset-conditions/events")
+def asset_condition_events(
+    request: Request,
+    cnvrt_project_id: Annotated[str, Query(min_length=1)],
+    collection_id: Annotated[str, Query(min_length=1)],
+    unigraph_project_id: Annotated[str, Query(min_length=1)],
+    job_id: str = Query(default=""),
+    authorization: str = Header(default=""),
+    last_event_id: str = Header(default="", alias="Last-Event-ID"),
+):
+    context = {
+        "cnvrt_project_id": cnvrt_project_id,
+        "collection_id": collection_id,
+        "unigraph_project_id": unigraph_project_id,
+        "job_id": job_id,
+    }
+    _authorize_asset_scope(context, authorization)
+    repository = _plan_repository(request)
+    return StreamingResponse(
+        asset_condition_event_stream(
+            repository,
+            context,
+            last_event_id=last_event_id,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/asset-conditions/{condition_id}", response_model=AssetConditionDetail)
+def asset_condition_detail(
+    request: Request,
+    condition_id: UUID,
+    authorization: str = Header(default=""),
+):
+    return _authorized_asset_condition(request, condition_id, authorization)
+
+
+@router.post(
+    "/asset-conditions/{condition_id}/confirm",
+    response_model=AssetConditionDetail,
+)
+def confirm_asset_condition(
+    request: Request,
+    condition_id: UUID,
+    request_body: AssetConditionActionRequest,
+    authorization: str = Header(default=""),
+):
+    _authorized_asset_condition(request, condition_id, authorization)
+    try:
+        return _plan_repository(request).confirm_asset_condition(
+            str(condition_id), request_body, _actor_id(request)
+        )
+    except PlanDomainError as error:
+        _raise_plan_error(error)
+
+
+@router.post(
+    "/asset-conditions/{condition_id}/clear",
+    response_model=AssetConditionDetail,
+)
+def clear_asset_condition(
+    request: Request,
+    condition_id: UUID,
+    request_body: AssetConditionActionRequest,
+    authorization: str = Header(default=""),
+):
+    _authorized_asset_condition(request, condition_id, authorization)
+    try:
+        return _plan_repository(request).clear_asset_condition(
+            str(condition_id), request_body, _actor_id(request)
+        )
+    except PlanDomainError as error:
+        _raise_plan_error(error)
 
 
 @router.get("/planning-context/projects", response_model=PlanningProjectList)
@@ -583,7 +759,12 @@ def derive_plan(request: Request, plan_id: UUID, request_body: DerivePlanRequest
     actor_id = _actor_id(request)
     prepared = None
     try:
-        prepared = repository.prepare_derivation(str(plan_id), request_body.parent_plan_version_id, actor_id)
+        prepared = repository.prepare_derivation(
+            str(plan_id),
+            request_body.parent_plan_version_id,
+            actor_id,
+            trigger=request_body.trigger,
+        )
         derived_request = DerivedIsolationRunRequest.model_validate(prepared["request"])
         record = _store(request).create(derived_request, token, parent_run_id=prepared["parent_run_id"])
     except PlanDomainError as error:

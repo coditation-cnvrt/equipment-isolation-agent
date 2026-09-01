@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from importlib.resources import files
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Text, case, cast, func, inspect, literal, select
+from sqlalchemy import Text, case, cast, func, inspect, literal, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased, load_only
 
 from equipment_isolation.agent.session import jsonable
@@ -19,6 +20,8 @@ from equipment_isolation.api.database import (
     postgres_configured,
 )
 from equipment_isolation.api.db_models import (
+    AssetCondition,
+    AssetConditionEvent,
     AssetReference,
     AuditEvent,
     DerivationManifest,
@@ -37,6 +40,7 @@ from equipment_isolation.api.db_models import (
     PlanFeedback,
     PlanStep,
     PlanVersion,
+    PlanVersionAssetCondition,
     PlanVersionFeedback,
     PlanWorkScope,
     WorkScopeAsset,
@@ -60,6 +64,9 @@ from equipment_isolation.domain.feedback import (
     point_feedback_state,
     validate_feedback_category,
 )
+
+
+ASSET_EVENT_REPLAY_OVERLAP = timedelta(minutes=10)
 
 
 def _migration_config():
@@ -147,6 +154,353 @@ class PostgresRunRepository:
                 "database before stamping the baseline."
             )
 
+    def create_asset_condition(self, payload, actor_id: str) -> dict:
+        context = payload.asset.context()
+        try:
+            with self._session_factory.begin() as session:
+                asset = _get_or_create_asset(
+                    session,
+                    payload.asset.external_system,
+                    payload.asset.external_id,
+                    payload.asset.tag,
+                    payload.asset.asset_class,
+                    context,
+                )
+                existing = session.scalar(
+                    select(AssetCondition)
+                    .where(
+                        AssetCondition.asset_ref_id == asset.asset_ref_id,
+                        AssetCondition.condition_type == payload.condition_type,
+                        AssetCondition.state == "active",
+                    )
+                    .with_for_update()
+                )
+                if existing is not None:
+                    raise PlanDomainError(
+                        "asset_condition_already_active",
+                        "This asset already has an active unavailable condition.",
+                        409,
+                        {"condition_id": str(existing.condition_id)},
+                    )
+                condition = AssetCondition(
+                    asset_ref_id=asset.asset_ref_id,
+                    condition_type=payload.condition_type,
+                    state="active",
+                    reason_code=str(payload.reason_code or "").strip() or None,
+                    notes=payload.notes,
+                    evidence=_jsonable(payload.evidence),
+                    source_system=str(payload.source_system or "").strip() or None,
+                    source_reference=_jsonable(payload.source_reference),
+                    reported_by=actor_id,
+                )
+                session.add(condition)
+                session.flush()
+                session.add(
+                    AssetConditionEvent(
+                        condition_id=condition.condition_id,
+                        event_type="reported",
+                        actor_id=actor_id,
+                        payload=_jsonable(
+                            {
+                                "reason_code": condition.reason_code,
+                                "notes": condition.notes,
+                                "evidence": condition.evidence,
+                            }
+                        ),
+                    )
+                )
+                session.flush()
+                return _asset_condition_dict(session, condition)
+        except IntegrityError as error:
+            raise PlanDomainError(
+                "asset_condition_already_active",
+                "This asset already has an active unavailable condition.",
+                409,
+            ) from error
+
+    def get_asset_condition(self, condition_id: str) -> dict | None:
+        condition_uuid = _uuid(condition_id, "unknown_asset_condition")
+        with self._session_factory() as session:
+            condition = session.get(AssetCondition, condition_uuid)
+            return _asset_condition_dict(session, condition) if condition else None
+
+    def list_asset_conditions(
+        self,
+        *,
+        cnvrt_project_id: str,
+        collection_id: str,
+        unigraph_project_id: str,
+        job_id: str = "",
+        state: str = "active",
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        context = {
+            "cnvrt_project_id": str(cnvrt_project_id),
+            "collection_id": str(collection_id),
+            "unigraph_project_id": str(unigraph_project_id),
+            "job_id": str(job_id or ""),
+        }
+        scope_keys = {_asset_scope_key("unigraph_candidate", context)}
+        if context["job_id"]:
+            scope_keys.add(_asset_scope_key("cnvrt_drawing_entity", context))
+        with self._session_factory() as session:
+            filters = [AssetReference.scope_key.in_(scope_keys)]
+            if state != "all":
+                filters.append(AssetCondition.state == state)
+            base = (
+                select(AssetCondition)
+                .join(AssetReference, AssetReference.asset_ref_id == AssetCondition.asset_ref_id)
+                .where(*filters)
+            )
+            statement = (
+                base
+                .order_by(AssetCondition.reported_at.desc(), AssetCondition.condition_id)
+                .limit(limit)
+                .offset(offset)
+            )
+            total = int(
+                session.scalar(
+                    select(func.count()).select_from(base.order_by(None).subquery())
+                )
+                or 0
+            )
+            items = _asset_condition_dicts(
+                session,
+                session.scalars(statement).all(),
+                include_events=True,
+            )
+            return items, total
+
+    def confirm_asset_condition(self, condition_id: str, payload, actor_id: str) -> dict:
+        condition_uuid = _uuid(condition_id, "unknown_asset_condition")
+        with self._session_factory.begin() as session:
+            condition = session.scalar(
+                select(AssetCondition)
+                .where(AssetCondition.condition_id == condition_uuid)
+                .with_for_update()
+            )
+            if condition is None:
+                raise PlanDomainError("unknown_asset_condition", "Unknown asset condition.", 404)
+            if condition.state != "active":
+                raise PlanDomainError(
+                    "asset_condition_not_active",
+                    "Only an active asset condition can be confirmed.",
+                    409,
+                )
+            if condition.confirmed_at is not None:
+                raise PlanDomainError(
+                    "asset_condition_already_confirmed",
+                    "This asset condition has already been confirmed.",
+                    409,
+                )
+            condition.confirmed_by = actor_id
+            condition.confirmed_at = func.now()
+            session.add(
+                AssetConditionEvent(
+                    condition_id=condition.condition_id,
+                    event_type="confirmed",
+                    actor_id=actor_id,
+                    payload=_jsonable({"reason": payload.reason, "evidence": payload.evidence}),
+                )
+            )
+            session.flush()
+            return _asset_condition_dict(session, condition)
+
+    def clear_asset_condition(self, condition_id: str, payload, actor_id: str) -> dict:
+        condition_uuid = _uuid(condition_id, "unknown_asset_condition")
+        with self._session_factory.begin() as session:
+            condition = session.scalar(
+                select(AssetCondition)
+                .where(AssetCondition.condition_id == condition_uuid)
+                .with_for_update()
+            )
+            if condition is None:
+                raise PlanDomainError("unknown_asset_condition", "Unknown asset condition.", 404)
+            if condition.state != "active":
+                raise PlanDomainError(
+                    "asset_condition_already_cleared",
+                    "This asset condition has already been cleared.",
+                    409,
+                )
+            condition.state = "cleared"
+            condition.cleared_by = actor_id
+            condition.cleared_at = func.now()
+            condition.clear_reason = payload.reason
+            session.add(
+                AssetConditionEvent(
+                    condition_id=condition.condition_id,
+                    event_type="cleared",
+                    actor_id=actor_id,
+                    payload=_jsonable({"reason": payload.reason, "evidence": payload.evidence}),
+                )
+            )
+            session.flush()
+            return _asset_condition_dict(session, condition)
+
+    def active_asset_conditions_for_run(self, request_payload: dict) -> list[dict]:
+        """Return exact-identity active conditions to snapshot into a new run."""
+
+        context = {
+            "cnvrt_project_id": str(request_payload.get("cnvrt_project_id") or ""),
+            "collection_id": str(request_payload.get("collection_id") or ""),
+            "unigraph_project_id": str(request_payload.get("unigraph_project_id") or ""),
+            "job_id": str(request_payload.get("job_id") or ""),
+        }
+        scope_keys = {_asset_scope_key("unigraph_candidate", context)}
+        if context["job_id"]:
+            scope_keys.add(_asset_scope_key("cnvrt_drawing_entity", context))
+        with self._session_factory() as session:
+            conditions = session.scalars(
+                select(AssetCondition)
+                .join(AssetReference, AssetReference.asset_ref_id == AssetCondition.asset_ref_id)
+                .where(
+                    AssetCondition.state == "active",
+                    AssetReference.scope_key.in_(scope_keys),
+                )
+                .order_by(AssetCondition.reported_at, AssetCondition.condition_id)
+            ).all()
+            return _asset_condition_dicts(
+                session, conditions, include_events=False
+            )
+
+    def latest_asset_condition_event_id(self, context: dict[str, str]) -> str:
+        scope_keys = _asset_scope_keys(context)
+        with self._session_factory() as session:
+            event_id = session.scalar(
+                select(AssetConditionEvent.event_id)
+                .join(AssetCondition, AssetCondition.condition_id == AssetConditionEvent.condition_id)
+                .join(AssetReference, AssetReference.asset_ref_id == AssetCondition.asset_ref_id)
+                .where(AssetReference.scope_key.in_(scope_keys))
+                .order_by(AssetConditionEvent.occurred_at.desc(), AssetConditionEvent.event_id.desc())
+                .limit(1)
+            )
+            return str(event_id) if event_id else ""
+
+    def asset_condition_event_replay_state(
+        self,
+        context: dict[str, str],
+        after_id: str = "",
+    ) -> dict:
+        """Establish a replay watermark and IDs already visible around it.
+
+        The overlap allows an event whose transaction commits late to appear
+        after a later-timestamped event without being skipped permanently.
+        """
+
+        scope_keys = _asset_scope_keys(context)
+        with self._session_factory() as session:
+            cursor = _scoped_asset_condition_event(
+                session, scope_keys, after_id
+            ) if after_id else None
+            if cursor is None:
+                cursor = session.scalar(
+                    select(AssetConditionEvent)
+                    .join(
+                        AssetCondition,
+                        AssetCondition.condition_id == AssetConditionEvent.condition_id,
+                    )
+                    .join(
+                        AssetReference,
+                        AssetReference.asset_ref_id == AssetCondition.asset_ref_id,
+                    )
+                    .where(AssetReference.scope_key.in_(scope_keys))
+                    .order_by(
+                        AssetConditionEvent.occurred_at.desc(),
+                        AssetConditionEvent.event_id.desc(),
+                    )
+                    .limit(1)
+                )
+            if cursor is None:
+                return {"cursor_id": "", "cursor_occurred_at": None, "seen_ids": set()}
+            cutoff = cursor.occurred_at - ASSET_EVENT_REPLAY_OVERLAP
+            seen_ids = {
+                str(event_id)
+                for event_id in session.scalars(
+                    select(AssetConditionEvent.event_id)
+                    .join(
+                        AssetCondition,
+                        AssetCondition.condition_id == AssetConditionEvent.condition_id,
+                    )
+                    .join(
+                        AssetReference,
+                        AssetReference.asset_ref_id == AssetCondition.asset_ref_id,
+                    )
+                    .where(
+                        AssetReference.scope_key.in_(scope_keys),
+                        AssetConditionEvent.occurred_at >= cutoff,
+                        or_(
+                            AssetConditionEvent.occurred_at < cursor.occurred_at,
+                            (
+                                (AssetConditionEvent.occurred_at == cursor.occurred_at)
+                                & (
+                                    cast(AssetConditionEvent.event_id, Text)
+                                    <= str(cursor.event_id)
+                                )
+                            ),
+                        ),
+                    )
+                ).all()
+            }
+            return {
+                "cursor_id": str(cursor.event_id),
+                "cursor_occurred_at": cursor.occurred_at,
+                "seen_ids": seen_ids,
+            }
+
+    def list_asset_condition_events(
+        self,
+        context: dict[str, str],
+        *,
+        after_id: str = "",
+        exclude_ids: set[str] | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        scope_keys = _asset_scope_keys(context)
+        with self._session_factory() as session:
+            cursor = _scoped_asset_condition_event(session, scope_keys, after_id)
+            statement = (
+                select(AssetConditionEvent, AssetCondition, AssetReference)
+                .join(AssetCondition, AssetCondition.condition_id == AssetConditionEvent.condition_id)
+                .join(AssetReference, AssetReference.asset_ref_id == AssetCondition.asset_ref_id)
+                .where(AssetReference.scope_key.in_(scope_keys))
+            )
+            if cursor is not None:
+                statement = statement.where(
+                    AssetConditionEvent.occurred_at
+                    >= cursor.occurred_at - ASSET_EVENT_REPLAY_OVERLAP
+                )
+            parsed_exclusions = []
+            for item in exclude_ids or set():
+                try:
+                    parsed_exclusions.append(UUID(str(item)))
+                except (TypeError, ValueError):
+                    continue
+            if parsed_exclusions:
+                statement = statement.where(
+                    AssetConditionEvent.event_id.not_in(parsed_exclusions)
+                )
+            rows = session.execute(
+                statement.order_by(
+                    AssetConditionEvent.occurred_at,
+                    AssetConditionEvent.event_id,
+                ).limit(limit)
+            ).all()
+            return [
+                {
+                    "event_id": str(event.event_id),
+                    "type": "asset_condition.changed",
+                    "event_type": event.event_type,
+                    "condition_id": str(condition.condition_id),
+                    "condition_type": condition.condition_type,
+                    "state": condition.state,
+                    "occurred_at": event.occurred_at,
+                    "asset": _asset_reference_dict(asset),
+                    "payload": event.payload or {},
+                }
+                for event, condition, asset in rows
+            ]
+
     def insert_run(self, record, request_payload: dict) -> None:
         with self._session_factory.begin() as session:
             session.add(
@@ -207,6 +561,14 @@ class PostgresRunRepository:
                     and manifest.child_plan_version_id is None
                 ):
                     self._complete_derivation(session, manifest, persisted)
+
+    def update_run_request(self, run_id: str, request_payload: dict) -> None:
+        """Persist context inferred while a run is still executing."""
+
+        with self._session_factory.begin() as session:
+            persisted = session.get(IsolationRun, run_id)
+            if persisted is not None:
+                persisted.request = _jsonable(request_payload or {})
 
     def append_event(self, run_id: str, event: dict) -> None:
         with self._session_factory.begin() as session:
@@ -389,7 +751,15 @@ class PostgresRunRepository:
             .order_by(PlanVersion.version_no.desc())
         )
         rows = session.execute(statement).all()
-        return _plan_from_rows(rows) if rows else None
+        if not rows:
+            return None
+        payload = _plan_from_rows(rows)
+        payload["freshness"] = _plan_freshness(
+            session,
+            UUID(payload["latest_plan_version_id"]),
+            rows[0][22] or {},
+        )
+        return payload
 
     def list_plans(
         self,
@@ -466,7 +836,21 @@ class PostgresRunRepository:
         with self._session_factory() as session:
             total = int(session.scalar(count_statement) or 0)
             rows = session.execute(paged_statement).all()
-            return [_plan_from_rows([row], summary=True) for row in rows], total
+            freshness_by_version = _plans_freshness(
+                session,
+                [
+                    (UUID(str(row[7])), row[22] or {})
+                    for row in rows
+                ],
+            )
+            items = []
+            for row in rows:
+                payload = _plan_from_rows([row], summary=True)
+                payload["freshness"] = freshness_by_version[
+                    UUID(payload["latest_plan_version_id"])
+                ]
+                items.append(payload)
+            return items, total
 
     def create_change(self, plan_id: str, payload, actor_id: str) -> dict:
         plan_uuid = _uuid(plan_id, "unknown_plan")
@@ -786,7 +1170,11 @@ class PostgresRunRepository:
             return result
 
     def prepare_derivation(
-        self, plan_id: str, parent_version_id: str, actor_id: str
+        self,
+        plan_id: str,
+        parent_version_id: str,
+        actor_id: str,
+        trigger: str = "corrections",
     ) -> dict:
         plan_uuid, parent_uuid = (
             _uuid(plan_id, "unknown_plan"),
@@ -839,12 +1227,6 @@ class PostgresRunRepository:
                 )
                 .order_by(PlanFeedback.created_at)
             ).all()
-            if not changes:
-                raise PlanDomainError(
-                    "no_approved_corrections",
-                    "No approved corrections are available for derivation.",
-                    409,
-                )
             effective_changes = session.scalars(
                 select(PlanFeedback)
                 .where(
@@ -867,14 +1249,46 @@ class PostgresRunRepository:
                     "Parent plan version has no derivation run.",
                     409,
                 )
+            freshness = _plan_freshness(
+                session, parent.plan_version_id, source_run.request or {}
+            )
+            conditions_stale = freshness["status"] == "stale"
+            if trigger == "corrections" and not changes:
+                raise PlanDomainError(
+                    "no_approved_corrections",
+                    "No approved corrections are available for derivation.",
+                    409,
+                )
+            if trigger == "asset_conditions" and not conditions_stale:
+                raise PlanDomainError(
+                    "plan_inputs_current",
+                    "The latest plan version already uses the current shared equipment status.",
+                    409,
+                )
             corrections = [
                 _feedback_to_derivation_input(item) for item in effective_changes
             ]
+            trigger_kind = (
+                "combined"
+                if conditions_stale and changes
+                else "asset_conditions"
+                if conditions_stale
+                else "corrections"
+            )
+            trigger_snapshot = {
+                "requested_trigger": trigger,
+                "effective_trigger": trigger_kind,
+                "freshness": freshness,
+            }
             manifest = DerivationManifest(
                 plan_id=plan_uuid,
                 parent_plan_version_id=parent_uuid,
                 state="locked",
-                policy_hash=canonical_hash(corrections),
+                trigger_kind=trigger_kind,
+                trigger_snapshot=_jsonable(trigger_snapshot),
+                policy_hash=canonical_hash(
+                    {"corrections": corrections, "trigger": trigger_snapshot}
+                ),
                 created_by=actor_id,
             )
             session.add(manifest)
@@ -899,6 +1313,7 @@ class PostgresRunRepository:
                 "manifest_id": str(manifest.manifest_id),
                 "plan_id": plan_id,
                 "parent_plan_version_id": parent_version_id,
+                "trigger_kind": trigger_kind,
             }
             _append_audit(
                 session,
@@ -908,7 +1323,9 @@ class PostgresRunRepository:
                 actor_id,
                 {
                     "manifest_id": str(manifest.manifest_id),
+                    "trigger_kind": trigger_kind,
                     "feedback_ids": [str(row.feedback_id) for row in changes],
+                    "asset_condition_changes": freshness["changes"],
                 },
             )
             return {
@@ -1113,6 +1530,7 @@ class PostgresRunRepository:
             "system",
             {
                 "manifest_id": str(manifest.manifest_id),
+                "trigger_kind": manifest.trigger_kind,
                 "run_id": run.run_id,
                 "parent_plan_version_id": str(parent.plan_version_id),
             },
@@ -1249,6 +1667,143 @@ def _plan_from_rows(rows: list, summary: bool = False) -> dict:
     return payload
 
 
+def _plan_freshness(session, version_id: UUID, request: dict) -> dict:
+    return _plans_freshness(session, [(version_id, request)])[version_id]
+
+
+def _plans_freshness(
+    session,
+    version_requests: list[tuple[UUID, dict]],
+) -> dict[UUID, dict]:
+    """Compute freshness for a plan page with a fixed number of SQL queries."""
+
+    evaluated_at = datetime.now(timezone.utc)
+    if not version_requests:
+        return {}
+    contexts = {
+        version_id: {
+            "cnvrt_project_id": str((request or {}).get("cnvrt_project_id") or ""),
+            "collection_id": str((request or {}).get("collection_id") or ""),
+            "unigraph_project_id": str((request or {}).get("unigraph_project_id") or ""),
+            "job_id": str((request or {}).get("job_id") or ""),
+        }
+        for version_id, request in version_requests
+    }
+    valid_contexts = {
+        version_id: context
+        for version_id, context in contexts.items()
+        if all(
+            context[key]
+            for key in ("cnvrt_project_id", "collection_id", "unigraph_project_id")
+        )
+    }
+    version_ids = set(valid_contexts)
+    captured_rows = session.execute(
+        select(
+            PlanVersionAssetCondition.plan_version_id,
+            PlanVersionAssetCondition.condition_id,
+            PlanVersionAssetCondition.snapshot,
+        ).where(PlanVersionAssetCondition.plan_version_id.in_(version_ids))
+    ).all()
+    captured_by_version: dict[UUID, dict[str, dict]] = {
+        version_id: {} for version_id in version_ids
+    }
+    for row in captured_rows:
+        captured_by_version[row.plan_version_id][str(row.condition_id)] = row.snapshot or {}
+
+    scope_keys = set().union(
+        *(_asset_scope_keys(context) for context in valid_contexts.values())
+    ) if valid_contexts else set()
+    current_rows = session.execute(
+        select(AssetCondition, AssetReference)
+        .join(AssetReference, AssetReference.asset_ref_id == AssetCondition.asset_ref_id)
+        .where(
+            AssetCondition.state == "active",
+            AssetReference.scope_key.in_(scope_keys),
+        )
+        .order_by(AssetCondition.reported_at, AssetCondition.condition_id)
+    ).all()
+    current_by_scope: dict[str, dict[str, dict]] = {}
+    for condition, asset in current_rows:
+        current_by_scope.setdefault(asset.scope_key, {})[str(condition.condition_id)] = (
+            _asset_condition_dict(
+                session,
+                condition,
+                include_events=False,
+                asset=asset,
+            )
+        )
+
+    current_by_version: dict[UUID, dict[str, dict]] = {}
+    removed_ids: set[str] = set()
+    for version_id, context in valid_contexts.items():
+        current: dict[str, dict] = {}
+        for scope_key in _asset_scope_keys(context):
+            current.update(current_by_scope.get(scope_key, {}))
+        current_by_version[version_id] = current
+        removed_ids.update(
+            set(captured_by_version[version_id]) - set(current)
+        )
+    removed_conditions = {
+        str(condition.condition_id): condition
+        for condition in (
+            session.scalars(
+                select(AssetCondition).where(
+                    AssetCondition.condition_id.in_([UUID(item) for item in removed_ids])
+                )
+            ).all()
+            if removed_ids
+            else []
+        )
+    }
+
+    results: dict[UUID, dict] = {}
+    for version_id, _request in version_requests:
+        if version_id not in valid_contexts:
+            results[version_id] = {
+                "status": "unknown",
+                "reason": None,
+                "evaluated_at": evaluated_at,
+                "changes": [],
+            }
+            continue
+        captured = captured_by_version[version_id]
+        current = current_by_version[version_id]
+        changes = []
+        for condition_id in sorted(set(current) - set(captured)):
+            item = current[condition_id]
+            changes.append(
+                {
+                    "change_type": "became_unavailable",
+                    "condition_id": condition_id,
+                    "occurred_at": item["reported_at"],
+                    "asset": item["asset"],
+                }
+            )
+        for condition_id in sorted(set(captured) - set(current)):
+            condition = removed_conditions.get(condition_id)
+            changes.append(
+                {
+                    "change_type": "returned_to_service",
+                    "condition_id": condition_id,
+                    "occurred_at": (
+                        condition.cleared_at
+                        if condition is not None and condition.cleared_at is not None
+                        else evaluated_at
+                    ),
+                    "asset": (captured[condition_id] or {}).get("asset") or {},
+                }
+            )
+        changes.sort(key=lambda item: (item["occurred_at"], item["condition_id"]))
+        results[version_id] = {
+            "status": "stale" if changes else "fresh",
+            "reason": "asset_condition_changed" if changes else None,
+            "evaluated_at": evaluated_at,
+            "changes": changes,
+        }
+    return results
+
+
 def _jsonable(value: Any):
     return jsonable(value) if value is not None else None
 
@@ -1339,6 +1894,30 @@ def _persist_normalized_content(
             payload=_jsonable(request),
         )
     )
+    asset_conditions = list((request or {}).get("asset_conditions") or [])
+    if asset_conditions:
+        session.add(
+            InputSnapshot(
+                plan_version_id=version.plan_version_id,
+                source_type="shared_asset_conditions",
+                content_hash=canonical_hash(asset_conditions),
+                payload=_jsonable({"items": asset_conditions}),
+            )
+        )
+        for snapshot in asset_conditions:
+            try:
+                condition_id = UUID(str(snapshot.get("condition_id") or ""))
+            except (TypeError, ValueError):
+                continue
+            if session.get(AssetCondition, condition_id) is None:
+                continue
+            session.add(
+                PlanVersionAssetCondition(
+                    plan_version_id=version.plan_version_id,
+                    condition_id=condition_id,
+                    snapshot=_jsonable(snapshot),
+                )
+            )
     session.add(
         InputSnapshot(
             plan_version_id=version.plan_version_id,
@@ -1459,6 +2038,150 @@ def _asset_scope_key(system: str, context: dict) -> str:
             job=str(context.get("job_id") or "unknown"),
         )
     return "context:" + canonical_hash(context)
+
+
+def _asset_scope_keys(context: dict) -> set[str]:
+    normalized = {
+        "cnvrt_project_id": str((context or {}).get("cnvrt_project_id") or ""),
+        "collection_id": str((context or {}).get("collection_id") or ""),
+        "unigraph_project_id": str((context or {}).get("unigraph_project_id") or ""),
+        "job_id": str((context or {}).get("job_id") or ""),
+    }
+    keys = {_asset_scope_key("unigraph_candidate", normalized)}
+    if normalized["job_id"]:
+        keys.add(_asset_scope_key("cnvrt_drawing_entity", normalized))
+    return keys
+
+
+def _scoped_asset_condition_event(session, scope_keys: set[str], event_id: str):
+    if not event_id:
+        return None
+    try:
+        event_uuid = UUID(str(event_id))
+    except (TypeError, ValueError):
+        return None
+    return session.scalar(
+        select(AssetConditionEvent)
+        .join(
+            AssetCondition,
+            AssetCondition.condition_id == AssetConditionEvent.condition_id,
+        )
+        .join(
+            AssetReference,
+            AssetReference.asset_ref_id == AssetCondition.asset_ref_id,
+        )
+        .where(
+            AssetConditionEvent.event_id == event_uuid,
+            AssetReference.scope_key.in_(scope_keys),
+        )
+    )
+
+
+def _asset_reference_dict(asset: AssetReference) -> dict:
+    return {
+        "asset_ref_id": str(asset.asset_ref_id),
+        "external_system": asset.external_system,
+        "scope_key": asset.scope_key,
+        "external_id": asset.external_id,
+        "tag": asset.tag,
+        "asset_class": asset.asset_class,
+        "context": asset.context or {},
+    }
+
+
+def _asset_condition_dict(
+    session,
+    condition: AssetCondition,
+    *,
+    include_events: bool = True,
+    asset: AssetReference | None = None,
+    events: list[AssetConditionEvent] | None = None,
+) -> dict:
+    asset = asset or session.get(AssetReference, condition.asset_ref_id)
+    event_rows = events or []
+    if include_events:
+        if events is None:
+            event_rows = session.scalars(
+                select(AssetConditionEvent)
+                .where(AssetConditionEvent.condition_id == condition.condition_id)
+                .order_by(AssetConditionEvent.occurred_at, AssetConditionEvent.event_id)
+            ).all()
+        serialized_events = [
+            {
+                "event_id": str(item.event_id),
+                "event_type": item.event_type,
+                "actor_id": item.actor_id,
+                "occurred_at": item.occurred_at,
+                "payload": item.payload or {},
+            }
+            for item in event_rows
+        ]
+    else:
+        serialized_events = []
+    return {
+        "condition_id": str(condition.condition_id),
+        "condition_type": condition.condition_type,
+        "state": condition.state,
+        "reason_code": condition.reason_code,
+        "notes": condition.notes,
+        "evidence": condition.evidence or {},
+        "source_system": condition.source_system,
+        "source_reference": condition.source_reference or {},
+        "reported_by": condition.reported_by,
+        "reported_at": condition.reported_at,
+        "confirmed_by": condition.confirmed_by,
+        "confirmed_at": condition.confirmed_at,
+        "cleared_by": condition.cleared_by,
+        "cleared_at": condition.cleared_at,
+        "clear_reason": condition.clear_reason,
+        "asset": _asset_reference_dict(asset),
+        "events": serialized_events,
+    }
+
+
+def _asset_condition_dicts(
+    session,
+    conditions: list[AssetCondition],
+    *,
+    include_events: bool,
+) -> list[dict]:
+    """Serialize a condition page with two bounded relationship queries."""
+
+    if not conditions:
+        return []
+    asset_ids = {item.asset_ref_id for item in conditions}
+    assets = {
+        item.asset_ref_id: item
+        for item in session.scalars(
+            select(AssetReference).where(AssetReference.asset_ref_id.in_(asset_ids))
+        ).all()
+    }
+    events_by_condition: dict[UUID, list[AssetConditionEvent]] = {
+        item.condition_id: [] for item in conditions
+    }
+    if include_events:
+        condition_ids = set(events_by_condition)
+        event_rows = session.scalars(
+            select(AssetConditionEvent)
+            .where(AssetConditionEvent.condition_id.in_(condition_ids))
+            .order_by(
+                AssetConditionEvent.condition_id,
+                AssetConditionEvent.occurred_at,
+                AssetConditionEvent.event_id,
+            )
+        ).all()
+        for event in event_rows:
+            events_by_condition[event.condition_id].append(event)
+    return [
+        _asset_condition_dict(
+            session,
+            condition,
+            include_events=include_events,
+            asset=assets[condition.asset_ref_id],
+            events=(events_by_condition[condition.condition_id] if include_events else None),
+        )
+        for condition in conditions
+    ]
 
 
 def _append_audit(

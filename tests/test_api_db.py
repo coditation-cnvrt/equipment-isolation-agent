@@ -27,6 +27,15 @@ class _FakeRepository:
     def __init__(self):
         self.runs = {}
         self.events = []
+        self.active_conditions = []
+        self.asset_condition_requests = []
+
+    def active_asset_conditions_for_run(self, request_payload):
+        self.asset_condition_requests.append(dict(request_payload))
+        return list(self.active_conditions)
+
+    def update_run_request(self, run_id, request_payload):
+        self.runs[run_id]["request"] = dict(request_payload)
 
     def insert_run(self, record, request_payload):
         self.runs[record.run_id] = {
@@ -119,7 +128,7 @@ class ApiDbTests(unittest.TestCase):
         return repository, patched_inspection()
 
     def test_packaged_migration_has_one_expected_head(self):
-        self.assertEqual(migration_head_revision(), "0005_feedback_constraint_names")
+        self.assertEqual(migration_head_revision(), "0007_asset_state_derivation")
 
     def test_migration_config_and_template_are_package_resources(self):
         migration_package = files("equipment_isolation.api.migrations")
@@ -134,6 +143,8 @@ class ApiDbTests(unittest.TestCase):
         self.assertTrue(migration_package.joinpath("versions", "0003_scoped_asset_identity.py").is_file())
         self.assertTrue(migration_package.joinpath("versions", "0004_plan_feedback_framework.py").is_file())
         self.assertTrue(migration_package.joinpath("versions", "0005_feedback_constraint_names.py").is_file())
+        self.assertTrue(migration_package.joinpath("versions", "0006_shared_asset_conditions.py").is_file())
+        self.assertTrue(migration_package.joinpath("versions", "0007_asset_condition_derivation_triggers.py").is_file())
         self.assertEqual(
             _migration_config().get_main_option("script_location"),
             str(migration_package),
@@ -142,7 +153,7 @@ class ApiDbTests(unittest.TestCase):
     def test_orm_metadata_owns_all_application_tables(self):
         self.assertEqual(
             set(Base.metadata.tables),
-            {"isolation_runs", "isolation_run_events", "isolation_plan", "plan_version", "external_run_link", "asset_reference", "work_scope", "work_scope_asset", "input_snapshot", "isolation_branch", "isolation_point", "path_point", "plan_step", "finding", "plan_feedback", "feedback_review_decision", "derivation_manifest", "derivation_manifest_feedback", "plan_version_feedback", "feedback_application_result", "audit_event"},
+            {"isolation_runs", "isolation_run_events", "isolation_plan", "plan_version", "external_run_link", "asset_reference", "asset_condition", "asset_condition_event", "plan_version_asset_condition", "work_scope", "work_scope_asset", "input_snapshot", "isolation_branch", "isolation_point", "path_point", "plan_step", "finding", "plan_feedback", "feedback_review_decision", "derivation_manifest", "derivation_manifest_feedback", "plan_version_feedback", "feedback_application_result", "audit_event"},
         )
         self.assertIn("isolation_plan_number_seq", Base.metadata._sequences)
 
@@ -174,7 +185,7 @@ class ApiDbTests(unittest.TestCase):
             "plan_version",
             "external_run_link",
         )
-        repository, connection_patch = self._ready_repository(tables, ("0005_feedback_constraint_names",))
+        repository, connection_patch = self._ready_repository(tables, ("0007_asset_state_derivation",))
         with connection_patch:
             repository.check_ready()
 
@@ -188,7 +199,7 @@ class ApiDbTests(unittest.TestCase):
             "external_run_link",
         )
         repository, connection_patch = self._ready_repository(tables, ("old_revision",))
-        with connection_patch, self.assertRaisesRegex(RuntimeError, "expected 0005_feedback_constraint_names"):
+        with connection_patch, self.assertRaisesRegex(RuntimeError, "expected 0007_asset_state_derivation"):
             repository.check_ready()
 
     def test_asset_scope_separates_reused_external_ids(self):
@@ -256,6 +267,18 @@ class ApiDbTests(unittest.TestCase):
 
     def test_run_store_persists_run_state_to_repository(self):
         repo = _FakeRepository()
+        repo.active_conditions = [
+            {
+                "condition_id": "8f841903-36a4-49ed-8024-a3011c7a4378",
+                "condition_type": "unavailable",
+                "state": "active",
+                "notes": "Valve stem seized",
+                "asset": {
+                    "external_system": "cnvrt_drawing_entity",
+                    "external_id": "hilt-valve-1",
+                },
+            }
+        ]
         store = RunStore(max_workers=1, repository=repo)
         request = IsolationRunRequest(
             equipment_tag="P3",
@@ -280,6 +303,9 @@ class ApiDbTests(unittest.TestCase):
         persisted = repo.get_run(record.run_id)
         self.assertEqual(persisted["status"], "succeeded")
         self.assertEqual(persisted["request"]["equipment_tag"], "P3")
+        self.assertEqual(
+            persisted["request"]["asset_conditions"][0]["state"], "active"
+        )
         self.assertNotIn("auth_token", persisted["request"])
         self.assertEqual(persisted["result"]["data"][0]["assurance_status"], "not_isolated")
         self.assertNotIn("result", store.list()[0])
@@ -307,6 +333,57 @@ class ApiDbTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "database unavailable"):
             store.create(request, "token")
         store.shutdown()
+
+    def test_inferred_job_refreshes_shared_conditions_and_persisted_snapshot(self):
+        class _DrawingAwareRepository(_FakeRepository):
+            def active_asset_conditions_for_run(self, request_payload):
+                self.asset_condition_requests.append(dict(request_payload))
+                if str(request_payload.get("job_id") or "") != "2151":
+                    return []
+                return [{"condition_id": "drawing-condition", "state": "active"}]
+
+        repo = _DrawingAwareRepository()
+        store = RunStore(max_workers=1, repository=repo)
+        request = IsolationRunRequest(
+            equipment_tag="P3",
+            cnvrt_project_id="277",
+            collection_id="206",
+            unigraph_project_id="15",
+        )
+
+        def execute(**kwargs):
+            loaded = kwargs["shared_asset_condition_loader"](
+                SimpleNamespace(
+                    resolved_job_id="2151",
+                    job_name="Aker drawing",
+                    cnvrt_project_id="277",
+                    collection_id="206",
+                    graph=SimpleNamespace(project_id="15"),
+                )
+            )
+            self.assertEqual(loaded[0]["condition_id"], "drawing-condition")
+            return {"ok": True, "payload": {"data": []}, "agent": {}, "trace": []}
+
+        try:
+            with mock.patch(
+                "equipment_isolation.api.runs.execute_agent_request",
+                side_effect=execute,
+            ):
+                record = store.create(request, "token")
+                for _ in range(100):
+                    persisted = repo.get_run(record.run_id)
+                    if persisted["status"] == "succeeded":
+                        break
+                    time.sleep(0.01)
+            self.assertEqual(persisted["request"]["job_id"], "2151")
+            self.assertEqual(
+                persisted["request"]["asset_conditions"][0]["condition_id"],
+                "drawing-condition",
+            )
+            self.assertEqual(repo.asset_condition_requests[0]["job_id"], "")
+            self.assertEqual(repo.asset_condition_requests[-1]["job_id"], "2151")
+        finally:
+            store.shutdown()
 
     def test_shutdown_marks_nonterminal_rows_failed_instead_of_deleting_them(self):
         repo = _FakeRepository()

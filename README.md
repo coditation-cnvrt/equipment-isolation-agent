@@ -305,13 +305,24 @@ Optional connection-pool settings are `POSTGRES_POOL_MAX_SIZE` (default `8`) and
 
 ### Start the API
 
+Development mode, with automatic reload:
+
 ```bash
-uv run equipment-isolation-api
+uv run fastapi dev --port 8088
 ```
 
-By default, the server listens on `0.0.0.0:8088`. Override with `EIA_HOST` and
-`EIA_PORT`. Startup fails if PostgreSQL is unconfigured, unreachable, or does
-not match the packaged Alembic migration head.
+Production mode, without automatic reload:
+
+```bash
+uv run fastapi run --port 8088
+```
+
+The FastAPI entrypoint is configured in `pyproject.toml` as
+`equipment_isolation.api.app:app`. The legacy `uv run equipment-isolation-api`
+command remains available and listens on `0.0.0.0:8088` by default; override
+that compatibility command with `EIA_HOST` and `EIA_PORT`. Startup fails if
+PostgreSQL is unconfigured, unreachable, or does not match the packaged
+Alembic migration head.
 
 API runs use the agentic runner, so `GEMINI_API_KEY` is required. Requests that
 need Plant360 data must send `Authorization: Bearer <token>`; for local/dev only,
@@ -326,6 +337,12 @@ Useful endpoints:
 ```text
 GET  /health
 POST /equipment
+POST /asset-conditions
+GET  /asset-conditions?cnvrt_project_id=&collection_id=&unigraph_project_id=&job_id=&state=
+GET  /asset-conditions/events?cnvrt_project_id=&collection_id=&unigraph_project_id=&job_id=
+GET  /asset-conditions/{condition_id}
+POST /asset-conditions/{condition_id}/confirm
+POST /asset-conditions/{condition_id}/clear
 POST /isolation-runs
 GET  /isolation-runs?equipment_tag=&job_id=&cnvrt_project_id=&collection_id=&unigraph_project_id=
 GET  /isolation-runs/{run_id}
@@ -377,6 +394,21 @@ barrier; without one, the affected process branch becomes unresolved and
 `validate()` reports that isolation is not demonstrated. Applied corrections are
 replayed in later derivations until a later correction explicitly changes their
 state. `validate()` remains authoritative.
+
+Shared operational conditions are separate from plan feedback. An unavailable
+asset may be reported through `/asset-conditions` before any isolation plan
+exists. Every fresh or derived run loads active conditions for its exact scoped
+UniGraph project and CNVRT drawing, applies them after plan-local feedback, and
+snapshots them into the resulting plan version. Therefore a plan-local
+"available" correction cannot weaken an active shared unavailable condition.
+Confirming a condition adds governance evidence; reporting it already has the
+conservative safety effect. Returning the asset to service explicitly clears
+the condition. Conditions have no automatic expiry.
+
+Shared matching uses exact `asset_reference` source identities. A HILT entity
+condition applies to that CNVRT project/collection/job identity, and a UniGraph
+condition applies to that UniGraph project identity. Tags are display metadata
+and are never used to merge assets across drawings.
 
 PostgreSQL is the API's sole persistence layer for run requests, status, events,
 results, traces, plans, and versions. The API writes no local run files. Drawing

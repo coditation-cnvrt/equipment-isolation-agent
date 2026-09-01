@@ -9,15 +9,20 @@ non-deterministic system.
 from __future__ import annotations
 
 from time import time
-from typing import Any
+from typing import Any, Callable
 
 from equipment_isolation.config import RunConfig
 from equipment_isolation.pipeline.job_inference import _config_with_inferred_job
 
 
 class AgentSession:
-    def __init__(self, config: RunConfig):
+    def __init__(
+        self,
+        config: RunConfig,
+        context_refresh: Callable[[RunConfig], RunConfig] | None = None,
+    ):
         self.config: RunConfig = config
+        self._context_refresh = context_refresh
         self.boundary_data: dict | None = None
         self.candidate_data: dict | None = None
         self.bbox_data: dict | None = None
@@ -33,6 +38,12 @@ class AgentSession:
         self.isolation_order: list | None = None
         self.trace: list[dict] = []
         self._step = 0
+
+    def refresh_context(self) -> None:
+        """Refresh run-scoped overlays after project or drawing resolution."""
+
+        if self._context_refresh is not None:
+            self.config = self._context_refresh(self.config)
 
     def record(self, tool: str, args: dict, result: Any, error: Any = None) -> dict:
         self._step += 1
@@ -68,6 +79,7 @@ class AgentSession:
         if config is self.config:  # returns the same object when nothing was inferred
             return False
         self.config = config
+        self.refresh_context()
         self.candidate_data["context"] = self.config.context
         return True
 

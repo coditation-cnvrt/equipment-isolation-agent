@@ -1,6 +1,345 @@
 {
   "components": {
     "schemas": {
+      "AssetConditionActionRequest": {
+        "properties": {
+          "evidence": {
+            "additionalProperties": true,
+            "title": "Evidence",
+            "type": "object"
+          },
+          "reason": {
+            "maxLength": 4000,
+            "minLength": 3,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "AssetConditionActionRequest",
+        "type": "object"
+      },
+      "AssetConditionAssetDetail": {
+        "properties": {
+          "asset_class": {
+            "title": "Asset Class",
+            "type": "string"
+          },
+          "asset_ref_id": {
+            "title": "Asset Ref Id",
+            "type": "string"
+          },
+          "context": {
+            "additionalProperties": true,
+            "title": "Context",
+            "type": "object"
+          },
+          "external_id": {
+            "title": "External Id",
+            "type": "string"
+          },
+          "external_system": {
+            "title": "External System",
+            "type": "string"
+          },
+          "scope_key": {
+            "title": "Scope Key",
+            "type": "string"
+          },
+          "tag": {
+            "title": "Tag",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asset_ref_id",
+          "external_system",
+          "scope_key",
+          "external_id",
+          "tag",
+          "asset_class",
+          "context"
+        ],
+        "title": "AssetConditionAssetDetail",
+        "type": "object"
+      },
+      "AssetConditionAssetRequest": {
+        "description": "Exact source identity for a physical asset; labels are descriptive only.",
+        "properties": {
+          "asset_class": {
+            "default": "",
+            "title": "Asset Class",
+            "type": "string"
+          },
+          "cnvrt_project_id": {
+            "minLength": 1,
+            "title": "Cnvrt Project Id",
+            "type": "string"
+          },
+          "collection_id": {
+            "minLength": 1,
+            "title": "Collection Id",
+            "type": "string"
+          },
+          "external_id": {
+            "minLength": 1,
+            "title": "External Id",
+            "type": "string"
+          },
+          "external_system": {
+            "enum": [
+              "cnvrt_drawing_entity",
+              "unigraph_candidate"
+            ],
+            "title": "External System",
+            "type": "string"
+          },
+          "job_id": {
+            "default": "",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "tag": {
+            "minLength": 1,
+            "title": "Tag",
+            "type": "string"
+          },
+          "unigraph_project_id": {
+            "minLength": 1,
+            "title": "Unigraph Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "external_system",
+          "external_id",
+          "tag",
+          "cnvrt_project_id",
+          "collection_id",
+          "unigraph_project_id"
+        ],
+        "title": "AssetConditionAssetRequest",
+        "type": "object"
+      },
+      "AssetConditionDetail": {
+        "properties": {
+          "asset": {
+            "$ref": "#/components/schemas/AssetConditionAssetDetail"
+          },
+          "clear_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clear Reason"
+          },
+          "cleared_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cleared At"
+          },
+          "cleared_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cleared By"
+          },
+          "condition_id": {
+            "title": "Condition Id",
+            "type": "string"
+          },
+          "condition_type": {
+            "const": "unavailable",
+            "title": "Condition Type",
+            "type": "string"
+          },
+          "confirmed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed At"
+          },
+          "confirmed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed By"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/AssetConditionEventDetail"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "evidence": {
+            "additionalProperties": true,
+            "title": "Evidence",
+            "type": "object"
+          },
+          "notes": {
+            "title": "Notes",
+            "type": "string"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "reported_at": {
+            "format": "date-time",
+            "title": "Reported At",
+            "type": "string"
+          },
+          "reported_by": {
+            "title": "Reported By",
+            "type": "string"
+          },
+          "source_reference": {
+            "additionalProperties": true,
+            "title": "Source Reference",
+            "type": "object"
+          },
+          "source_system": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source System"
+          },
+          "state": {
+            "enum": [
+              "active",
+              "cleared"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "condition_id",
+          "condition_type",
+          "state",
+          "notes",
+          "evidence",
+          "source_reference",
+          "reported_by",
+          "reported_at",
+          "asset"
+        ],
+        "title": "AssetConditionDetail",
+        "type": "object"
+      },
+      "AssetConditionEventDetail": {
+        "properties": {
+          "actor_id": {
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "event_type": {
+            "enum": [
+              "reported",
+              "confirmed",
+              "cleared"
+            ],
+            "title": "Event Type",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          }
+        },
+        "required": [
+          "event_id",
+          "event_type",
+          "actor_id",
+          "occurred_at",
+          "payload"
+        ],
+        "title": "AssetConditionEventDetail",
+        "type": "object"
+      },
+      "AssetConditionList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AssetConditionDetail"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "total"
+        ],
+        "title": "AssetConditionList",
+        "type": "object"
+      },
       "ChangeRequestDetail": {
         "properties": {
           "application_outcome": {
@@ -197,6 +536,63 @@
         "title": "ChangeRequestList",
         "type": "object"
       },
+      "CreateAssetConditionRequest": {
+        "properties": {
+          "asset": {
+            "$ref": "#/components/schemas/AssetConditionAssetRequest"
+          },
+          "condition_type": {
+            "const": "unavailable",
+            "default": "unavailable",
+            "title": "Condition Type",
+            "type": "string"
+          },
+          "evidence": {
+            "additionalProperties": true,
+            "title": "Evidence",
+            "type": "object"
+          },
+          "notes": {
+            "maxLength": 4000,
+            "minLength": 3,
+            "title": "Notes",
+            "type": "string"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "source_reference": {
+            "additionalProperties": true,
+            "title": "Source Reference",
+            "type": "object"
+          },
+          "source_system": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source System"
+          }
+        },
+        "required": [
+          "asset",
+          "notes"
+        ],
+        "title": "CreateAssetConditionRequest",
+        "type": "object"
+      },
       "CreateChangeRequest": {
         "properties": {
           "change_type": {
@@ -370,6 +766,15 @@
           "parent_plan_version_id": {
             "title": "Parent Plan Version Id",
             "type": "string"
+          },
+          "trigger": {
+            "default": "corrections",
+            "enum": [
+              "corrections",
+              "asset_conditions"
+            ],
+            "title": "Trigger",
+            "type": "string"
           }
         },
         "required": [
@@ -529,6 +934,9 @@
             "title": "Created At",
             "type": "string"
           },
+          "freshness": {
+            "$ref": "#/components/schemas/PlanFreshness"
+          },
           "latest_plan_version_id": {
             "title": "Latest Plan Version Id",
             "type": "string"
@@ -568,6 +976,7 @@
           "created_at",
           "latest_plan_version_id",
           "latest_version",
+          "freshness",
           "versions"
         ],
         "title": "IsolationPlanDetail",
@@ -633,6 +1042,9 @@
             "title": "Created At",
             "type": "string"
           },
+          "freshness": {
+            "$ref": "#/components/schemas/PlanFreshness"
+          },
           "latest_plan_version_id": {
             "title": "Latest Plan Version Id",
             "type": "string"
@@ -664,7 +1076,8 @@
           "lifecycle_state",
           "created_at",
           "latest_plan_version_id",
-          "latest_version"
+          "latest_version",
+          "freshness"
         ],
         "title": "IsolationPlanSummary",
         "type": "object"
@@ -767,6 +1180,81 @@
           "unigraph_project_id"
         ],
         "title": "IsolationRunRequest",
+        "type": "object"
+      },
+      "PlanFreshness": {
+        "properties": {
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/PlanFreshnessChange"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "evaluated_at": {
+            "format": "date-time",
+            "title": "Evaluated At",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "const": "asset_condition_changed",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "status": {
+            "enum": [
+              "fresh",
+              "stale",
+              "unknown"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "evaluated_at"
+        ],
+        "title": "PlanFreshness",
+        "type": "object"
+      },
+      "PlanFreshnessChange": {
+        "properties": {
+          "asset": {
+            "$ref": "#/components/schemas/AssetConditionAssetDetail"
+          },
+          "change_type": {
+            "enum": [
+              "became_unavailable",
+              "returned_to_service"
+            ],
+            "title": "Change Type",
+            "type": "string"
+          },
+          "condition_id": {
+            "title": "Condition Id",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "change_type",
+          "condition_id",
+          "occurred_at",
+          "asset"
+        ],
+        "title": "PlanFreshnessChange",
         "type": "object"
       },
       "PlanSourceRun": {
@@ -1523,6 +2011,427 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/asset-conditions": {
+      "get": {
+        "operationId": "list_asset_conditions_asset_conditions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cnvrt_project_id",
+            "required": true,
+            "schema": {
+              "title": "Cnvrt Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "collection_id",
+            "required": true,
+            "schema": {
+              "title": "Collection Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "unigraph_project_id",
+            "required": true,
+            "schema": {
+              "title": "Unigraph Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "job_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "default": "active",
+              "enum": [
+                "active",
+                "cleared",
+                "all"
+              ],
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetConditionList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Asset Conditions"
+      },
+      "post": {
+        "operationId": "create_asset_condition_asset_conditions_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAssetConditionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetConditionDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Asset Condition"
+      }
+    },
+    "/asset-conditions/events": {
+      "get": {
+        "operationId": "asset_condition_events_asset_conditions_events_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cnvrt_project_id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Cnvrt Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "collection_id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Collection Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "unigraph_project_id",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Unigraph Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "job_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Authorization",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Last-Event-ID",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Last-Event-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Asset Condition Events"
+      }
+    },
+    "/asset-conditions/{condition_id}": {
+      "get": {
+        "operationId": "asset_condition_detail_asset_conditions__condition_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "condition_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Condition Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetConditionDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Asset Condition Detail"
+      }
+    },
+    "/asset-conditions/{condition_id}/clear": {
+      "post": {
+        "operationId": "clear_asset_condition_asset_conditions__condition_id__clear_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "condition_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Condition Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssetConditionActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetConditionDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clear Asset Condition"
+      }
+    },
+    "/asset-conditions/{condition_id}/confirm": {
+      "post": {
+        "operationId": "confirm_asset_condition_asset_conditions__condition_id__confirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "condition_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Condition Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssetConditionActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetConditionDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirm Asset Condition"
+      }
+    },
     "/equipment": {
       "post": {
         "operationId": "equipment_equipment_post",

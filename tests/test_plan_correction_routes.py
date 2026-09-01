@@ -18,6 +18,7 @@ CHANGE_ID = UUID("974eb15d-e89f-48be-a347-d8dcf5f236fe")
 class Repository:
     def __init__(self):
         self.failed_manifest = None
+        self.calls = []
         self.change = {
             "change_id": str(CHANGE_ID), "plan_id": str(PLAN_ID), "raised_against_version_id": VERSION_ID,
             "change_type": "accept_manual_candidate", "target_type": "candidate", "target_id": "v1",
@@ -39,7 +40,8 @@ class Repository:
     def list_changes(self, plan_id):
         return [self.change]
 
-    def prepare_derivation(self, plan_id, parent, actor):
+    def prepare_derivation(self, plan_id, parent, actor, trigger="corrections"):
+        self.calls.append(("prepare_derivation", plan_id, parent, actor, trigger))
         return {
             "manifest_id": "f2ddaa35-795e-4dc8-a72d-1a330a14255f",
             "parent_run_id": "a" * 32,
@@ -146,6 +148,22 @@ class PlanCorrectionRouteTests(unittest.TestCase):
         accepted = derive_plan(request, PLAN_ID, DerivePlanRequest(parent_plan_version_id=VERSION_ID), authorization="Bearer token")
         self.assertEqual(accepted["run_id"], "b" * 32)
         self.assertEqual(request.app.state.run_store.parent, "a" * 32)
+
+    def test_asset_condition_derivation_trigger_is_forwarded(self):
+        request = self.request("8")
+        derive_plan(
+            request,
+            PLAN_ID,
+            DerivePlanRequest(
+                parent_plan_version_id=VERSION_ID,
+                trigger="asset_conditions",
+            ),
+            authorization="Bearer token",
+        )
+        self.assertEqual(
+            request.app.state.run_store.repository.calls[-1][-1],
+            "asset_conditions",
+        )
 
     def test_derivation_launch_failure_releases_manifest(self):
         request = self.request("8")

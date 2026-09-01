@@ -8,6 +8,7 @@ from collections import OrderedDict
 from dataclasses import replace
 from pathlib import Path
 from threading import Lock
+from types import SimpleNamespace
 from typing import Callable
 from urllib.parse import urlparse
 
@@ -44,7 +45,7 @@ def _cnvrt_client(auth_token: str) -> Plant360Client:
     return Plant360Client(ApiConfig(base_url=_cnvrt_api_base_url(), auth_token=auth_token))
 
 
-def config_from_run_request(request, auth_token: str):
+def config_from_run_request(request, auth_token: str, *, shared_asset_conditions=()):
     scope = request.work_scope
     config = build_run_config(
         equipment_tag=request.equipment_tag,
@@ -68,7 +69,14 @@ def config_from_run_request(request, auth_token: str):
         hot_work=scope.hot_work,
         output_dir=Path("."),
     )
-    config = replace(config, approved_corrections=tuple(getattr(request, "approved_corrections", ()) or ()))
+    local_feedback = tuple(getattr(request, "approved_corrections", ()) or ())
+    # Shared unavailable conditions are deliberately applied after plan-local
+    # feedback. A local "available" correction must never weaken a current
+    # shared operational condition.
+    config = _config_with_shared_asset_conditions(
+        replace(config, approved_corrections=local_feedback),
+        shared_asset_conditions,
+    )
     if request.selected_asset is None:
         return config
     context = PlanningContext(
@@ -88,6 +96,21 @@ def config_from_run_request(request, auth_token: str):
         hilt_entity_class=request.selected_asset.entity_class,
     )
     return replace(config, selected_asset=selected_asset)
+
+
+def _config_with_shared_asset_conditions(config, conditions):
+    local_feedback = tuple(
+        item
+        for item in (getattr(config, "approved_corrections", ()) or ())
+        if str(item.get("source_system") or "") != "shared_asset_condition"
+    )
+    shared_feedback = tuple(
+        _asset_condition_overlay(item) for item in (conditions or ())
+    )
+    return replace(
+        config,
+        approved_corrections=local_feedback + shared_feedback,
+    )
 
 
 def config_from_equipment_request(request, auth_token: str):
@@ -123,6 +146,41 @@ def list_project_equipment(request, auth_token: str):
     if not _is_unigraph_project_mapped(client, request):
         raise ValueError("Selected UniGraph project is not mapped to the CNVRT project and collection")
     return list_equipment(config.graph, request.limit)
+
+
+def _asset_condition_overlay(condition: dict) -> dict:
+    """Translate one snapshotted shared condition into a safety overlay."""
+
+    asset = condition.get("asset") or {}
+    external_id = str(asset.get("external_id") or "").strip()
+    external_system = str(asset.get("external_system") or "")
+    proposed_change = {"operational_status": "unavailable"}
+    if "drawing" in external_system or "hilt" in external_system:
+        proposed_change["drawing_entity_id"] = external_id
+    return {
+        "change_id": str(condition.get("condition_id") or ""),
+        "change_type": "mark_point_unavailable",
+        "feedback_category": "input_correction",
+        "feedback_effect": "input_overlay",
+        "target_type": "isolation_point",
+        "target_id": external_id,
+        "proposed_change": proposed_change,
+        "justification": str(condition.get("notes") or "Reported unavailable."),
+        "raised_by": str(condition.get("reported_by") or "shared_operational_context"),
+        "approved_by": str(
+            condition.get("confirmed_by")
+            or condition.get("reported_by")
+            or "shared_operational_context"
+        ),
+        "source_system": "shared_asset_condition",
+        "source_reference": {
+            "condition_id": str(condition.get("condition_id") or ""),
+            "asset_ref_id": str(asset.get("asset_ref_id") or ""),
+            "external_system": external_system,
+            "scope_key": str(asset.get("scope_key") or ""),
+        },
+        "evidence": condition.get("evidence") or {},
+    }
 
 
 def _is_unigraph_project_mapped(client: Plant360Client, request) -> bool:
@@ -226,6 +284,58 @@ def list_cnvrt_drawings(cnvrt_project_id: int, collection_id: int, auth_token: s
     ]
 
 
+def authorize_planning_context(context: dict, auth_token: str) -> None:
+    """Fail unless the bearer token can access the complete supplied scope."""
+
+    try:
+        project_id = int(str(context.get("cnvrt_project_id") or ""))
+        collection_id = int(str(context.get("collection_id") or ""))
+    except ValueError as error:
+        raise PermissionError("Invalid planning context") from error
+    unigraph_project_id = str(context.get("unigraph_project_id") or "").strip()
+    job_id = str(context.get("job_id") or "").strip()
+
+    cnvrt_client = _cnvrt_client(auth_token)
+    if job_id:
+        job = cnvrt_client.job_details(job_id)
+        project_value = job.get("project") if isinstance(job, dict) else None
+        if isinstance(project_value, dict):
+            project_value = project_value.get("id")
+        if not isinstance(job, dict) or any(
+            (
+                str(job.get("id") or "") != job_id,
+                str(project_value or "") != str(project_id),
+                str(job.get("collection_id") or "") != str(collection_id),
+            )
+        ):
+            raise PermissionError("CNVRT drawing is not accessible")
+    else:
+        collection = cnvrt_client.get_json(
+            f"/projects/{project_id}/collections/{collection_id}"
+        )
+        project_value = collection.get("project") if isinstance(collection, dict) else None
+        if isinstance(project_value, dict):
+            project_value = project_value.get("id")
+        if not isinstance(collection, dict) or any(
+            (
+                str(collection.get("id") or "") != str(collection_id),
+                str(project_value or "") != str(project_id),
+            )
+        ):
+            raise PermissionError("CNVRT collection is not accessible")
+
+    unigraph_client = Plant360Client(
+        ApiConfig(base_url=_unigraph_api_base_url(), auth_token=auth_token)
+    )
+    mapped_request = SimpleNamespace(
+        cnvrt_project_id=str(project_id),
+        collection_id=str(collection_id),
+        unigraph_project_id=unigraph_project_id,
+    )
+    if not _is_unigraph_project_mapped(unigraph_client, mapped_request):
+        raise PermissionError("UniGraph project is not accessible")
+
+
 def get_cnvrt_drawing_image(cnvrt_project_id: int, collection_id: int, job_id: int, auth_token: str):
     path = f"/projects/{cnvrt_project_id}/collections/{collection_id}/jobs/{job_id}/image/source"
     return _cnvrt_client(auth_token).get_bytes(path)
@@ -314,16 +424,31 @@ def execute_agent_request(
     run_id: str,
     request,
     auth_token: str,
+    shared_asset_conditions=(),
+    shared_asset_condition_loader: Callable | None = None,
     on_event: Callable | None = None,
 ) -> dict:
-    config = config_from_run_request(request, auth_token)
+    config = config_from_run_request(
+        request,
+        auth_token,
+        shared_asset_conditions=shared_asset_conditions,
+    )
     model = request.model or os.environ.get("GEMINI_MODEL") or DEFAULT_MODEL
+    def refresh_context(config):
+        conditions = (
+            shared_asset_condition_loader(config)
+            if shared_asset_condition_loader is not None
+            else shared_asset_conditions
+        )
+        return _config_with_shared_asset_conditions(config, conditions)
+
     result: AgentRunResult = run_agent_pipeline(
         config,
         model=model,
         api_key=os.environ.get("GEMINI_API_KEY", ""),
         max_steps=request.max_steps,
         on_event=on_event,
+        context_refresh=refresh_context,
     )
 
     trace_payload = {

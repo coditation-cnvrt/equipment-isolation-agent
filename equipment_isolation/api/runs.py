@@ -107,11 +107,16 @@ class RunStore:
 
     def create(self, request, auth_token: str, *, parent_run_id: str | None = None) -> RunRecord:
         run_id = uuid.uuid4().hex
+        request_payload = _request_payload(request)
+        if self.repository and hasattr(self.repository, "active_asset_conditions_for_run"):
+            request_payload["asset_conditions"] = self.repository.active_asset_conditions_for_run(
+                request_payload
+            )
         record = RunRecord(
             run_id=run_id,
             equipment_tag=request.equipment_tag,
             runner=request.runner,
-            request=_request_payload(request),
+            request=request_payload,
             parent_run_id=parent_run_id,
             derivation_manifest_id=str((getattr(request, "derivation_context", {}) or {}).get("manifest_id") or "") or None,
         )
@@ -191,6 +196,25 @@ class RunStore:
                 self._set_progress(record, kind=kind, tool=str(payload.get("name") or ""))
             self._emit_event(record, event)
 
+        def load_asset_conditions(config):
+            if not self.repository:
+                return record.request.get("asset_conditions") or []
+            refreshed_request = {
+                **record.request,
+                "job_id": str(config.resolved_job_id or ""),
+                "job_name": str(config.job_name or ""),
+                "cnvrt_project_id": str(config.cnvrt_project_id or ""),
+                "collection_id": str(config.collection_id or ""),
+                "unigraph_project_id": str(config.graph.project_id or ""),
+            }
+            conditions = self.repository.active_asset_conditions_for_run(
+                refreshed_request
+            )
+            refreshed_request["asset_conditions"] = conditions
+            self.repository.update_run_request(record.run_id, refreshed_request)
+            record.request = refreshed_request
+            return conditions
+
         try:
             if self._is_interrupted(record):
                 return
@@ -205,6 +229,8 @@ class RunStore:
                 run_id=record.run_id,
                 request=request,
                 auth_token=auth_token,
+                shared_asset_conditions=record.request.get("asset_conditions") or [],
+                shared_asset_condition_loader=load_asset_conditions,
                 on_event=on_event,
             )
             if outcome.get("ok"):

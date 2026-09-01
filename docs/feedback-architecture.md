@@ -1,5 +1,9 @@
 # Isolation-plan feedback architecture
 
+Plan feedback is the plan-local context. Shared plant facts use the separate
+asset-condition model described below; they are not represented by feedback
+rows with nullable plan foreign keys.
+
 ## Decision
 
 Plan feedback is one governed record family with four distinct categories:
@@ -35,6 +39,44 @@ No requirement-deviation or execution-failure subtype is currently registered. M
 
 Feedback has no expiry date in the current increment. Later temporal plant-state support must be added deliberately rather than inferred from creation timestamps.
 
+## Shared operational context
+
+`asset_condition` records the current lifecycle of a shared fact about an exact
+`asset_reference`. The first supported condition is `unavailable`. Reporting it
+makes the condition active immediately; `asset_condition_event` preserves
+append-only report, confirmation, and clear events. Returning an asset to
+service clears the active condition rather than creating an active `available`
+fact.
+
+Fresh and derived runs load active conditions in their explicit UniGraph and
+CNVRT drawing scopes. When a request omits `job_id`, the run refreshes and
+persists the condition snapshot immediately after authoritative boundary/job
+resolution and before HILT candidate resolution. The backend translates them
+into deterministic unavailable overlays after plan-local feedback, so local
+feedback cannot weaken the shared safety state. `plan_version_asset_condition`
+and an input snapshot
+preserve exactly which conditions a completed version considered.
+
+Plan freshness is computed from that immutable snapshot and the currently
+applicable active-condition set. A changed set makes the latest version
+`stale`; it does not mutate or revoke the saved version. The scoped
+`/asset-conditions/events` SSE stream is an invalidation signal only. Clients
+refetch plan detail and use the backend freshness result rather than deriving
+authority from event order or timestamps. The stream uses overlap replay plus
+event-ID deduplication so a transaction that commits late is not skipped by a
+timestamp cursor. Every condition read, mutation, and stream subscription first
+verifies the bearer token against the persisted CNVRT/UniGraph scope.
+
+A stale version can launch a complete child derivation with the
+`asset_conditions` trigger even when no approved plan feedback exists.
+Derivation manifests record `corrections`, `asset_conditions`, or `combined`
+provenance. The child run snapshots the current shared conditions, and normal
+plan-version lineage and structural diffing remain authoritative.
+
+Identity matching is exact and source-scoped. Tags are not physical-asset keys.
+Cross-drawing propagation requires a future governed canonical-asset mapping;
+the current model does not infer that two repeated tags identify one valve.
+
 ## Invariants
 
 - A feedback subtype belongs to exactly one category.
@@ -47,5 +89,7 @@ Feedback has no expiry date in the current increment. Later temporal plant-state
   selection, availability, label, or addition behavior at a time.
 - Review decisions are append-only; projection fields on `plan_feedback` are compatibility/read-model fields.
 - Derivation always reruns the complete authoritative pipeline.
+- Shared-condition events invalidate clients; only backend snapshot comparison determines staleness.
+- Asset-condition re-evaluation creates a child plan version and never rewrites the stale parent.
 - Failed or stale application is recorded, never silently treated as applied.
 - Manual observations retain manual provenance; they are not represented as authoritative source-data updates.

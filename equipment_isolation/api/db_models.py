@@ -243,6 +243,68 @@ class AssetReference(Base):
     context: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
 
 
+class AssetCondition(Base):
+    """Current lifecycle record for a shared operational fact about an asset."""
+
+    __tablename__ = "asset_condition"
+    __table_args__ = (
+        CheckConstraint(
+            "condition_type IN ('unavailable')",
+            name="asset_condition_type_check",
+        ),
+        CheckConstraint(
+            "state IN ('active','cleared')",
+            name="asset_condition_state_check",
+        ),
+    )
+    condition_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    asset_ref_id: Mapped[UUID] = mapped_column(
+        ForeignKey("asset_reference.asset_ref_id", ondelete="RESTRICT"), nullable=False
+    )
+    condition_type: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(Text, nullable=False, server_default="active")
+    reason_code: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    source_system: Mapped[str | None] = mapped_column(Text)
+    source_reference: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    reported_by: Mapped[str] = mapped_column(Text, nullable=False)
+    reported_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    confirmed_by: Mapped[str | None] = mapped_column(Text)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cleared_by: Mapped[str | None] = mapped_column(Text)
+    cleared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    clear_reason: Mapped[str | None] = mapped_column(Text)
+
+
+class AssetConditionEvent(Base):
+    """Append-only audit history for an asset condition lifecycle."""
+
+    __tablename__ = "asset_condition_event"
+    __table_args__ = (
+        CheckConstraint(
+            "event_type IN ('reported','confirmed','cleared')",
+            name="asset_condition_event_type_check",
+        ),
+    )
+    event_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid()
+    )
+    condition_id: Mapped[UUID] = mapped_column(
+        ForeignKey("asset_condition.condition_id", ondelete="RESTRICT"), nullable=False
+    )
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    actor_id: Mapped[str] = mapped_column(Text, nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+
+
 class PlanWorkScope(Base):
     __tablename__ = "work_scope"
     work_scope_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
@@ -265,6 +327,22 @@ class InputSnapshot(Base):
     source_type: Mapped[str] = mapped_column(Text, nullable=False)
     content_hash: Mapped[str] = mapped_column(Text, nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+
+
+class PlanVersionAssetCondition(Base):
+    """Immutable record of a shared condition considered by a plan version."""
+
+    __tablename__ = "plan_version_asset_condition"
+    plan_version_id: Mapped[UUID] = mapped_column(
+        ForeignKey("plan_version.plan_version_id", ondelete="CASCADE"), primary_key=True
+    )
+    condition_id: Mapped[UUID] = mapped_column(
+        ForeignKey("asset_condition.condition_id", ondelete="RESTRICT"), primary_key=True
+    )
+    snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    captured_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class IsolationBranch(Base):
@@ -370,13 +448,21 @@ class FeedbackReviewDecision(Base):
 
 class DerivationManifest(Base):
     __tablename__ = "derivation_manifest"
-    __table_args__ = (CheckConstraint("state IN ('locked','running','completed','failed')", name="derivation_manifest_state_check"),)
+    __table_args__ = (
+        CheckConstraint("state IN ('locked','running','completed','failed')", name="derivation_manifest_state_check"),
+        CheckConstraint(
+            "trigger_kind IN ('corrections','asset_conditions','combined')",
+            name="derivation_manifest_trigger_kind_check",
+        ),
+    )
     manifest_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
     plan_id: Mapped[UUID] = mapped_column(ForeignKey("isolation_plan.plan_id", ondelete="CASCADE"), nullable=False)
     parent_plan_version_id: Mapped[UUID] = mapped_column(ForeignKey("plan_version.plan_version_id", ondelete="RESTRICT"), nullable=False)
     run_id: Mapped[str | None] = mapped_column(ForeignKey("isolation_runs.run_id", ondelete="RESTRICT"), unique=True)
     child_plan_version_id: Mapped[UUID | None] = mapped_column(ForeignKey("plan_version.plan_version_id", ondelete="RESTRICT"), unique=True)
     state: Mapped[str] = mapped_column(Text, nullable=False)
+    trigger_kind: Mapped[str] = mapped_column(Text, nullable=False, server_default="corrections")
+    trigger_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
     policy_hash: Mapped[str] = mapped_column(Text, nullable=False)
     created_by: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -450,6 +536,23 @@ Index(
     "feedback_review_decision_feedback_idx",
     FeedbackReviewDecision.feedback_id,
     FeedbackReviewDecision.created_at.desc(),
+)
+Index(
+    "asset_condition_one_active_type_idx",
+    AssetCondition.asset_ref_id,
+    AssetCondition.condition_type,
+    unique=True,
+    postgresql_where=AssetCondition.state == "active",
+)
+Index(
+    "asset_condition_state_reported_idx",
+    AssetCondition.state,
+    AssetCondition.reported_at.desc(),
+)
+Index(
+    "asset_condition_event_condition_idx",
+    AssetConditionEvent.condition_id,
+    AssetConditionEvent.occurred_at,
 )
 Index("derivation_manifest_plan_state_idx", DerivationManifest.plan_id, DerivationManifest.state)
 Index(

@@ -74,6 +74,10 @@ def t_fetch_boundary(session: AgentSession, equipment_tag: str = "") -> dict:
     data["context"] = config.context
     data.setdefault("debug", {}).update(job_debug)
     session.config = config
+    refresh_context = getattr(session, "refresh_context", None)
+    if refresh_context is not None:
+        refresh_context()
+    data["context"] = session.config.context
     session.boundary_data = data
     summary = _summarize_boundary(data)
     if rejected:

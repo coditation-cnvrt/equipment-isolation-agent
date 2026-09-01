@@ -26,10 +26,13 @@ def run_agent_pipeline(
     api_key: str = "",
     max_steps: int = 16,
     on_event: Callable | None = None,
+    context_refresh: Callable | None = None,
 ) -> AgentRunResult:
     """Run the agentic pipeline without printing or writing artifacts."""
     config, metadata_debug = resolve_project_metadata(config)
-    session = AgentSession(config)
+    if context_refresh is not None:
+        config = context_refresh(config)
+    session = AgentSession(config, context_refresh=context_refresh)
     agent_result = run_agent(
         session,
         model=model,

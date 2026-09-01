@@ -28,13 +28,20 @@ from sqlalchemy import create_engine, func, inspect, select
 
 from equipment_isolation.api.database import database_url, postgres_config_from_env
 from equipment_isolation.api.db import PostgresRunRepository, _get_or_create_asset
-from equipment_isolation.api.db_models import PathPoint
-from equipment_isolation.api.models import CreateChangeRequest
+from equipment_isolation.api.db_models import PathPoint, PlanVersionAssetCondition
+from equipment_isolation.api.models import (
+    AssetConditionActionRequest,
+    AssetConditionAssetRequest,
+    CreateAssetConditionRequest,
+    CreateChangeRequest,
+)
 from equipment_isolation.api.plans import PlanDomainError
 from equipment_isolation.pipeline.env import load_dotenv
 
 
 APP_TABLES = (
+    "asset_condition",
+    "asset_condition_event",
     "asset_reference",
     "audit_event",
     "feedback_application_result",
@@ -53,6 +60,7 @@ APP_TABLES = (
     "plan_feedback",
     "plan_step",
     "plan_version",
+    "plan_version_asset_condition",
     "plan_version_feedback",
     "work_scope",
     "work_scope_asset",
@@ -137,6 +145,28 @@ def _repository_smoke(repository: PostgresRunRepository) -> None:
         "collection_id": "206",
         "unigraph_project_id": "15",
     }
+    condition = repository.create_asset_condition(
+        CreateAssetConditionRequest(
+            asset=AssetConditionAssetRequest(
+                external_system="cnvrt_drawing_entity",
+                external_id="orm-smoke-hilt-valve",
+                tag="XV-ORM-SMOKE",
+                asset_class="gate_valve",
+                cnvrt_project_id="277",
+                collection_id="206",
+                unigraph_project_id="15",
+                job_id="9001",
+            ),
+            notes="Disposable database unavailable condition smoke test.",
+        ),
+        "reporter-1",
+    )
+    request["asset_conditions"] = repository.active_asset_conditions_for_run(request)
+    _require(
+        [item["condition_id"] for item in request["asset_conditions"]]
+        == [condition["condition_id"]],
+        "Active shared asset condition was not loaded into run context",
+    )
     repository.insert_run(run, request)
     _require(repository.get_run(run_id)["status"] == "queued", "Run insert/get failed")
     _require(
@@ -180,6 +210,27 @@ def _repository_smoke(repository: PostgresRunRepository) -> None:
     _require(
         repository.get_plan(plan["plan_id"])["versions"][0]["version_no"] == 1,
         "Plan detail failed",
+    )
+    with repository._session_factory() as session:
+        _require(
+            session.scalar(select(func.count()).select_from(PlanVersionAssetCondition)) == 1,
+            "Plan version did not snapshot its shared asset condition",
+        )
+    confirmed = repository.confirm_asset_condition(
+        condition["condition_id"],
+        AssetConditionActionRequest(reason="Independent field review completed."),
+        "reviewer-2",
+    )
+    _require(confirmed["confirmed_by"] == "reviewer-2", "Asset condition confirmation failed")
+    cleared = repository.clear_asset_condition(
+        condition["condition_id"],
+        AssetConditionActionRequest(reason="Valve repaired and function tested."),
+        "maintainer-1",
+    )
+    _require(cleared["state"] == "cleared", "Asset condition clear failed")
+    _require(
+        repository.active_asset_conditions_for_run(request) == [],
+        "Cleared asset condition remained in active run context",
     )
 
     change = repository.create_change(
