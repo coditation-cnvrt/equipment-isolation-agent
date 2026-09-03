@@ -135,10 +135,19 @@ def _actor_id(request: Request) -> str:
     return str(actor)
 
 
-def _authorize_asset_scope(context: dict, authorization: str) -> None:
+def _authorize_asset_scope(
+    context: dict,
+    authorization: str,
+    *,
+    asset_system: str = "",
+) -> None:
     token = _require_run_read_auth(authorization)
     try:
-        authorize_planning_context(context, token)
+        authorize_planning_context(
+            context,
+            token,
+            asset_system=asset_system,
+        )
     except PermissionError:
         raise HTTPException(
             status_code=403,
@@ -165,7 +174,12 @@ def _authorized_asset_condition(request: Request, condition_id: UUID, authorizat
             status_code=404,
             detail={"kind": "unknown_asset_condition", "message": "Unknown asset condition."},
         )
-    _authorize_asset_scope((item.get("asset") or {}).get("context") or {}, authorization)
+    asset = item.get("asset") or {}
+    _authorize_asset_scope(
+        asset.get("context") or {},
+        authorization,
+        asset_system=str(asset.get("external_system") or ""),
+    )
     return item
 
 
@@ -207,7 +221,11 @@ def create_asset_condition(
     request_body: CreateAssetConditionRequest,
     authorization: str = Header(default=""),
 ):
-    _authorize_asset_scope(request_body.asset.context(), authorization)
+    _authorize_asset_scope(
+        request_body.asset.context(),
+        authorization,
+        asset_system=request_body.asset.external_system,
+    )
     try:
         return _plan_repository(request).create_asset_condition(
             request_body, _actor_id(request)

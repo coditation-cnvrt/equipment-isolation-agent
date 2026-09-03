@@ -284,8 +284,13 @@ def list_cnvrt_drawings(cnvrt_project_id: int, collection_id: int, auth_token: s
     ]
 
 
-def authorize_planning_context(context: dict, auth_token: str) -> None:
-    """Fail unless the bearer token can access the complete supplied scope."""
+def authorize_planning_context(
+    context: dict,
+    auth_token: str,
+    *,
+    asset_system: str = "",
+) -> None:
+    """Fail unless the bearer token can access an asset's authoritative scope."""
 
     try:
         project_id = int(str(context.get("cnvrt_project_id") or ""))
@@ -297,15 +302,26 @@ def authorize_planning_context(context: dict, auth_token: str) -> None:
 
     cnvrt_client = _cnvrt_client(auth_token)
     if job_id:
-        job = cnvrt_client.job_details(job_id)
+        try:
+            numeric_job_id = int(job_id)
+        except ValueError as error:
+            raise PermissionError("Invalid planning context") from error
+        job = cnvrt_client.authorized_job(
+            project_id,
+            collection_id,
+            numeric_job_id,
+        )
         project_value = job.get("project") if isinstance(job, dict) else None
         if isinstance(project_value, dict):
             project_value = project_value.get("id")
+        collection_value = job.get("collection") if isinstance(job, dict) else None
+        if isinstance(collection_value, dict):
+            collection_value = collection_value.get("id")
         if not isinstance(job, dict) or any(
             (
                 str(job.get("id") or "") != job_id,
                 str(project_value or "") != str(project_id),
-                str(job.get("collection_id") or "") != str(collection_id),
+                str(collection_value or "") != str(collection_id),
             )
         ):
             raise PermissionError("CNVRT drawing is not accessible")
@@ -323,6 +339,13 @@ def authorize_planning_context(context: dict, auth_token: str) -> None:
             )
         ):
             raise PermissionError("CNVRT collection is not accessible")
+
+    # HILT/drawing entity identity is fully scoped by CNVRT project,
+    # collection, and job. Its recorded UniGraph project is descriptive
+    # provenance and may be superseded by a later export of the same drawing.
+    normalized_system = str(asset_system or "").strip().lower()
+    if normalized_system == "cnvrt_drawing_entity":
+        return
 
     unigraph_client = Plant360Client(
         ApiConfig(base_url=_unigraph_api_base_url(), auth_token=auth_token)

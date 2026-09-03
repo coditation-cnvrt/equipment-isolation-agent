@@ -3,9 +3,31 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from equipment_isolation.api.service import list_project_equipment
+from equipment_isolation.integrations.api_client import Plant360Client
 
 
 class EquipmentServiceTests(unittest.TestCase):
+    def test_authorized_job_uses_nested_permission_checked_endpoint(self):
+        client = Plant360Client(
+            SimpleNamespace(
+                base_url="https://cnvrt.example",
+                auth_token="user-token",
+                verify_ssl=True,
+            )
+        )
+        expected = {
+            "id": 2151,
+            "project": {"id": 277},
+            "collection": {"id": 206},
+        }
+        with patch.object(client, "get_json", return_value=expected) as get_json:
+            result = client.authorized_job(277, 206, 2151)
+
+        self.assertEqual(result, expected)
+        get_json.assert_called_once_with(
+            "/projects/277/collections/206/jobs/2151"
+        )
+
     @patch("equipment_isolation.api.service.list_equipment")
     @patch("equipment_isolation.api.service.Plant360Client")
     @patch("equipment_isolation.api.service.config_from_equipment_request")

@@ -66,6 +66,11 @@ class Plant360Client:
     def job_details(self, job_id):
         return self.get_json(f"/jobs/get_job_details/{job_id}")
 
+    def authorized_job(self, project_id, collection_id, job_id):
+        return self.get_json(
+            f"/projects/{project_id}/collections/{collection_id}/jobs/{job_id}"
+        )
+
     def hilt_graph(self, job_id):
         return self.get_json(f"/jobs/get_job_hilt_graph/{job_id}")
 

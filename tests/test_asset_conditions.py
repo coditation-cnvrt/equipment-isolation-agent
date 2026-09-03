@@ -48,7 +48,10 @@ class Repository:
         self.condition = {
             "condition_id": str(CONDITION_ID),
             "state": "active",
-            "asset": {"context": asset_request().context()},
+            "asset": {
+                "external_system": "cnvrt_drawing_entity",
+                "context": asset_request().context(),
+            },
         }
 
     def get_asset_condition(self, _condition_id):
@@ -117,7 +120,25 @@ class AssetConditionTests(unittest.TestCase):
         self.assertEqual(listed["items"][0]["condition_id"], str(CONDITION_ID))
         self.assertEqual(repository.calls[0][2], "42")
         self.assertEqual(repository.calls[1][1]["job_id"], "2151")
-        self.assertEqual(self.authorize_scope.call_count, 2)
+        self.authorize_scope.assert_has_calls(
+            [
+                mock.call(
+                    payload.asset.context(),
+                    "token",
+                    asset_system="cnvrt_drawing_entity",
+                ),
+                mock.call(
+                    {
+                        "cnvrt_project_id": "277",
+                        "collection_id": "206",
+                        "unigraph_project_id": "15",
+                        "job_id": "2151",
+                    },
+                    "token",
+                    asset_system="",
+                ),
+            ]
+        )
 
     def test_confirm_and_clear_are_distinct_lifecycle_actions(self):
         request, repository = self.request()
@@ -130,6 +151,21 @@ class AssetConditionTests(unittest.TestCase):
         )
         self.assertEqual(cleared["state"], "cleared")
         self.assertEqual([call[0] for call in repository.calls], ["confirm", "clear"])
+        self.assertEqual(
+            self.authorize_scope.call_args_list,
+            [
+                mock.call(
+                    asset_request().context(),
+                    "token",
+                    asset_system="cnvrt_drawing_entity",
+                ),
+                mock.call(
+                    asset_request().context(),
+                    "token",
+                    asset_system="cnvrt_drawing_entity",
+                ),
+            ],
+        )
 
     def test_scope_authorization_precedes_shared_condition_creation(self):
         request, repository = self.request()
@@ -212,16 +248,85 @@ class AssetConditionTests(unittest.TestCase):
     def test_context_authorization_checks_complete_hierarchy(
         self, cnvrt_client, _unigraph_client, mapped
     ):
-        cnvrt_client.return_value.job_details.return_value = {
+        cnvrt_client.return_value.authorized_job.return_value = {
             "id": 2151,
-            "project": 277,
-            "collection_id": 206,
+            "project": {"id": 277},
+            "collection": {"id": 206},
         }
         mapped.return_value = True
-        authorize_planning_context(asset_request().context(), "token")
+        authorize_planning_context(
+            asset_request(external_system="unigraph_candidate").context(),
+            "token",
+            asset_system="unigraph_candidate",
+        )
+        cnvrt_client.return_value.authorized_job.assert_called_once_with(277, 206, 2151)
+        cnvrt_client.return_value.job_details.assert_not_called()
         mapped.return_value = False
         with self.assertRaises(PermissionError):
-            authorize_planning_context(asset_request().context(), "token")
+            authorize_planning_context(
+                asset_request(external_system="unigraph_candidate").context(),
+                "token",
+                asset_system="unigraph_candidate",
+            )
+
+    @mock.patch("equipment_isolation.api.service._is_unigraph_project_mapped")
+    @mock.patch("equipment_isolation.api.service.Plant360Client")
+    @mock.patch("equipment_isolation.api.service._cnvrt_client")
+    def test_drawing_authorization_ignores_superseded_unigraph_export(
+        self, cnvrt_client, unigraph_client, mapped
+    ):
+        cnvrt_client.return_value.authorized_job.return_value = {
+            "id": 2151,
+            "project": {"id": 277},
+            "collection": {"id": 206},
+        }
+        authorize_planning_context(
+            asset_request(unigraph_project_id="obsolete-export").context(),
+            "token",
+            asset_system="cnvrt_drawing_entity",
+        )
+        cnvrt_client.return_value.authorized_job.assert_called_once_with(277, 206, 2151)
+        cnvrt_client.return_value.job_details.assert_not_called()
+        unigraph_client.assert_not_called()
+        mapped.assert_not_called()
+
+    @mock.patch("equipment_isolation.api.service._cnvrt_client")
+    def test_context_authorization_rejects_unexpected_nested_job_identity(
+        self, cnvrt_client
+    ):
+        cnvrt_client.return_value.authorized_job.return_value = {
+            "id": 2151,
+            "project": {"id": 277},
+            "collection": {"id": 999},
+        }
+        with self.assertRaisesRegex(PermissionError, "drawing is not accessible"):
+            authorize_planning_context(
+                asset_request().context(),
+                "token",
+                asset_system="cnvrt_drawing_entity",
+            )
+
+    @mock.patch("equipment_isolation.api.service._is_unigraph_project_mapped")
+    @mock.patch("equipment_isolation.api.service.Plant360Client")
+    @mock.patch("equipment_isolation.api.service._cnvrt_client")
+    def test_only_canonical_drawing_system_skips_unigraph_authorization(
+        self, cnvrt_client, _unigraph_client, mapped
+    ):
+        cnvrt_client.return_value.authorized_job.return_value = {
+            "id": 2151,
+            "project": {"id": 277},
+            "collection": {"id": 206},
+        }
+        mapped.return_value = False
+
+        with self.assertRaisesRegex(PermissionError, "UniGraph project"):
+            authorize_planning_context(
+                asset_request().context(),
+                "token",
+                asset_system="untrusted_drawing_alias",
+            )
+
+        mapped.assert_called_once()
 
 
 if __name__ == "__main__":
