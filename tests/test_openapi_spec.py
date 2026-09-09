@@ -15,6 +15,13 @@ class OpenApiSpecTests(unittest.TestCase):
         self.assertIn("/isolation-plans/{plan_id}/changes", paths)
         self.assertIn("/isolation-plans/{plan_id}/derive", paths)
         self.assertIn("/isolation-plans/{plan_id}/versions/{version_id}/diff", paths)
+        self.assertIn("/source-data-defects", paths)
+        self.assertIn("/source-data-defects/{defect_id}/remediation", paths)
+        self.assertIn("/source-data-defects/policy", paths)
+        self.assertIn("/source-data-defects/{defect_id}/comments", paths)
+        self.assertIn("/source-data-defects/{defect_id}/evidence", paths)
+        self.assertIn("/source-data-defects/{defect_id}/claim", paths)
+        self.assertIn("/source-data-defects/{defect_id}/release", paths)
 
 
 if __name__ == "__main__":

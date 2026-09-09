@@ -46,3 +46,5 @@ namespaces = false
 "equipment_isolation.agent.docs" = ["*.md"]
 "equipment_isolation.api.migrations" = ["alembic.ini", "script.py.mako"]
 "equipment_isolation.domain" = ["instrument_catalog.json"]
+
+"equipment_isolation.fixtures" = ["*.json"]

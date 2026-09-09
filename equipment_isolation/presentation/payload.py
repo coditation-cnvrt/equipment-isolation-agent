@@ -4,6 +4,7 @@ Pure dict construction -- no filesystem, no HTML. Split out of output.py so the
 agent tool layer can build payloads without importing the HTML renderer.
 Covered by tests/test_payload.py.
 """
+from equipment_isolation.domain.path_facts import path_facts
 from equipment_isolation.domain.identity import RESULT_SCHEMA_VERSION
 from equipment_isolation.domain.isolation_actions import operation_kind, requires_positive_field_confirmation
 from equipment_isolation.domain.serialization import to_jsonable  # noqa: F401  (re-exported for callers)
@@ -59,7 +60,8 @@ def build_final_payload(validation_data, config, downstream_impact=None):
                 "source_component_tag": candidate.get("source_component_tag"),
                 "source_visual_id": candidate.get("source_visual_id"),
                 "required_branch_isolation": bool(candidate.get("required_branch_isolation")),
-                "branch_id": candidate.get("branch_id"),
+                "branch_id": candidate.get("branch_id") or candidate.get("graph_path_key"),
+                **path_facts(candidate),
                 "branch_status": candidate.get("branch_status"),
                 "branch_basis": candidate.get("branch_basis"),
                 "branch_path_node_ids": candidate.get("branch_path_node_ids") or [],
@@ -90,6 +92,9 @@ def build_final_payload(validation_data, config, downstream_impact=None):
                 "assurance_status": validation_data.get("assurance_status"),
                 "plan_readiness": validation_data.get("plan_readiness") or (validation_data.get("isolation_validation") or {}).get("plan_readiness"),
                 "isolation_validation": validation_data.get("isolation_validation"),
+                **({'process_safety_assessment': validation_data['process_safety_assessment'],
+                    'captured_hilt_hash': config.captured_hilt.to_dict()['content_hash'] if getattr(config, 'captured_hilt', None) else None}
+                   if validation_data.get('process_safety_assessment') is not None else {}),
                 "unselected_boundary_sources": (validation_data.get("isolation_validation") or {}).get("unselected_boundary_sources") or [],
                 "boundary_context_sources": boundary_context_sources,
                 "context_instruments": context_instruments,

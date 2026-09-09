@@ -11,6 +11,7 @@ from typing import Any
 PLAN_READINESS_SCHEMA_VERSION = "1.0"
 
 _HARD_REASON_CODES = {
+    "process_safety_requirements_not_demonstrated",
     "no_isolation_candidates",
     "no_deterministic_barrier",
     "boundary_path_without_barrier",

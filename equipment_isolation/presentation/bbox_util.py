@@ -5,6 +5,7 @@ Extracted from bbox.py so that both bbox.py (candidate selection) and hilt_merge
 no I/O.
 """
 
+from equipment_isolation.domain.path_facts import path_facts
 from equipment_isolation.domain.enums import IsolationDecision
 from equipment_isolation.domain.topology import FAR_DISTANCE, normalize_tag
 
@@ -36,10 +37,11 @@ def _dedupe_candidates(candidates):
     for candidate in candidates:
         key = (candidate.get("equipment_tag"), normalize_tag(candidate.get("visual_id") or candidate.get("candidate_id")))
         path = {
+            **path_facts(candidate),
             "source_component_tag": candidate.get("source_component_tag"),
             "source_component_id": candidate.get("source_component_id"),
             "source_visual_id": candidate.get("source_visual_id"),
-            "branch_id": candidate.get("branch_id"),
+            "branch_id": candidate.get("branch_id") or candidate.get("graph_path_key"),
             "branch_status": candidate.get("branch_status"),
             "source_name": candidate.get("source_name"),
             "traversal_depth": candidate.get("traversal_depth"),
@@ -48,12 +50,12 @@ def _dedupe_candidates(candidates):
         }
         if key not in merged:
             copied = dict(candidate)
-            copied["source_paths"] = [path]
+            copied["source_paths"] = candidate.get("source_paths") or [path]
             copied["source_path_count"] = 1
             merged[key] = copied
             continue
         existing = merged[key]
-        existing["source_paths"].append(path)
+        existing["source_paths"].extend(candidate.get("source_paths") or [path])
         existing["source_path_count"] = len(existing["source_paths"])
         if _visual_sort_key(candidate) < _visual_sort_key(existing):
             for field in ("source_component_tag", "source_component_id", "source_visual_id", "source_bbox", "source_visual_node_id", "source_visual_distance", "traversal_depth", "source_name", "confidence", "reason"):

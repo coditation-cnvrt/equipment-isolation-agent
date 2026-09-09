@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from equipment_isolation.api.auth import CnvrtAuthMiddleware
 from equipment_isolation.api.db import PostgresRunRepository, postgres_config_from_env
 from equipment_isolation.api.routes import router
+from equipment_isolation.api.planning_previews import router as preview_router
 from equipment_isolation.api.runs import RunStore
 from equipment_isolation.pipeline.env import load_dotenv
 
@@ -66,6 +67,7 @@ def create_app() -> FastAPI:
         )
     app.state.run_store = run_store
     app.include_router(router)
+    app.include_router(preview_router)
     return app
 
 

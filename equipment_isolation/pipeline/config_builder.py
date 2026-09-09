@@ -39,6 +39,7 @@ def build_run_config(
     confined_space_entry: bool = False,
     hot_work: bool = False,
     output_dir: str | Path = Path("output"),
+    process_safety_inputs=None,
 ) -> RunConfig:
     """Build the same RunConfig shape used by both existing CLIs.
 
@@ -92,7 +93,7 @@ def build_run_config(
             auth_token=auth_token,
             verify_ssl=verify_ssl,
         ),
-        policy=replace(config.policy, max_traversal_depth=max_depth) if max_depth is not None else config.policy,
+        policy=replace(config.policy, process_safety_inputs=process_safety_inputs, **({"max_traversal_depth": max_depth} if max_depth is not None else {})),
         work_scope=WorkScope(
             intrusive_work=intrusive_work,
             confined_space_entry=confined_space_entry,
@@ -100,4 +101,5 @@ def build_run_config(
             high_risk_service=high_risk_service,
         ),
         output_dir=Path(output_dir),
+        process_safety_inputs=process_safety_inputs,
     )

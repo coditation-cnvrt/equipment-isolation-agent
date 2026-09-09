@@ -1,6 +1,38 @@
 {
   "components": {
     "schemas": {
+      "AddSourceDefectEvidenceRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "comment": {
+            "maxLength": 4000,
+            "minLength": 3,
+            "title": "Comment",
+            "type": "string"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_version",
+          "evidence_refs",
+          "comment"
+        ],
+        "title": "AddSourceDefectEvidenceRequest",
+        "type": "object"
+      },
       "AssetConditionActionRequest": {
         "properties": {
           "evidence": {
@@ -771,7 +803,8 @@
             "default": "corrections",
             "enum": [
               "corrections",
-              "asset_conditions"
+              "asset_conditions",
+              "source_data_defects"
             ],
             "title": "Trigger",
             "type": "string"
@@ -1137,6 +1170,11 @@
             "title": "Model",
             "type": "string"
           },
+          "process_safety_inputs": {
+            "additionalProperties": true,
+            "title": "Process Safety Inputs",
+            "type": "object"
+          },
           "request_schema_version": {
             "const": "1.0",
             "default": "1.0",
@@ -1150,14 +1188,7 @@
             "type": "string"
           },
           "selected_asset": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/SelectedAssetRequest"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/SelectedAssetRequest"
           },
           "traversal_source": {
             "default": "",
@@ -1177,13 +1208,20 @@
           "equipment_tag",
           "cnvrt_project_id",
           "collection_id",
-          "unigraph_project_id"
+          "unigraph_project_id",
+          "selected_asset",
+          "process_safety_inputs"
         ],
         "title": "IsolationRunRequest",
         "type": "object"
       },
       "PlanFreshness": {
         "properties": {
+          "asset_conditions_changed": {
+            "default": false,
+            "title": "Asset Conditions Changed",
+            "type": "boolean"
+          },
           "changes": {
             "items": {
               "$ref": "#/components/schemas/PlanFreshnessChange"
@@ -1196,10 +1234,25 @@
             "title": "Evaluated At",
             "type": "string"
           },
+          "governance_readiness": {
+            "default": "ready",
+            "enum": [
+              "ready",
+              "advisory",
+              "warning",
+              "blocked"
+            ],
+            "title": "Governance Readiness",
+            "type": "string"
+          },
           "reason": {
             "anyOf": [
               {
-                "const": "asset_condition_changed",
+                "enum": [
+                  "asset_condition_changed",
+                  "source_data_defect_changed",
+                  "governance_inputs_changed"
+                ],
                 "type": "string"
               },
               {
@@ -1207,6 +1260,19 @@
               }
             ],
             "title": "Reason"
+          },
+          "source_data_defects_changed": {
+            "default": false,
+            "title": "Source Data Defects Changed",
+            "type": "boolean"
+          },
+          "source_defects": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Source Defects",
+            "type": "array"
           },
           "status": {
             "enum": [
@@ -1228,19 +1294,81 @@
       "PlanFreshnessChange": {
         "properties": {
           "asset": {
-            "$ref": "#/components/schemas/AssetConditionAssetDetail"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AssetConditionAssetDetail"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "change_type": {
             "enum": [
               "became_unavailable",
-              "returned_to_service"
+              "returned_to_service",
+              "source_defect_opened",
+              "source_defect_changed",
+              "source_defect_closed"
             ],
             "title": "Change Type",
             "type": "string"
           },
           "condition_id": {
-            "title": "Condition Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Condition Id"
+          },
+          "defect": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Defect"
+          },
+          "defect_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Defect Id"
+          },
+          "event_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          },
+          "material": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Material"
           },
           "occurred_at": {
             "format": "date-time",
@@ -1250,9 +1378,7 @@
         },
         "required": [
           "change_type",
-          "condition_id",
-          "occurred_at",
-          "asset"
+          "occurred_at"
         ],
         "title": "PlanFreshnessChange",
         "type": "object"
@@ -1729,6 +1855,333 @@
         "title": "PlanningUniGraphProjectList",
         "type": "object"
       },
+      "PreviewDetail": {
+        "properties": {
+          "comparison": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparison"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "input_hash": {
+            "title": "Input Hash",
+            "type": "string"
+          },
+          "inputs": {
+            "additionalProperties": true,
+            "title": "Inputs",
+            "type": "object"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "preview_id": {
+            "format": "uuid",
+            "title": "Preview Id",
+            "type": "string"
+          },
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          },
+          "result_hash": {
+            "title": "Result Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "preview_id",
+          "parent_id",
+          "created_at",
+          "input_hash",
+          "result_hash",
+          "inputs",
+          "result",
+          "comparison"
+        ],
+        "title": "PreviewDetail",
+        "type": "object"
+      },
+      "PreviewList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PreviewSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "PreviewList",
+        "type": "object"
+      },
+      "PreviewRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "inputs": {
+            "additionalProperties": true,
+            "title": "Inputs",
+            "type": "object"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          }
+        },
+        "required": [
+          "inputs"
+        ],
+        "title": "PreviewRequest",
+        "type": "object"
+      },
+      "PreviewSummary": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "input_hash": {
+            "title": "Input Hash",
+            "type": "string"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "preview_id": {
+            "format": "uuid",
+            "title": "Preview Id",
+            "type": "string"
+          },
+          "result_hash": {
+            "title": "Result Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "preview_id",
+          "parent_id",
+          "created_at",
+          "input_hash",
+          "result_hash"
+        ],
+        "title": "PreviewSummary",
+        "type": "object"
+      },
+      "PreviewTemplate": {
+        "properties": {
+          "inputs": {
+            "additionalProperties": true,
+            "title": "Inputs",
+            "type": "object"
+          },
+          "scenarios": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Scenarios",
+            "type": "array"
+          }
+        },
+        "required": [
+          "inputs",
+          "scenarios"
+        ],
+        "title": "PreviewTemplate",
+        "type": "object"
+      },
+      "ReclassifySourceDefectRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "anchor": {
+            "$ref": "#/components/schemas/SourceDefectAnchor"
+          },
+          "category": {
+            "enum": [
+              "missing_device",
+              "extra_device",
+              "incorrect_device_type",
+              "incorrect_symbol",
+              "incorrect_label",
+              "incorrect_attribute",
+              "missing_connection",
+              "phantom_connection",
+              "incorrect_connection",
+              "off_page_connector_mismatch",
+              "source_revision_mismatch",
+              "other"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "comment": {
+            "maxLength": 4000,
+            "minLength": 3,
+            "title": "Comment",
+            "type": "string"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_version",
+          "comment",
+          "category",
+          "anchor"
+        ],
+        "title": "ReclassifySourceDefectRequest",
+        "type": "object"
+      },
+      "RecordSourceDefectRemediationRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "comment": {
+            "maxLength": 4000,
+            "minLength": 3,
+            "title": "Comment",
+            "type": "string"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "remediation": {
+            "additionalProperties": true,
+            "title": "Remediation",
+            "type": "object"
+          }
+        },
+        "required": [
+          "expected_version",
+          "comment",
+          "remediation"
+        ],
+        "title": "RecordSourceDefectRemediationRequest",
+        "type": "object"
+      },
+      "ReportSourceDefectRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "anchor": {
+            "$ref": "#/components/schemas/SourceDefectAnchor"
+          },
+          "category": {
+            "enum": [
+              "missing_device",
+              "extra_device",
+              "incorrect_device_type",
+              "incorrect_symbol",
+              "incorrect_label",
+              "incorrect_attribute",
+              "missing_connection",
+              "phantom_connection",
+              "incorrect_connection",
+              "off_page_connector_mismatch",
+              "source_revision_mismatch",
+              "other"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "context": {
+            "$ref": "#/components/schemas/SourceDefectContext"
+          },
+          "description": {
+            "maxLength": 4000,
+            "minLength": 3,
+            "title": "Description",
+            "type": "string"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Evidence Refs",
+            "type": "array"
+          }
+        },
+        "required": [
+          "context",
+          "category",
+          "anchor",
+          "description"
+        ],
+        "title": "ReportSourceDefectRequest",
+        "type": "object"
+      },
       "RunAccepted": {
         "properties": {
           "events_url": {
@@ -1935,6 +2388,409 @@
           "selection_source"
         ],
         "title": "SelectedAssetRequest",
+        "type": "object"
+      },
+      "SourceDefectActionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "comment": {
+            "maxLength": 4000,
+            "minLength": 3,
+            "title": "Comment",
+            "type": "string"
+          },
+          "evidence_refs": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "title": "Evidence Refs",
+            "type": "array"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_version",
+          "comment"
+        ],
+        "title": "SourceDefectActionRequest",
+        "type": "object"
+      },
+      "SourceDefectAnchor": {
+        "additionalProperties": false,
+        "properties": {
+          "anchor_id": {
+            "minLength": 1,
+            "title": "Anchor Id",
+            "type": "string"
+          },
+          "anchor_type": {
+            "enum": [
+              "entity",
+              "link",
+              "point",
+              "region"
+            ],
+            "title": "Anchor Type",
+            "type": "string"
+          },
+          "facts": {
+            "additionalProperties": true,
+            "title": "Facts",
+            "type": "object"
+          }
+        },
+        "required": [
+          "anchor_type",
+          "anchor_id"
+        ],
+        "title": "SourceDefectAnchor",
+        "type": "object"
+      },
+      "SourceDefectContext": {
+        "additionalProperties": false,
+        "properties": {
+          "cnvrt_project_id": {
+            "minLength": 1,
+            "title": "Cnvrt Project Id",
+            "type": "string"
+          },
+          "collection_id": {
+            "minLength": 1,
+            "title": "Collection Id",
+            "type": "string"
+          },
+          "job_id": {
+            "minLength": 1,
+            "title": "Job Id",
+            "type": "string"
+          },
+          "reported_source_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reported Source Revision"
+          },
+          "reported_source_snapshot_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reported Source Snapshot Hash"
+          },
+          "unigraph_project_id": {
+            "minLength": 1,
+            "title": "Unigraph Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cnvrt_project_id",
+          "collection_id",
+          "unigraph_project_id",
+          "job_id"
+        ],
+        "title": "SourceDefectContext",
+        "type": "object"
+      },
+      "SourceDefectDetail": {
+        "properties": {
+          "affected_plans": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Affected Plans",
+            "type": "array"
+          },
+          "anchor": {
+            "additionalProperties": true,
+            "title": "Anchor",
+            "type": "object"
+          },
+          "category": {
+            "enum": [
+              "missing_device",
+              "extra_device",
+              "incorrect_device_type",
+              "incorrect_symbol",
+              "incorrect_label",
+              "incorrect_attribute",
+              "missing_connection",
+              "phantom_connection",
+              "incorrect_connection",
+              "off_page_connector_mismatch",
+              "source_revision_mismatch",
+              "other"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "claimed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claimed At"
+          },
+          "claimed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claimed By"
+          },
+          "context": {
+            "additionalProperties": true,
+            "title": "Context",
+            "type": "object"
+          },
+          "defect_id": {
+            "title": "Defect Id",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/SourceDefectEventDetail"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "policy_hash": {
+            "title": "Policy Hash",
+            "type": "string"
+          },
+          "policy_snapshot": {
+            "additionalProperties": true,
+            "title": "Policy Snapshot",
+            "type": "object"
+          },
+          "reported_at": {
+            "format": "date-time",
+            "title": "Reported At",
+            "type": "string"
+          },
+          "reported_by": {
+            "title": "Reported By",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "reported",
+              "confirmed",
+              "remediation_recorded",
+              "resolved",
+              "rejected",
+              "withdrawn"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "defect_id",
+          "version",
+          "context",
+          "category",
+          "anchor",
+          "description",
+          "state",
+          "policy_snapshot",
+          "policy_hash",
+          "reported_by",
+          "reported_at",
+          "updated_at"
+        ],
+        "title": "SourceDefectDetail",
+        "type": "object"
+      },
+      "SourceDefectEventDetail": {
+        "properties": {
+          "actor_id": {
+            "title": "Actor Id",
+            "type": "string"
+          },
+          "defect_version": {
+            "title": "Defect Version",
+            "type": "integer"
+          },
+          "event_hash": {
+            "title": "Event Hash",
+            "type": "string"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "from_state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "reported",
+                  "confirmed",
+                  "remediation_recorded",
+                  "resolved",
+                  "rejected",
+                  "withdrawn"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From State"
+          },
+          "impact_snapshot": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Impact Snapshot",
+            "type": "array"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "previous_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Hash"
+          },
+          "to_state": {
+            "enum": [
+              "reported",
+              "confirmed",
+              "remediation_recorded",
+              "resolved",
+              "rejected",
+              "withdrawn"
+            ],
+            "title": "To State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "event_type",
+          "to_state",
+          "defect_version",
+          "actor_id",
+          "occurred_at",
+          "payload",
+          "event_hash"
+        ],
+        "title": "SourceDefectEventDetail",
+        "type": "object"
+      },
+      "SourceDefectList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SourceDefectDetail"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "offset": {
+            "title": "Offset",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "limit",
+          "offset",
+          "total"
+        ],
+        "title": "SourceDefectList",
+        "type": "object"
+      },
+      "SourceDefectPolicyDetail": {
+        "properties": {
+          "catalogue_hash": {
+            "title": "Catalogue Hash",
+            "type": "string"
+          },
+          "categories": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Categories",
+            "type": "object"
+          },
+          "policy_version": {
+            "title": "Policy Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "policy_version",
+          "catalogue_hash",
+          "categories"
+        ],
+        "title": "SourceDefectPolicyDetail",
         "type": "object"
       },
       "ValidationError": {
@@ -3541,6 +4397,23 @@
         "summary": "Planning Context Hilt Graph"
       }
     },
+    "/planning-context/process-safety-example": {
+      "get": {
+        "description": "Explicit unapproved example documents; no drawing or approval access granted.",
+        "operationId": "process_safety_example_planning_context_process_safety_example_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Process Safety Example"
+      }
+    },
     "/planning-context/projects": {
       "get": {
         "operationId": "planning_context_projects_planning_context_projects_get",
@@ -3856,6 +4729,1109 @@
           }
         },
         "summary": "Planning Context Symbols"
+      }
+    },
+    "/planning-previews": {
+      "get": {
+        "operationId": "list_previews_planning_previews_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Previews",
+        "tags": [
+          "Synthetic planning previews"
+        ]
+      },
+      "post": {
+        "operationId": "create_preview_planning_previews_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Preview",
+        "tags": [
+          "Synthetic planning previews"
+        ]
+      }
+    },
+    "/planning-previews/template": {
+      "get": {
+        "operationId": "get_template_planning_previews_template_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewTemplate"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Template",
+        "tags": [
+          "Synthetic planning previews"
+        ]
+      }
+    },
+    "/planning-previews/{preview_id}": {
+      "get": {
+        "operationId": "read_preview_planning_previews__preview_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "preview_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Preview Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Preview",
+        "tags": [
+          "Synthetic planning previews"
+        ]
+      }
+    },
+    "/source-data-defects": {
+      "get": {
+        "operationId": "list_source_defects_source_data_defects_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cnvrt_project_id",
+            "required": true,
+            "schema": {
+              "title": "Cnvrt Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "collection_id",
+            "required": true,
+            "schema": {
+              "title": "Collection Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "unigraph_project_id",
+            "required": true,
+            "schema": {
+              "title": "Unigraph Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "default": "open",
+              "enum": [
+                "open",
+                "reported",
+                "confirmed",
+                "remediation_recorded",
+                "resolved",
+                "rejected",
+                "withdrawn",
+                "all"
+              ],
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceDefectList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Source Defects"
+      },
+      "post": {
+        "operationId": "report_source_defect_source_data_defects_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportSourceDefectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceDefectDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Report Source Defect"
+      }
+    },
+    "/source-data-defects/events": {
+      "get": {
+        "operationId": "source_defect_events_source_data_defects_events_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cnvrt_project_id",
+            "required": true,
+            "schema": {
+              "title": "Cnvrt Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "collection_id",
+            "required": true,
+            "schema": {
+              "title": "Collection Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "unigraph_project_id",
+            "required": true,
+            "schema": {
+              "title": "Unigraph Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Authorization",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Last-Event-ID",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Last-Event-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Source Defect Events"
+      }
+    },
+    "/source-data-defects/policy": {
+      "get": {
+        "operationId": "source_defect_policy_source_data_defects_policy_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceDefectPolicyDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Source Defect Policy"
+      }
+    },
+    "/source-data-defects/{defect_id}": {
+      "get": {
+        "operationId": "source_defect_detail_source_data_defects__defect_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "defect_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Defect Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceDefectDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Source Defect Detail"
+      }
+    },
+    "/source-data-defects/{defect_id}/claim": {
+      "post": {
+        "operationId": "claim_source_defect_source_data_defects__defect_id__claim_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "defect_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Defect Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceDefectActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceDefectDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Claim Source Defect"
+      }
+    },
+    "/source-data-defects/{defect_id}/comments": {
+      "post": {
+        "operationId": "comment_on_source_defect_source_data_defects__defect_id__comments_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "defect_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Defect Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceDefectActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceDefectDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Comment On Source Defect"
+      }
+    },
+    "/source-data-defects/{defect_id}/confirm": {
+      "post": {
+        "operationId": "confirm_source_defect_source_data_defects__defect_id__confirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "defect_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Defect Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceDefectActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceDefectDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirm Source Defect"
+      }
+    },
+    "/source-data-defects/{defect_id}/evidence": {
+      "post": {
+        "operationId": "add_source_defect_evidence_source_data_defects__defect_id__evidence_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "defect_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Defect Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddSourceDefectEvidenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceDefectDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Source Defect Evidence"
+      }
+    },
+    "/source-data-defects/{defect_id}/reclassify": {
+      "post": {
+        "operationId": "reclassify_source_defect_source_data_defects__defect_id__reclassify_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "defect_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Defect Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReclassifySourceDefectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceDefectDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reclassify Source Defect"
+      }
+    },
+    "/source-data-defects/{defect_id}/reject": {
+      "post": {
+        "operationId": "reject_source_defect_source_data_defects__defect_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "defect_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Defect Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceDefectActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceDefectDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reject Source Defect"
+      }
+    },
+    "/source-data-defects/{defect_id}/release": {
+      "post": {
+        "operationId": "release_source_defect_source_data_defects__defect_id__release_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "defect_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Defect Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceDefectActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceDefectDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Release Source Defect"
+      }
+    },
+    "/source-data-defects/{defect_id}/remediation": {
+      "post": {
+        "operationId": "record_source_defect_remediation_source_data_defects__defect_id__remediation_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "defect_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Defect Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordSourceDefectRemediationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceDefectDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Record Source Defect Remediation"
+      }
+    },
+    "/source-data-defects/{defect_id}/reopen": {
+      "post": {
+        "operationId": "reopen_source_defect_source_data_defects__defect_id__reopen_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "defect_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Defect Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceDefectActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceDefectDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reopen Source Defect"
+      }
+    },
+    "/source-data-defects/{defect_id}/resolve": {
+      "post": {
+        "operationId": "resolve_source_defect_source_data_defects__defect_id__resolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "defect_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Defect Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceDefectActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceDefectDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Source Defect"
+      }
+    },
+    "/source-data-defects/{defect_id}/withdraw": {
+      "post": {
+        "operationId": "withdraw_source_defect_source_data_defects__defect_id__withdraw_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "defect_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Defect Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceDefectActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceDefectDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Withdraw Source Defect"
       }
     }
   }

@@ -27,7 +27,87 @@ def expander(adjacency):
     return expand
 
 
+def fact_expander(adjacency):
+    def expand(vertex_ids):
+        return {
+            str(identifier): [
+                {
+                    "vertex": {
+                        **vertex(item["target"], item["entity_class"]),
+                        **(item.get("properties") or {}),
+                    },
+                    "edge_label": "PHYSICALLY_CONNECTED_TO",
+                    "edge_fact": {
+                        "edge_id": item["edge_id"],
+                        "edge_label": "PHYSICALLY_CONNECTED_TO",
+                        "from_node_id": str(identifier),
+                        "to_node_id": item["target"],
+                        "properties": item.get("edge_properties") or {},
+                    },
+                }
+                for item in adjacency.get(str(identifier), [])
+            ]
+            for identifier in vertex_ids
+        }
+
+    return expand
+
+
 class UniGraphTopologyTests(unittest.TestCase):
+    def test_ordered_edge_and_node_facts_are_preserved(self):
+        adjacency = {
+            "S": [
+                {
+                    "target": "P",
+                    "entity_class": "pipe",
+                    "edge_id": "E1",
+                    "properties": {"fluid_code": "CDH", "operating_pressure": 18},
+                    "edge_properties": {"connection_kind": "process"},
+                }
+            ],
+            "P": [
+                {
+                    "target": "V",
+                    "entity_class": "gate_valve",
+                    "edge_id": "E2",
+                    "properties": {"line_specification": "CS150"},
+                }
+            ],
+        }
+
+        samples, branches, hit_limit = _walk_component_topology(
+            "S", fact_expander(adjacency), IsolationPolicy(), set()
+        )
+
+        self.assertFalse(hit_limit)
+        barrier = samples[-1]
+        self.assertEqual(barrier["graph_path_edge_ids"], ["E1", "E2"])
+        self.assertEqual(barrier["graph_path_edge_facts"][0]["properties"], {"connection_kind": "process"})
+        self.assertEqual(barrier["graph_path_node_facts"][1]["properties"]["fluid_code"], "CDH")
+        self.assertEqual(barrier["graph_path_node_facts"][2]["properties"]["line_specification"], "CS150")
+        self.assertEqual(branches[0]["path_edge_ids"], ["E1", "E2"])
+        self.assertEqual(branches[0]["branch_id"], "unigraph:S>P>V|edges:E1>E2")
+
+    def test_parallel_edges_survive_candidate_and_plan_projection(self):
+        from equipment_isolation.config import RunConfig
+        from equipment_isolation.core.candidates import _candidate_from_vertex, _dedupe_candidates
+        from equipment_isolation.presentation.bbox_util import _dedupe_candidates as dedupe_visual
+        from equipment_isolation.presentation.payload import build_final_payload
+        from equipment_isolation.api.plans import normalized_plan_content
+        adjacency = {"S": [
+            {"target": "V", "entity_class": "gate_valve", "edge_id": edge, "edge_properties": {"fluid_code": code}}
+            for edge, code in (("E1", "CW"), ("E2", "PROCESS"))
+        ]}
+        policy = IsolationPolicy()
+        samples, _, _ = _walk_component_topology("S", fact_expander(adjacency), policy)
+        candidates = [_candidate_from_vertex("P1", "S", "S", {}, item, "adaptive component path", policy) for item in samples]
+        candidates = dedupe_visual(_dedupe_candidates(candidates))
+        self.assertEqual(len(candidates), 1)
+        result = build_final_payload({"candidates": candidates, "assurance_status": "not_isolated"}, RunConfig(equipment_tag="P1"))
+        branches = normalized_plan_content({}, result)["branches"]
+        self.assertEqual({tuple(branch["path_edge_ids"]) for branch in branches}, {("E1",), ("E2",)})
+        self.assertEqual({branch["path_edge_facts"][0]["properties"]["fluid_code"] for branch in branches}, {"CW", "PROCESS"})
+
     def test_unavailable_barrier_is_passed_and_next_barrier_is_selected(self):
         adjacency = {
             "S": [("U", "gate_valve")],

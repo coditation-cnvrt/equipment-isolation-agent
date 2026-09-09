@@ -1,3 +1,4 @@
+from tests.run_request_fixtures import run_request, captured_hilt
 import os
 import time
 import unittest
@@ -66,6 +67,8 @@ class _Result:
 
 class ApiContractTests(unittest.TestCase):
     def setUp(self):
+        capture = mock.patch('equipment_isolation.api.service.capture_run_hilt', side_effect=captured_hilt)
+        capture.start(); self.addCleanup(capture.stop)
         self.old_env = dict(os.environ)
         os.environ["EIA_MAX_CONCURRENT_RUNS"] = "1"
         os.environ["GEMINI_API_KEY"] = "gemini-key"
@@ -88,7 +91,7 @@ class ApiContractTests(unittest.TestCase):
             payload.update(body)
         return create_run(
             self.request,
-            IsolationRunRequest(**payload),
+            run_request(**payload),
             authorization=f"Bearer {token}" if token else "",
         )
 
@@ -123,7 +126,7 @@ class ApiContractTests(unittest.TestCase):
             "auth_token": "body-secret",
         }
         with self.assertRaises(HTTPException) as caught:
-            create_run(self.request, IsolationRunRequest(**payload), authorization="")
+            create_run(self.request, run_request(**payload), authorization="")
         self.assertEqual(caught.exception.status_code, 400)
         self.assertEqual(caught.exception.detail["kind"], "missing_auth_token")
 
@@ -145,7 +148,7 @@ class ApiContractTests(unittest.TestCase):
             IsolationRunRequest(equipment_tag="P3")
 
     def test_request_contract_is_versioned(self):
-        request = IsolationRunRequest(
+        request = run_request(
             equipment_tag="P3",
             cnvrt_project_id="277",
             collection_id="206",
@@ -161,7 +164,7 @@ class ApiContractTests(unittest.TestCase):
             self.assertNotIn("port", model.model_fields)
 
     def test_request_accepts_exact_selected_asset_identity(self):
-        request = IsolationRunRequest(
+        request = run_request(
             equipment_tag="P3",
             job_id="2151",
             cnvrt_project_id="277",
@@ -214,7 +217,7 @@ class ApiContractTests(unittest.TestCase):
             )
 
     def test_selected_asset_is_adapted_to_typed_run_config(self):
-        request = IsolationRunRequest(
+        request = run_request(
             equipment_tag="P3",
             job_id="2151",
             cnvrt_project_id="277",
@@ -587,7 +590,7 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(response["items"][0]["run_id"], accepted.run_id)
         self.assertEqual(response["items"][0]["status"], "succeeded")
         self.assertNotIn("result", response["items"][0])
-        self.assertEqual(response["items"][0]["request"]["job_id"], "")
+        self.assertEqual(response["items"][0]["request"]["job_id"], "2151")
 
     def test_list_runs_filters_by_persisted_planning_context(self):
         with mock.patch("equipment_isolation.api.service.run_agent_pipeline", side_effect=lambda config, **_: _Result(config)):

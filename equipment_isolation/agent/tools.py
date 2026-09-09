@@ -274,7 +274,7 @@ def t_validate(session: AgentSession, **_) -> dict:
         return {"error": "call build_evidence first"}
     planner_data = plan_requests(source, session.config)
     session.planner_data = planner_data
-    data = validate(planner_data)
+    data = validate(planner_data, process_safety_inputs=session.config.process_safety_inputs, captured_hilt=session.config.captured_hilt)
     session.validation_data = data
     return _summarize_validation(data)
 

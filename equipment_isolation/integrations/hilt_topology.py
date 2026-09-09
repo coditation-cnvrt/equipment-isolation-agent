@@ -17,6 +17,7 @@ from collections import deque
 from equipment_isolation.domain.classification import class_matches, classify_candidate, normalize_class
 from equipment_isolation.domain.enums import IsolationDecision
 from equipment_isolation.domain.topology import PROCESS_LINE_CLASSES, normalize_tag, nozzle_belongs_to_equipment
+from equipment_isolation.integrations.hilt_index import _hilt_path_link_summary
 
 BRANCH_CONTEXT_VALVE_CLASSES = {"check_valve", "control_valve"}
 # Plain flanges are connection hardware, not deterministic barriers. They remain
@@ -133,7 +134,7 @@ def _hilt_index(graph):
     # symbols, however, use one companion edge purely as the graphical attachment
     # from an equipment nozzle to a split flange whose other side starts the real
     # process line. Admit only that narrow nozzle->process-network bridge.
-    adj: dict[str, set] = {}
+    adj: dict[str, list[dict]] = {}
     companion_links = []
     for link in links:
         payload = link.get("payload") or {}
@@ -143,22 +144,29 @@ def _hilt_index(graph):
             continue
         entity_class = normalize_class(payload.get("entity_class"))
         if entity_class in PROCESS_LINE_CLASSES:
-            adj.setdefault(source, set()).add(target)
-            adj.setdefault(target, set()).add(source)
+            _append_edge(adj, source, target, link)
         elif entity_class == "companion_line":
-            companion_links.append((source, target))
+            companion_links.append((source, target, link))
 
     process_nodes = set(adj)
-    for source, target in companion_links:
+    for source, target, link in companion_links:
         source_class = normalize_class(_node_class(source, node_by_id))
         target_class = normalize_class(_node_class(target, node_by_id))
         if source_class == "equipment_nozzle" and target in process_nodes:
-            adj.setdefault(source, set()).add(target)
-            adj.setdefault(target, set()).add(source)
+            _append_edge(adj, source, target, link)
         elif target_class == "equipment_nozzle" and source in process_nodes:
-            adj.setdefault(source, set()).add(target)
-            adj.setdefault(target, set()).add(source)
+            _append_edge(adj, source, target, link)
     return node_by_id, adj
+
+
+def _append_edge(adj, source, target, link):
+    facts = _hilt_path_link_summary(link)
+    adj.setdefault(source, []).append(
+        {"node_id": target, "link": {**facts, "from_node_id": source, "to_node_id": target}}
+    )
+    adj.setdefault(target, []).append(
+        {"node_id": source, "link": {**facts, "from_node_id": target, "to_node_id": source}}
+    )
 
 
 def _nearest_valves(start, adj, node_by_id, max_hops, y_flip=None, policy=None, unavailable_ids=None):
@@ -176,22 +184,40 @@ def _nearest_branch_devices(start, adj, node_by_id, max_hops, y_flip=None, polic
     """BFS from a nozzle over process lines; record the first valve on each branch.
     Valves are leaves (we do not traverse through them) -- the nearest valve on a
     branch is that branch's isolation point."""
+    if getattr(policy, 'process_safety_inputs', None) is not None:
+        return _configuration_candidate_branches(start, adj, node_by_id, max_hops, y_flip, policy, unavailable_ids)
     unavailable = {str(value) for value in (unavailable_ids or ()) if value not in (None, "")}
-    seen = {start}
-    queue = deque([(start, 0, [start], [])])
+    queue = deque([(start, 0, [start], [], [])])
     found: list[dict] = []
-    found_ids: set = set()
+    cycles: list[dict] = []
     while queue:
-        node, hops, path, context_devices = queue.popleft()
+        node, hops, path, path_links, context_devices = queue.popleft()
         if hops >= max_hops:
-            found.append(_unresolved_branch(path, context_devices, "max_hops_reached", node_by_id))
+            found.append(_unresolved_branch(path, path_links, context_devices, "max_hops_reached", node_by_id))
             continue
         expanded = False
-        for nbr in sorted(adj.get(node, ())):
-            if nbr in seen:
+        neighbors = sorted(
+            adj.get(node, ()),
+            key=lambda item: (
+                str(item.get("node_id") or ""),
+                str((item.get("link") or {}).get("line_id") or ""),
+            ),
+        )
+        for edge in neighbors:
+            nbr = str(edge.get("node_id") or "")
+            if not nbr:
                 continue
-            seen.add(nbr)
+            if nbr in path:
+                # Skip the incoming edge; retain a distinct cycle-closing edge.
+                if path_links and _path_edge_key(edge.get("link") or {}) == _path_edge_key(path_links[-1]):
+                    continue
+                cycles.append(_unresolved_branch(
+                    path + [nbr], path_links + [edge.get("link") or {}],
+                    context_devices, "cycle_without_demonstrated_barrier", node_by_id,
+                ))
+                continue
             new_path = path + [nbr]
+            new_path_links = path_links + [edge.get("link") or {}]
             expanded = True
             branch_role = _branch_device_role(nbr, node_by_id, policy)
             if branch_role == "required_isolation":
@@ -202,36 +228,62 @@ def _nearest_branch_devices(start, adj, node_by_id, max_hops, y_flip=None, polic
                         available_for_isolation=False,
                         reason="Approved correction reports this device faulty or out of service; traversal continued to seek an alternate barrier.",
                     )
-                    queue.append((nbr, hops + 1, new_path, context_devices + [unavailable_device]))
+                    queue.append((nbr, hops + 1, new_path, new_path_links, context_devices + [unavailable_device]))
                     continue
-                if nbr not in found_ids:
-                    found_ids.add(nbr)
-                    found.append(
-                        {
-                            "status": "isolated",
-                            "valve": _valve_summary(nbr, node_by_id, hops + 1, new_path, y_flip),
-                            "path_node_ids": new_path,
-                            "path_node_classes": [_node_class(node_id, node_by_id) for node_id in new_path],
-                            "context_devices": context_devices,
-                            "basis": "first required isolation device on HILT process branch",
-                        }
-                    )
+                found.append(
+                    {
+                        "status": "isolated",
+                        "valve": _valve_summary(nbr, node_by_id, hops + 1, new_path, y_flip),
+                        "path_node_ids": new_path,
+                        "path_node_classes": [_node_class(node_id, node_by_id) for node_id in new_path],
+                        "path_link_ids": [str(link.get("line_id") or "") for link in new_path_links],
+                        "path_link_facts": new_path_links,
+                        "context_devices": context_devices,
+                        "basis": "first required isolation device on HILT process branch",
+                    }
+                )
                 # valves are leaves -- do not traverse past the isolation point
                 continue
             next_context = context_devices
             if branch_role == "backflow_or_control_context":
                 next_context = context_devices + [_valve_summary(nbr, node_by_id, hops + 1, new_path, y_flip)]
-            queue.append((nbr, hops + 1, new_path, next_context))
-        if not expanded and node != start:
-            found.append(_unresolved_branch(path, context_devices, "no_required_isolation_device_found", node_by_id))
+            queue.append((nbr, hops + 1, new_path, new_path_links, next_context))
+        distinct_neighbor_ids = {str(item.get("node_id") or "") for item in neighbors}
+        if not expanded and node != start and len(distinct_neighbor_ids) <= 1:
+            found.append(
+                _unresolved_branch(
+                    path,
+                    path_links,
+                    context_devices,
+                    "no_required_isolation_device_found",
+                    node_by_id,
+                )
+            )
+    represented_edges = {
+        _path_edge_key(link) for branch in found for link in branch.get("path_link_facts") or []
+    }
+    seen_cycles = set()
+    for cycle in cycles:
+        edges = frozenset(_path_edge_key(link) for link in cycle["path_link_facts"])
+        if not edges.issubset(represented_edges) and edges not in seen_cycles:
+            found.append(cycle)
+            seen_cycles.add(edges)
     found.sort(
         key=lambda item: (
             0 if item.get("status") == "isolated" else 1,
             int(((item.get("valve") or {}).get("hop_distance") or len(item.get("path_node_ids") or []))),
             str((item.get("valve") or {}).get("valve_id") or item.get("branch_id") or ""),
+            tuple(item.get("path_link_ids") or ()),
         )
     )
-    return found
+    return _dedupe_branches(found)
+
+
+def _path_edge_key(link):
+    return (str(link.get("line_id") or ""), tuple(sorted((
+        str(link.get("from_node_id") or link.get("source") or ""),
+        str(link.get("to_node_id") or link.get("target") or ""),
+    ))))
 
 
 def _valve_summary(valve_id: str, node_by_id: dict, hop_distance: int, path, y_flip: float | None = None) -> dict:
@@ -250,17 +302,36 @@ def _valve_summary(valve_id: str, node_by_id: dict, hop_distance: int, path, y_f
     }
 
 
-def _unresolved_branch(path, context_devices, reason, node_by_id):
+def _unresolved_branch(path, path_links, context_devices, reason, node_by_id):
     terminal_id = str(path[-1]) if path else ""
     return {
         "status": "unresolved",
         "valve": None,
         "path_node_ids": list(path),
         "path_node_classes": [_node_class(node_id, node_by_id) for node_id in path],
+        "path_link_ids": [str(link.get("line_id") or "") for link in path_links],
+        "path_link_facts": list(path_links),
         "context_devices": context_devices,
         "terminal_node": _terminal_node_summary(terminal_id, node_by_id),
         "basis": reason,
     }
+
+
+def _dedupe_branches(branches):
+    result = []
+    seen = set()
+    for branch in branches:
+        key = (
+            branch.get("status"),
+            tuple(branch.get("path_node_ids") or ()),
+            tuple(branch.get("path_link_ids") or ()),
+            str((branch.get("valve") or {}).get("valve_id") or ""),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(branch)
+    return result
 
 
 def _terminal_node_summary(node_id, node_by_id):
@@ -336,3 +407,56 @@ def _attr(attributes, name):
 
 # Alias, not a wrapper: normalize_tag is the single implementation.
 _norm = normalize_tag
+
+
+def _configuration_candidate_branches(start, adj, node_by_id, max_hops, y_flip, policy, unavailable_ids):
+    """Search outward for path-local candidate configurations, never certify them.
+
+    Counts are a search criterion only. Lockability, ratings, disconnection and
+    bleed destination still require evidence in the process safety validator.
+    """
+    from equipment_isolation.domain.process_safety import required_configuration_for_path
+    unavailable = {str(x) for x in unavailable_ids or ()}
+    queue = deque([(start, [start], [], [])])
+    found, expanded_count = [], 0
+    while queue:
+        node, path, links, devices = queue.popleft()
+        def finish(reason):
+            branch = _unresolved_branch(path, links, devices, reason, node_by_id)
+            branch['barrier_candidates'] = devices
+            found.append(branch)
+        if len(links) >= max_hops:
+            finish('safety_limit_reached'); continue
+        neighbors = sorted(adj.get(node, ()), key=lambda edge: (str(edge.get('node_id')), str(edge.get('link', {}).get('line_id'))))
+        choices = [edge for edge in neighbors if not links or _path_edge_key(edge.get('link') or {}) != _path_edge_key(links[-1])]
+        if not choices:
+            finish('configuration_not_found_before_terminal'); continue
+        for edge in choices:
+            expanded_count += 1
+            if expanded_count > 2000:
+                finish('safety_limit_reached')
+                return found
+            neighbor = str(edge.get('node_id') or '')
+            new_path, new_links = path + [neighbor], links + [edge.get('link') or {}]
+            if neighbor in path:
+                branch = _unresolved_branch(new_path, new_links, devices, 'cycle_without_demonstrated_configuration', node_by_id)
+                branch['barrier_candidates'] = devices; found.append(branch); continue
+            kind = normalize_class(_node_class(neighbor, node_by_id))
+            next_devices = list(devices)
+            if _branch_device_role(neighbor, node_by_id, policy) == 'required_isolation' and neighbor not in unavailable:
+                # Spectacle-open symbols are not a demonstrated positive closure.
+                summary = _valve_summary(neighbor, node_by_id, len(new_links), new_path, y_flip)
+                summary['positive_candidate'] = kind in {'blind', 'spade', 'blank_flange', 'blind_flange'}
+                next_devices.append(summary)
+                required = required_configuration_for_path({'path_link_facts': new_links}, policy.process_safety_inputs)
+                if len(next_devices) >= required['barrier_count'] and sum(d['positive_candidate'] for d in next_devices) >= required['positive_barrier_count']:
+                    branch = _unresolved_branch(new_path, new_links, [], 'candidate_configuration_requires_validation', node_by_id)
+                    branch['barrier_candidates'] = next_devices
+                    branch['required_configuration'] = required
+                    found.append(branch)
+                    continue
+            if kind == 'equipment_nozzle' and neighbor != start:
+                branch = _unresolved_branch(new_path, new_links, [], 'other_equipment_boundary_configuration_unresolved', node_by_id)
+                branch['barrier_candidates'] = next_devices; found.append(branch); continue
+            queue.append((neighbor, new_path, new_links, next_devices))
+    return found

@@ -360,6 +360,13 @@ POST /isolation-plans/{plan_id}/changes/{change_id}/approve
 POST /isolation-plans/{plan_id}/derive
 ```
 
+New `POST /isolation-runs` requests require `selected_asset` and
+`process_safety_inputs` containing scoped FHR/SIC/PSD and structured work scope.
+Requests without these inputs are rejected with 422. Historical runs/plans remain
+readable; correction derivation from a historical plan without these inputs
+returns 409 `process_safety_inputs_required`. Start a new run from Workspace.
+Document presence does not establish approval or isolation assurance.
+
 `POST /isolation-plans/from-run` idempotently promotes a succeeded persisted run
 to an immutable, normalized advisory draft (`isolation_plan` + version 1 + run
 link, scope, assets, branches, points, steps, findings, and input snapshots). The

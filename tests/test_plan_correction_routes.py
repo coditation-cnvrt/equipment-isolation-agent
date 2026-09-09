@@ -1,5 +1,7 @@
+from tests.run_request_fixtures import run_request
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -30,6 +32,14 @@ class Repository:
         self.change["raised_by"] = actor
         return self.change
 
+    def get_plan_authorization_context(self, plan_id, version_id=None):
+        if plan_id != str(PLAN_ID) or (version_id is not None and version_id != VERSION_ID):
+            return None
+        return {
+            "cnvrt_project_id": "277", "collection_id": "206",
+            "unigraph_project_id": "15", "job_id": "2151",
+        }
+
     def list_plans(self, **kwargs):
         return [], 0
 
@@ -46,7 +56,7 @@ class Repository:
             "manifest_id": "f2ddaa35-795e-4dc8-a72d-1a330a14255f",
             "parent_run_id": "a" * 32,
             "request": {
-                "equipment_tag": "N7", "job_id": "2151", "cnvrt_project_id": "277", "collection_id": "206", "unigraph_project_id": "15",
+                **run_request(equipment_tag="N7").model_dump(),
                 "approved_corrections": [self.change], "derivation_context": {"manifest_id": "f2ddaa35-795e-4dc8-a72d-1a330a14255f"},
             },
         }
@@ -71,6 +81,11 @@ class FailingStore(Store):
 
 
 class PlanCorrectionRouteTests(unittest.TestCase):
+    def setUp(self):
+        patcher = mock.patch("equipment_isolation.api.routes.authorize_planning_context")
+        self.authorize = patcher.start()
+        self.addCleanup(patcher.stop)
+
     def request(self, user_id="7"):
         store = Store()
         return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(run_store=store)), state=SimpleNamespace(token_data={"user": {"id": user_id}}))
@@ -136,6 +151,24 @@ class PlanCorrectionRouteTests(unittest.TestCase):
         listed = list_plan_changes(request, PLAN_ID, authorization="Bearer token")
         self.assertEqual(created["raised_by"], "7")
         self.assertEqual(listed["items"][0]["change_id"], str(CHANGE_ID))
+        self.authorize.assert_called_with(
+            {
+                "cnvrt_project_id": "277", "collection_id": "206",
+                "unigraph_project_id": "15", "job_id": "2151",
+            },
+            "token",
+            asset_system="cnvrt_drawing_entity",
+        )
+
+    def test_cross_scope_change_is_rejected_before_mutation(self):
+        request = self.request("7")
+        request.app.state.run_store.repository.change["raised_by"] = "original"
+        self.authorize.side_effect = PermissionError("forbidden")
+        with self.assertRaises(HTTPException) as caught:
+            create_plan_change(request, PLAN_ID, self.body(), authorization="Bearer token")
+        self.assertEqual(caught.exception.status_code, 403)
+        self.assertEqual(caught.exception.detail["kind"], "plan_scope_forbidden")
+        self.assertEqual(request.app.state.run_store.repository.change["raised_by"], "original")
 
     def test_advisory_correction_can_be_self_approved(self):
         request = self.request("7")
@@ -164,6 +197,16 @@ class PlanCorrectionRouteTests(unittest.TestCase):
             request.app.state.run_store.repository.calls[-1][-1],
             "asset_conditions",
         )
+
+    def test_source_defect_derivation_trigger_is_forwarded(self):
+        request = self.request("8")
+        derive_plan(
+            request,
+            PLAN_ID,
+            DerivePlanRequest(parent_plan_version_id=VERSION_ID, trigger="source_data_defects"),
+            authorization="Bearer token",
+        )
+        self.assertEqual(request.app.state.run_store.repository.calls[-1][-1], "source_data_defects")
 
     def test_derivation_launch_failure_releases_manifest(self):
         request = self.request("8")

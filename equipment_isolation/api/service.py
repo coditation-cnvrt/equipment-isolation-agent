@@ -46,6 +46,10 @@ def _cnvrt_client(auth_token: str) -> Plant360Client:
 
 
 def config_from_run_request(request, auth_token: str, *, shared_asset_conditions=()):
+    from equipment_isolation.domain.process_safety import ProcessSafetyInputs
+    if getattr(request, 'process_safety_inputs', None) is None:
+        raise ValueError('FHR, SIC and PSD are required for every new isolation run')
+    safety = ProcessSafetyInputs.from_dict(request.process_safety_inputs)
     scope = request.work_scope
     config = build_run_config(
         equipment_tag=request.equipment_tag,
@@ -68,6 +72,7 @@ def config_from_run_request(request, auth_token: str, *, shared_asset_conditions
         confined_space_entry=scope.confined_space_entry,
         hot_work=scope.hot_work,
         output_dir=Path("."),
+        process_safety_inputs=safety,
     )
     local_feedback = tuple(getattr(request, "approved_corrections", ()) or ())
     # Shared unavailable conditions are deliberately applied after plan-local
@@ -299,6 +304,9 @@ def authorize_planning_context(
         raise PermissionError("Invalid planning context") from error
     unigraph_project_id = str(context.get("unigraph_project_id") or "").strip()
     job_id = str(context.get("job_id") or "").strip()
+    normalized_system = str(asset_system or "").strip().lower()
+    if normalized_system == "cnvrt_drawing_entity" and not job_id:
+        raise PermissionError("Exact CNVRT drawing identity is required")
 
     cnvrt_client = _cnvrt_client(auth_token)
     if job_id:
@@ -343,7 +351,6 @@ def authorize_planning_context(
     # HILT/drawing entity identity is fully scoped by CNVRT project,
     # collection, and job. Its recorded UniGraph project is descriptive
     # provenance and may be superseded by a later export of the same drawing.
-    normalized_system = str(asset_system or "").strip().lower()
     if normalized_system == "cnvrt_drawing_entity":
         return
 
@@ -442,6 +449,22 @@ def list_unigraph_projects(cnvrt_project_id: int, collection_id: int, auth_token
     return selected
 
 
+def capture_run_hilt(request, auth_token):
+    """Retain the complete original export, including unresolved graph records."""
+    from datetime import datetime, timezone
+    from equipment_isolation.domain.hilt_run_capture import HiltRunCapture
+    capture = HiltRunCapture.from_dict({'schema_version': 'hilt-run-capture-v1',
+        'context': {key: getattr(request, key) for key in ('cnvrt_project_id', 'collection_id', 'unigraph_project_id', 'job_id')},
+        'captured_at': datetime.now(timezone.utc).isoformat(),
+        'payload': get_cnvrt_hilt_graph(int(request.job_id), auth_token)})
+    target = request.selected_asset.hilt_entity_id
+    nodes = capture.to_dict()['payload']['hilt_graph']['nodes']
+    matches = [node for node in nodes if target in {str(node.get('id', '')), str(node.get('payload', {}).get('id', ''))}]
+    if len(matches) != 1 or matches[0].get('payload', {}).get('entity_type') != 'equipment':
+        raise ValueError('Selected HILT equipment identity is not uniquely present in captured drawing')
+    return {**capture.to_dict(), 'content_hash': capture.content_hash, 'blockers': capture.blockers}
+
+
 def execute_agent_request(
     *,
     run_id: str,
@@ -449,6 +472,7 @@ def execute_agent_request(
     auth_token: str,
     shared_asset_conditions=(),
     shared_asset_condition_loader: Callable | None = None,
+    captured_hilt=None,
     on_event: Callable | None = None,
 ) -> dict:
     config = config_from_run_request(
@@ -456,8 +480,23 @@ def execute_agent_request(
         auth_token,
         shared_asset_conditions=shared_asset_conditions,
     )
+    if config.process_safety_inputs is not None:
+        from equipment_isolation.domain.safety_inputs import FrozenJSON
+        if captured_hilt is None:
+            raise ValueError('Process safety run requires a persisted HILT capture')
+        from equipment_isolation.domain.hilt_run_capture import HiltRunCapture
+        verified = HiltRunCapture.from_dict({key: captured_hilt[key] for key in ('schema_version', 'context', 'captured_at', 'payload')})
+        if verified.content_hash != captured_hilt.get('content_hash'):
+            raise ValueError('Persisted HILT capture hash mismatch')
+        config.process_safety_inputs.require_scope(verified.to_dict()['context'])
+        config = replace(config, captured_hilt=FrozenJSON.from_dict({**verified.to_dict(),
+            'content_hash': verified.content_hash, 'blockers': verified.blockers}))
     model = request.model or os.environ.get("GEMINI_MODEL") or DEFAULT_MODEL
     def refresh_context(config):
+        if config.process_safety_inputs is not None:
+            config.process_safety_inputs.require_scope({
+                'cnvrt_project_id': config.cnvrt_project_id, 'collection_id': config.collection_id,
+                'unigraph_project_id': config.graph.project_id, 'job_id': config.resolved_job_id})
         conditions = (
             shared_asset_condition_loader(config)
             if shared_asset_condition_loader is not None

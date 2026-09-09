@@ -12,7 +12,12 @@ MISSING_BY_CHECK = {
 }
 
 
-def validate(planner_data):
+def validate(planner_data, *, process_safety_inputs=None, captured_hilt=None):
+    from equipment_isolation.domain.process_safety import assess_process_paths
+    process_assessment = assess_process_paths(planner_data, process_safety_inputs) if process_safety_inputs is not None else None
+    if process_assessment is not None:
+        capture_gaps = captured_hilt.to_dict().get('blockers', []) if captured_hilt else ['hilt_capture_missing']
+        process_assessment['blockers'] = sorted(set(process_assessment['blockers']) | set(capture_gaps))
     candidates = planner_data.get("candidates", []) or []
     evidence = planner_data.get("evidence_state") or {}
     missing = list(evidence.get("missing_evidence") or planner_data.get("missing_evidence") or [])
@@ -64,6 +69,13 @@ def validate(planner_data):
         decisive_rule = "verification_missing"
         rationale = "Selected barriers exist for known boundary paths, but proof of zero or safe energy was not found."
 
+    if process_assessment is not None:
+        status = AssuranceStatus.NOT_ISOLATED
+        decisive_rule = "process_safety_requirements_not_demonstrated"
+        rationale = "Process safety inputs were assessed, but approval, source completeness and required path configurations are not demonstrated."
+        missing.extend(process_assessment['blockers'])
+        planner_data = {**planner_data, 'process_safety_assessment': process_assessment}
+
     assurance_explanation = build_assurance_explanation(
         assurance_status=status.value,
         decisive_rule=decisive_rule,
@@ -71,6 +83,13 @@ def validate(planner_data):
         evidence=evidence,
         unresolved_checks=unresolved,
     )
+    if process_assessment is not None:
+        assurance_explanation['primary_reasons'].append({
+            'reason_id': 'process_safety_requirements_not_demonstrated',
+            'code': 'process_safety_requirements_not_demonstrated',
+            'message': rationale, 'required_action': 'resolve_process_safety_blockers',
+        })
+        assurance_explanation['summary']['primary_reason_count'] = len(assurance_explanation['primary_reasons'])
     plan_readiness = build_plan_readiness(
         assurance_status=status.value,
         assurance_explanation=assurance_explanation,

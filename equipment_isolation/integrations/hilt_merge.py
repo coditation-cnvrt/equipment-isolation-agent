@@ -15,6 +15,7 @@ here (rather than interleaved in bbox.py) so the overlap can be reviewed and,
 eventually, collapsed to a single canonical strategy.
 """
 
+from equipment_isolation.domain.path_facts import path_facts
 from equipment_isolation.presentation.bbox_util import _dedupe_candidates
 from equipment_isolation.domain.classification import classify_candidate
 from equipment_isolation.domain.enums import FlowRole
@@ -71,6 +72,14 @@ def _merge_hilt_source_branches(candidates, hilt_branch_obligations, flow_roles,
     for source in hilt_branch_obligations or []:
         source_component = str(source.get("source_component") or source.get("source_component_tag") or "")
         for branch in source.get("branches") or []:
+            if getattr(policy, 'process_safety_inputs', None) is not None:
+                for device in branch.get('barrier_candidates') or []:
+                    merged.append(_hilt_valve_candidate(device,
+                        source.get('source_component_tag') or source_component,
+                        source.get('equipment_tag') or equipment_tag, flow_roles, policy,
+                        source_component_id=source_component, source_visual_id=source.get('source_visual_id'),
+                        source_bbox=source.get('source_bbox') or [], branch=branch))
+                continue
             if branch.get("status") != "isolated" or not branch.get("valve"):
                 continue
             merged.append(
@@ -161,6 +170,8 @@ def _hilt_valve_candidate(
         "branch_basis": (branch or {}).get("basis"),
         "branch_path_node_ids": (branch or {}).get("path_node_ids") or valve.get("path_node_ids") or [],
         "branch_path_node_classes": (branch or {}).get("path_node_classes") or [],
+        "branch_path_link_ids": (branch or {}).get("path_link_ids") or [],
+        "branch_path_link_facts": (branch or {}).get("path_link_facts") or [],
         "branch_context_devices": (branch or {}).get("context_devices") or [],
         "source_flow_role": role_for_source(flow_roles, nozzle_tag),
         "source_paths": [_hilt_source_path(nozzle_tag, hops, flow_roles, source_component_id=source_component_id, source_visual_id=source_visual_id, branch=branch)],
@@ -189,6 +200,7 @@ def _append_hilt_source_path(candidate, valve, nozzle_tag, flow_roles):
 
 def _hilt_source_path(nozzle_tag, hops, flow_roles, source_component_id=None, source_visual_id=None, branch=None):
     return {
+        **path_facts(branch or {}),
         "source_component_tag": nozzle_tag,
         "source_component_id": source_component_id or nozzle_tag,
         "source_visual_id": source_visual_id,

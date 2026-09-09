@@ -243,7 +243,7 @@ def run(config, image_url=""):
     )
 
     logger.info("[10/15] Validating isolation assurance")
-    validation_data = validate(planner_data)
+    validation_data = validate(planner_data, process_safety_inputs=config.process_safety_inputs, captured_hilt=config.captured_hilt)
     logger.info(
         "      assurance_status=%s terminal=%s",
         validation_data.get("assurance_status"),

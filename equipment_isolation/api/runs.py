@@ -106,8 +106,16 @@ class RunStore:
         self.repository = repository
 
     def create(self, request, auth_token: str, *, parent_run_id: str | None = None) -> RunRecord:
+        # Validate at dispatch as well as HTTP admission; internal callers and
+        # historical payloads must not bypass the document-backed contract.
+        from equipment_isolation.api.models import DerivedIsolationRunRequest, IsolationRunRequest
+        model = DerivedIsolationRunRequest if isinstance(request, DerivedIsolationRunRequest) else IsolationRunRequest
+        request = model.model_validate(_request_payload(request))
         run_id = uuid.uuid4().hex
         request_payload = _request_payload(request)
+        if getattr(request, 'process_safety_inputs', None) is not None:
+            from equipment_isolation.api.service import capture_run_hilt
+            request_payload['_captured_hilt'] = capture_run_hilt(request, auth_token)
         if self.repository and hasattr(self.repository, "active_asset_conditions_for_run"):
             request_payload["asset_conditions"] = self.repository.active_asset_conditions_for_run(
                 request_payload
@@ -177,7 +185,7 @@ class RunStore:
             "started_at": record.started_at,
             "finished_at": record.finished_at,
             "agent": record.agent,
-            "request": dict(record.request),
+            "request": {key: value for key, value in record.request.items() if key != "_captured_hilt"},
             "error": record.error,
             "parent_run_id": record.parent_run_id,
             "derivation_manifest_id": record.derivation_manifest_id,
@@ -232,6 +240,7 @@ class RunStore:
                 shared_asset_conditions=record.request.get("asset_conditions") or [],
                 shared_asset_condition_loader=load_asset_conditions,
                 on_event=on_event,
+                **({"captured_hilt": record.request["_captured_hilt"]} if "_captured_hilt" in record.request else {}),
             )
             if outcome.get("ok"):
                 if not self._mark(

@@ -222,15 +222,28 @@ def _component_boundary(g, component, policy, corrections=()):
             .as_("target")
             .select("origin", "edge", "target")
             .by(__.id_())
-            .by(__.label())
+            .by(__.valueMap(True))
             .by(__.valueMap(True))
             .toList()
         )
         adjacency = {str(value): [] for value in vertex_ids}
         for row in rows:
             target = normalize_vertex(row.get("target") or {})
+            edge = normalize_vertex(row.get("edge") or {})
+            origin_id = str(row.get("origin"))
+            target_id = str(vertex_id(target))
             adjacency.setdefault(str(row.get("origin")), []).append(
-                {"vertex": target, "edge_label": str(row.get("edge") or "")}
+                {
+                    "vertex": target,
+                    "edge_label": str(vertex_label(edge) or ""),
+                    "edge_fact": {
+                        "edge_id": str(vertex_id(edge) or ""),
+                        "edge_label": str(vertex_label(edge) or ""),
+                        "from_node_id": origin_id,
+                        "to_node_id": target_id,
+                        "properties": props_only(edge),
+                    },
+                }
             )
         return adjacency
 
@@ -273,7 +286,15 @@ def _walk_component_topology(start_id, expand, policy, unavailable_identities=()
     unfinished paths are returned as unresolved rather than silently accepted.
     """
     start = str(start_id)
-    frontier = [{"current": start, "path": (start,), "edges": ()}]
+    frontier = [
+        {
+            "current": start,
+            "path": (start,),
+            "edges": (),
+            "edge_facts": (),
+            "node_facts": ({"id": start, "label": "", "properties": {}},),
+        }
+    ]
     samples = []
     branches = []
     limit_hit = False
@@ -284,20 +305,52 @@ def _walk_component_topology(start_id, expand, policy, unavailable_identities=()
         adjacency = expand([state["current"] for state in frontier])
         next_frontier = []
         for state in frontier:
-            neighbors = [
-                item
-                for item in adjacency.get(str(state["current"]), [])
-                if str(vertex_id(item["vertex"])) not in state["path"]
-            ]
+            neighbors = sorted(
+                (
+                    item
+                    for item in adjacency.get(str(state["current"]), [])
+                    if str(vertex_id(item["vertex"])) not in state["path"]
+                ),
+                key=lambda item: (
+                    str(vertex_id(item["vertex"])),
+                    str((item.get("edge_fact") or {}).get("edge_id") or ""),
+                    str(item.get("edge_label") or ""),
+                ),
+            )
             if not neighbors:
                 if len(state["path"]) > 1:
-                    branches.append(_graph_branch(state["path"], state["edges"], "unresolved", reason="terminal_without_barrier"))
+                    branches.append(
+                        _graph_branch(
+                            state["path"],
+                            state["edges"],
+                            "unresolved",
+                            edge_facts=state["edge_facts"],
+                            node_facts=state["node_facts"],
+                            reason="terminal_without_barrier",
+                        )
+                    )
                 continue
             for item in neighbors:
                 vertex = item["vertex"]
                 target_id = str(vertex_id(vertex))
                 path = (*state["path"], target_id)
                 edges = (*state["edges"], item.get("edge_label") or "")
+                edge_fact = item.get("edge_fact") or {
+                    "edge_id": "",
+                    "edge_label": item.get("edge_label") or "",
+                    "from_node_id": str(state["current"]),
+                    "to_node_id": target_id,
+                    "properties": {},
+                }
+                edge_facts = (*state["edge_facts"], edge_fact)
+                node_facts = (
+                    *state["node_facts"],
+                    {
+                        "id": target_id,
+                        "label": vertex_label(vertex),
+                        "properties": props_only(vertex),
+                    },
+                )
                 selectable = _selectable_barrier_vertex(vertex, policy)
                 unavailable = selectable and _vertex_matches_identities(vertex, unavailable_identities)
                 sample = {
@@ -307,7 +360,10 @@ def _walk_component_topology(start_id, expand, policy, unavailable_identities=()
                     "traversal_depth": depth,
                     "graph_path_ids": list(path),
                     "graph_path_edge_labels": list(edges),
-                    "graph_path_key": ">".join(path),
+                    "graph_path_edge_ids": _edge_path_ids(edge_facts),
+                    "graph_path_edge_facts": list(edge_facts),
+                    "graph_path_node_facts": list(node_facts),
+                    "graph_path_key": _graph_path_key(path, edge_facts),
                     "graph_path_status": "unavailable_pass_through" if unavailable else "barrier" if selectable else "transit",
                     "graph_path_complete": bool(selectable and not unavailable),
                 }
@@ -315,21 +371,45 @@ def _walk_component_topology(start_id, expand, policy, unavailable_identities=()
                     sample.update(availability_status="unavailable", available_for_isolation=False)
                 samples.append(sample)
                 if selectable and not unavailable:
-                    branches.append(_graph_branch(path, edges, "isolated", barrier_id=target_id))
+                    branches.append(
+                        _graph_branch(
+                            path,
+                            edges,
+                            "isolated",
+                            edge_facts=edge_facts,
+                            node_facts=node_facts,
+                            barrier_id=target_id,
+                        )
+                    )
                 else:
-                    next_frontier.append({"current": target_id, "path": path, "edges": edges})
+                    next_frontier.append(
+                        {
+                            "current": target_id,
+                            "path": path,
+                            "edges": edges,
+                            "edge_facts": edge_facts,
+                            "node_facts": node_facts,
+                        }
+                    )
 
         if len(next_frontier) > int(policy.traversal_limit_per_depth):
             limit_hit = True
             next_frontier = next_frontier[: int(policy.traversal_limit_per_depth)]
         # Exact path dedupe prevents duplicate Gremlin edges from multiplying a
         # state while retaining distinct split paths and reconvergence evidence.
-        frontier = list({state["path"]: state for state in next_frontier}.values())
+        frontier = list({_graph_state_key(state): state for state in next_frontier}.values())
 
     if frontier:
         limit_hit = True
         branches.extend(
-            _graph_branch(state["path"], state["edges"], "unresolved", reason="safety_limit_reached")
+            _graph_branch(
+                state["path"],
+                state["edges"],
+                "unresolved",
+                edge_facts=state["edge_facts"],
+                node_facts=state["node_facts"],
+                reason="safety_limit_reached",
+            )
             for state in frontier
         )
     return samples, _dedupe_graph_branches(branches), limit_hit
@@ -372,11 +452,14 @@ def _final_unavailable_identities(corrections):
     return unavailable
 
 
-def _graph_branch(path, edges, status, *, barrier_id="", reason=""):
+def _graph_branch(path, edges, status, *, edge_facts=(), node_facts=(), barrier_id="", reason=""):
     return {
-        "branch_id": "unigraph:" + ">".join(path),
+        "branch_id": _graph_path_key(path, edge_facts),
         "path_node_ids": list(path),
         "path_edge_labels": list(edges),
+        "path_edge_ids": _edge_path_ids(edge_facts),
+        "path_edge_facts": list(edge_facts),
+        "path_node_facts": list(node_facts),
         "status": status,
         "barrier_id": barrier_id,
         "reason": reason,
@@ -386,6 +469,27 @@ def _graph_branch(path, edges, status, *, barrier_id="", reason=""):
 def _dedupe_graph_branches(branches):
     result = {}
     for branch in branches:
-        key = (tuple(branch.get("path_node_ids") or ()), branch.get("status"), branch.get("barrier_id"))
+        key = (
+            tuple(branch.get("path_node_ids") or ()),
+            tuple(branch.get("path_edge_ids") or ()),
+            branch.get("status"),
+            branch.get("barrier_id"),
+        )
         result[key] = branch
-    return list(result.values())
+    return sorted(result.values(), key=lambda branch: str(branch.get("branch_id") or ""))
+
+
+def _edge_path_ids(edge_facts):
+    return [str(fact.get("edge_id") or "") for fact in edge_facts]
+
+
+def _graph_path_key(path, edge_facts):
+    key = "unigraph:" + ">".join(path)
+    edge_ids = _edge_path_ids(edge_facts)
+    if edge_ids and all(edge_ids):
+        return key + "|edges:" + ">".join(edge_ids)
+    return key
+
+
+def _graph_state_key(state):
+    return tuple(state.get("path") or ()), tuple(_edge_path_ids(state.get("edge_facts") or ()))

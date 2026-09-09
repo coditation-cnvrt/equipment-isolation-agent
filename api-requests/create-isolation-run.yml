@@ -20,7 +20,13 @@ http:
         "unigraph_project_id": "{{UNIGRAPH_PROJECT_ID}}",
         "collection_name": "{{COLLECTION_NAME}}",
         "job_name": "{{JOB_NAME}}",
-        "job_id": "{{JOB_ID}}"
+        "job_id": "{{JOB_ID}}",
+        "selected_asset": {
+          "hilt_entity_id": "{{HILT_EQUIPMENT_ID}}",
+          "tag": "{{EQUIPMENT_TAG}}",
+          "selection_source": "hilt_equipment_list"
+        },
+        "process_safety_inputs": {{PROCESS_SAFETY_INPUTS_JSON}}
       }
 
 settings:

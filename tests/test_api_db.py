@@ -1,4 +1,6 @@
+from tests.run_request_fixtures import run_request, captured_hilt
 import os
+import inspect as python_inspect
 import threading
 import time
 import unittest
@@ -11,6 +13,7 @@ from equipment_isolation.api.db import (
     PostgresConfig,
     PostgresRunRepository,
     _asset_scope_key,
+    _lock_source_defect_for_update,
     _migration_config,
     _plan_number_statement,
     migration_head_revision,
@@ -100,6 +103,10 @@ class _FailingRepository(_FakeRepository):
 
 
 class ApiDbTests(unittest.TestCase):
+    def setUp(self):
+        capture = mock.patch('equipment_isolation.api.service.capture_run_hilt', side_effect=captured_hilt)
+        capture.start(); self.addCleanup(capture.stop)
+
     @staticmethod
     def _ready_repository(tables, current_heads, columns=()):
         connection = mock.MagicMock()
@@ -128,7 +135,7 @@ class ApiDbTests(unittest.TestCase):
         return repository, patched_inspection()
 
     def test_packaged_migration_has_one_expected_head(self):
-        self.assertEqual(migration_head_revision(), "0007_asset_state_derivation")
+        self.assertEqual(migration_head_revision(), "0010_planning_previews")
 
     def test_migration_config_and_template_are_package_resources(self):
         migration_package = files("equipment_isolation.api.migrations")
@@ -145,6 +152,8 @@ class ApiDbTests(unittest.TestCase):
         self.assertTrue(migration_package.joinpath("versions", "0005_feedback_constraint_names.py").is_file())
         self.assertTrue(migration_package.joinpath("versions", "0006_shared_asset_conditions.py").is_file())
         self.assertTrue(migration_package.joinpath("versions", "0007_asset_condition_derivation_triggers.py").is_file())
+        self.assertTrue(migration_package.joinpath("versions", "0008_source_data_defects.py").is_file())
+        self.assertTrue(migration_package.joinpath("versions", "0009_controlled_inputs_controlled_inputs.py").is_file())
         self.assertEqual(
             _migration_config().get_main_option("script_location"),
             str(migration_package),
@@ -153,9 +162,61 @@ class ApiDbTests(unittest.TestCase):
     def test_orm_metadata_owns_all_application_tables(self):
         self.assertEqual(
             set(Base.metadata.tables),
-            {"isolation_runs", "isolation_run_events", "isolation_plan", "plan_version", "external_run_link", "asset_reference", "asset_condition", "asset_condition_event", "plan_version_asset_condition", "work_scope", "work_scope_asset", "input_snapshot", "isolation_branch", "isolation_point", "path_point", "plan_step", "finding", "plan_feedback", "feedback_review_decision", "derivation_manifest", "derivation_manifest_feedback", "plan_version_feedback", "feedback_application_result", "audit_event"},
+            {"isolation_runs", "isolation_run_events", "isolation_plan", "plan_version", "external_run_link", "asset_reference", "asset_condition", "asset_condition_event", "plan_version_asset_condition", "source_data_defect", "source_data_defect_event", "plan_source_dependency", "source_defect_plan_impact", "derivation_manifest_source_data_defect", "work_scope", "work_scope_asset", "input_snapshot", "isolation_branch", "isolation_point", "path_point", "plan_step", "finding", "plan_feedback", "feedback_review_decision", "derivation_manifest", "derivation_manifest_feedback", "plan_version_feedback", "feedback_application_result", "audit_event", "controlled_input", "controlled_input_revision", "run_input_manifest", "run_input_manifest_item", "plan_version_invalidation", "planning_preview"},
         )
         self.assertIn("isolation_plan_number_seq", Base.metadata._sequences)
+        trigger_constraints = {
+            str(item.sqltext)
+            for item in Base.metadata.tables["derivation_manifest"].constraints
+            if hasattr(item, "sqltext")
+        }
+        self.assertTrue(any("source_data_defects" in item for item in trigger_constraints))
+
+    def test_source_defect_links_enforce_relational_identity(self):
+        event_constraints = Base.metadata.tables["source_data_defect_event"].constraints
+        impact_constraints = Base.metadata.tables["source_defect_plan_impact"].constraints
+        derivation_constraints = Base.metadata.tables["derivation_manifest_source_data_defect"].constraints
+        self.assertIn(
+            "source_data_defect_event_defect_event_key",
+            {item.name for item in event_constraints},
+        )
+        self.assertIn(
+            "source_defect_plan_impact_defect_event_fkey",
+            {item.name for item in impact_constraints},
+        )
+        self.assertIn(
+            "source_defect_plan_impact_plan_version_fkey",
+            {item.name for item in impact_constraints},
+        )
+        self.assertIn(
+            "derivation_manifest_source_defect_event_fkey",
+            {item.name for item in derivation_constraints},
+        )
+
+    def test_source_defect_plan_transactions_lock_drawing_scope_before_rows(self):
+        methods = (
+            PostgresRunRepository.create_plan_from_run,
+            PostgresRunRepository.prepare_derivation,
+            PostgresRunRepository._complete_derivation,
+            _lock_source_defect_for_update,
+        )
+        for method in methods:
+            source = python_inspect.getsource(method)
+            with self.subTest(method=method.__name__):
+                self.assertIn("_lock_source_defect_scope", source)
+                self.assertIn("with_for_update", source)
+                self.assertLess(
+                    source.index("_lock_source_defect_scope"),
+                    source.index("with_for_update"),
+                )
+
+    def test_0008_downgrade_restores_0007_derivation_trigger_constraint(self):
+        migration = files("equipment_isolation.api.migrations").joinpath(
+            "versions", "0008_source_data_defects.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("'corrections','asset_conditions','source_data_defects','combined'", migration)
+        self.assertIn("'corrections','asset_conditions','combined'", migration)
+        self.assertIn("op.drop_table(\"derivation_manifest_source_data_defect\")", migration)
 
     def test_postgresql_statements_preserve_json_index_and_lock_semantics(self):
         dialect = postgresql.dialect()
@@ -185,7 +246,7 @@ class ApiDbTests(unittest.TestCase):
             "plan_version",
             "external_run_link",
         )
-        repository, connection_patch = self._ready_repository(tables, ("0007_asset_state_derivation",))
+        repository, connection_patch = self._ready_repository(tables, ("0010_planning_previews",))
         with connection_patch:
             repository.check_ready()
 
@@ -199,7 +260,7 @@ class ApiDbTests(unittest.TestCase):
             "external_run_link",
         )
         repository, connection_patch = self._ready_repository(tables, ("old_revision",))
-        with connection_patch, self.assertRaisesRegex(RuntimeError, "expected 0007_asset_state_derivation"):
+        with connection_patch, self.assertRaisesRegex(RuntimeError, "expected 0010_planning_previews"):
             repository.check_ready()
 
     def test_asset_scope_separates_reused_external_ids(self):
@@ -280,7 +341,7 @@ class ApiDbTests(unittest.TestCase):
             }
         ]
         store = RunStore(max_workers=1, repository=repo)
-        request = IsolationRunRequest(
+        request = run_request(
             equipment_tag="P3",
             cnvrt_project_id="277",
             collection_id="206",
@@ -324,7 +385,7 @@ class ApiDbTests(unittest.TestCase):
 
     def test_repository_insert_failure_rejects_run_creation(self):
         store = RunStore(max_workers=1, repository=_FailingRepository())
-        request = IsolationRunRequest(
+        request = run_request(
             equipment_tag="P3",
             cnvrt_project_id="277",
             collection_id="206",
@@ -334,7 +395,7 @@ class ApiDbTests(unittest.TestCase):
             store.create(request, "token")
         store.shutdown()
 
-    def test_inferred_job_refreshes_shared_conditions_and_persisted_snapshot(self):
+    def test_explicit_job_refreshes_shared_conditions_and_persisted_snapshot(self):
         class _DrawingAwareRepository(_FakeRepository):
             def active_asset_conditions_for_run(self, request_payload):
                 self.asset_condition_requests.append(dict(request_payload))
@@ -344,7 +405,7 @@ class ApiDbTests(unittest.TestCase):
 
         repo = _DrawingAwareRepository()
         store = RunStore(max_workers=1, repository=repo)
-        request = IsolationRunRequest(
+        request = run_request(
             equipment_tag="P3",
             cnvrt_project_id="277",
             collection_id="206",
@@ -380,7 +441,7 @@ class ApiDbTests(unittest.TestCase):
                 persisted["request"]["asset_conditions"][0]["condition_id"],
                 "drawing-condition",
             )
-            self.assertEqual(repo.asset_condition_requests[0]["job_id"], "")
+            self.assertEqual(repo.asset_condition_requests[0]["job_id"], "2151")
             self.assertEqual(repo.asset_condition_requests[-1]["job_id"], "2151")
         finally:
             store.shutdown()
@@ -390,10 +451,10 @@ class ApiDbTests(unittest.TestCase):
         release = threading.Event()
         started = threading.Event()
         store = RunStore(max_workers=1, repository=repo)
-        first = IsolationRunRequest(
+        first = run_request(
             equipment_tag="P3", cnvrt_project_id="277", collection_id="206", unigraph_project_id="15"
         )
-        second = IsolationRunRequest(
+        second = run_request(
             equipment_tag="P4", cnvrt_project_id="277", collection_id="206", unigraph_project_id="15"
         )
 

@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from importlib.resources import files
 from types import SimpleNamespace
 from uuid import UUID
+from unittest import mock
 
 from fastapi import HTTPException, Response
 
@@ -30,7 +31,10 @@ def _plan():
         "cnvrt_project_id": "277",
         "collection_id": "206",
         "unigraph_project_id": "15",
-        "request": {"job_id": "2151"},
+        "request": {
+            "job_id": "2151", "cnvrt_project_id": "277",
+            "collection_id": "206", "unigraph_project_id": "15",
+        },
         "agent": None,
         "result_url": f"/isolation-runs/{RUN_ID}/result",
         "trace_url": f"/isolation-runs/{RUN_ID}/trace",
@@ -79,7 +83,20 @@ class _PlanRepository:
             raise self.create_error
         return self.plan, self.created
 
-    def list_plans(self, **_):
+    def get_run(self, run_id):
+        return self.plan["latest_version"]["source_run"] if run_id == RUN_ID else None
+
+    def get_plan_authorization_context(self, plan_id, version_id=None):
+        if plan_id != PLAN_ID or (version_id is not None and version_id != VERSION_ID):
+            return None
+        return self.plan["latest_version"]["source_run"]
+
+    def list_plan_authorization_contexts(self, **_):
+        return [self.plan["latest_version"]["source_run"]]
+
+    def list_plans(self, authorized_contexts=None, **_):
+        if authorized_contexts == []:
+            return [], 0
         summary = dict(self.plan)
         summary.pop("versions")
         return [summary], 1
@@ -89,6 +106,11 @@ class _PlanRepository:
 
 
 class PlanTests(unittest.TestCase):
+    def setUp(self):
+        patcher = mock.patch("equipment_isolation.api.routes.authorize_planning_context")
+        self.authorize = patcher.start()
+        self.addCleanup(patcher.stop)
+
     def _request(self, repository=None):
         store = SimpleNamespace(repository=repository)
         return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(run_store=store)))
@@ -243,6 +265,73 @@ class PlanTests(unittest.TestCase):
         self.assertNotIn("versions", listed["items"][0])
         self.assertEqual(detail["versions"][0]["version_no"], 1)
         self.assertIsNone(detail["active_plan_version_id"])
+        self.authorize.assert_called_with(
+            repository.plan["latest_version"]["source_run"],
+            "token",
+            asset_system="cnvrt_drawing_entity",
+        )
+
+    def test_plan_list_filters_forbidden_scopes_without_leaking_defects_or_count(self):
+        repository = _PlanRepository()
+        allowed = repository.plan["latest_version"]["source_run"]
+        forbidden = {
+            **allowed,
+            "job_id": "9999",
+            "request": {**allowed["request"], "job_id": "9999"},
+        }
+        repository.list_plan_authorization_contexts = mock.Mock(
+            return_value=[allowed, forbidden]
+        )
+
+        def authorize(context, _token, **_kwargs):
+            if str(context.get("job_id")) == "9999":
+                raise PermissionError("forbidden")
+
+        self.authorize.side_effect = authorize
+        def list_authorized(**kwargs):
+            contexts = kwargs["authorized_contexts"]
+            self.assertEqual([item["job_id"] for item in contexts], ["2151"])
+            allowed_summary = dict(repository.plan)
+            allowed_summary.pop("versions")
+            forbidden_summary = {
+                **allowed_summary,
+                "plan_id": "forbidden-plan",
+                "freshness": {
+                    **allowed_summary["freshness"],
+                    "source_defects": [{"defect_id": "forbidden-defect"}],
+                },
+            }
+            allowed_jobs = {item["job_id"] for item in contexts}
+            items = [
+                item for job, item in (
+                    ("2151", allowed_summary), ("9999", forbidden_summary)
+                )
+                if job in allowed_jobs
+            ]
+            return items, len(items)
+
+        repository.list_plans = list_authorized
+        listed = list_plans(
+            self._request(repository), limit=20, offset=0,
+            authorization="Bearer token",
+        )
+        self.assertEqual(listed["total"], 1)
+        self.assertEqual([item["plan_id"] for item in listed["items"]], [PLAN_ID])
+        self.assertNotIn("forbidden-defect", str(listed))
+        passed_contexts = repository.list_plan_authorization_contexts.return_value
+        self.assertEqual({item["job_id"] for item in passed_contexts}, {"2151", "9999"})
+
+    def test_cross_scope_plan_detail_does_not_return_defect_freshness(self):
+        repository = _PlanRepository()
+        repository.plan["freshness"]["source_defects"] = [{"defect_id": "forbidden-defect"}]
+        self.authorize.side_effect = PermissionError("forbidden")
+        with self.assertRaises(HTTPException) as caught:
+            plan_detail(
+                self._request(repository), UUID(PLAN_ID),
+                authorization="Bearer token",
+            )
+        self.assertEqual(caught.exception.status_code, 403)
+        self.assertEqual(caught.exception.detail["kind"], "plan_scope_forbidden")
 
     def test_baseline_migration_contains_bridge_constraints(self):
         migration = (

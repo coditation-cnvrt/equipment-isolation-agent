@@ -11,7 +11,11 @@ uv run python -m api
 Recommended smoke order:
 
 Set `PLANT360_AUTH_TOKEN` in the collection/environment first. Requests inherit
-Bearer auth from the collection.
+Bearer auth from the collection. Set `JOB_ID`, `HILT_EQUIPMENT_ID` and
+`PROCESS_SAFETY_INPUTS_JSON` (the complete JSON object containing scoped FHR,
+SIC, PSD, structured scope and assessment time). The documents must match the
+selected project, collection, UniGraph and drawing. Missing/null documents or
+missing equipment identity return 422 before a run is created.
 
 1. `health` should return `200`.
 2. `reject blank equipment tag` should return `422`.

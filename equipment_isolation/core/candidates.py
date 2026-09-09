@@ -1,3 +1,4 @@
+from equipment_isolation.domain.path_facts import path_facts
 from equipment_isolation.domain.classification import class_matches, classify_candidate, normalize_class
 from equipment_isolation.domain.enums import IsolationDecision
 from equipment_isolation.domain.models import BBox, IsolationCandidate
@@ -176,6 +177,9 @@ def _candidate_from_vertex(equipment_tag, source_component_tag, source_component
             "property_preview": {key: properties[key] for key in sorted(properties)[:12] if properties.get(key) is not None},
             "graph_path_ids": vertex.get("graph_path_ids") or [],
             "graph_path_edge_labels": vertex.get("graph_path_edge_labels") or [],
+            "graph_path_edge_ids": vertex.get("graph_path_edge_ids") or [],
+            "graph_path_edge_facts": vertex.get("graph_path_edge_facts") or [],
+            "graph_path_node_facts": vertex.get("graph_path_node_facts") or [],
             "graph_path_key": vertex.get("graph_path_key") or "",
             "graph_path_status": vertex.get("graph_path_status") or "",
             "graph_path_complete": bool(vertex.get("graph_path_complete")),
@@ -271,6 +275,8 @@ def _candidate_sort_key(candidate):
 
 def _path_trace(candidate):
     return {
+        **path_facts(candidate),
+        "branch_id": candidate.get("branch_id") or candidate.get("graph_path_key"),
         "source_component_tag": candidate.get("source_component_tag"),
         "source_component_id": candidate.get("source_component_id"),
         "source_name": candidate.get("source_name"),

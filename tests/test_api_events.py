@@ -3,7 +3,7 @@ import unittest
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from equipment_isolation.api.events import asset_condition_event_stream, compact_event, sse_frame
+from equipment_isolation.api.events import asset_condition_event_stream, compact_event, source_defect_event_stream, sse_frame
 from equipment_isolation.api.runs import event_stream
 
 
@@ -75,6 +75,29 @@ class _LateCommitAssetEventRepository:
         ]
 
 
+class _LateCommitDefectEventRepository:
+    def source_defect_event_replay_state(self, _context, _after_id=""):
+        return {
+            "cursor_id": "later-visible-event",
+            "cursor_occurred_at": datetime(2026, 9, 1, 0, 0, 2, tzinfo=timezone.utc),
+            "seen_ids": {"later-visible-event"},
+        }
+
+    def list_source_defect_events(self, _context, *, after_id="", exclude_ids=None, limit=100):
+        return [
+            {
+                "event_id": "late-defect-event", "event_type": "confirmed",
+                "defect_id": "defect-1", "state": "confirmed", "category": "incorrect_label",
+                "occurred_at": datetime(2026, 9, 1, 0, 0, 1, tzinfo=timezone.utc), "payload": {},
+            },
+            {
+                "event_id": "later-visible-event", "event_type": "reclassified",
+                "defect_id": "defect-2", "state": "reported", "category": "incorrect_symbol",
+                "occurred_at": datetime(2026, 9, 1, 0, 0, 2, tzinfo=timezone.utc), "payload": {},
+            },
+        ]
+
+
 class ApiEventTests(unittest.TestCase):
     def test_tool_result_events_are_compact(self):
         event = compact_event(
@@ -135,6 +158,22 @@ class ApiEventTests(unittest.TestCase):
         finally:
             stream.close()
         self.assertIn("id: late-commit-earlier-timestamp", changed)
+        self.assertNotIn("id: later-visible-event", changed)
+
+    def test_source_defect_stream_uses_overlap_and_deduplicates_seen_events(self):
+        stream = source_defect_event_stream(
+            _LateCommitDefectEventRepository(),
+            {"cnvrt_project_id": "277", "collection_id": "206", "job_id": "2151"},
+            last_event_id="later-visible-event",
+            poll_interval=0,
+        )
+        try:
+            next(stream)
+            changed = next(stream)
+        finally:
+            stream.close()
+        self.assertIn("id: late-defect-event", changed)
+        self.assertIn("event: source_data_defect.changed", changed)
         self.assertNotIn("id: later-visible-event", changed)
 
 

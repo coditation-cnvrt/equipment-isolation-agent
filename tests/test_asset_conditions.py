@@ -1,3 +1,4 @@
+from tests.run_request_fixtures import run_request
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -199,7 +200,7 @@ class AssetConditionTests(unittest.TestCase):
         self.assertEqual(repository.calls, [])
 
     def test_shared_unavailable_condition_is_applied_after_local_feedback(self):
-        request_with_local = DerivedIsolationRunRequest(
+        request_with_local = run_request(model=DerivedIsolationRunRequest,
             equipment_tag="P3",
             job_id="2151",
             cnvrt_project_id="277",
@@ -305,6 +306,18 @@ class AssetConditionTests(unittest.TestCase):
                 "token",
                 asset_system="cnvrt_drawing_entity",
             )
+
+    @mock.patch("equipment_isolation.api.service._cnvrt_client")
+    def test_drawing_authorization_requires_exact_job_identity(self, cnvrt_client):
+        context = asset_request().context()
+        context["job_id"] = ""
+        with self.assertRaisesRegex(PermissionError, "Exact CNVRT drawing identity"):
+            authorize_planning_context(
+                context,
+                "token",
+                asset_system="cnvrt_drawing_entity",
+            )
+        cnvrt_client.assert_not_called()
 
     @mock.patch("equipment_isolation.api.service._is_unigraph_project_mapped")
     @mock.patch("equipment_isolation.api.service.Plant360Client")

@@ -86,6 +86,8 @@ def analyze_isolation_obligations(candidate_data, config):
                     "branch_index": branch.get("branch_index"),
                     "branch_path_node_ids": path_ids,
                     "branch_path_node_classes": path_classes,
+                    "branch_path_link_ids": branch.get("path_link_ids") or [],
+                    "branch_path_link_facts": branch.get("path_link_facts") or [],
                     "branch_context_devices": branch.get("context_devices") or [],
                     "unavailable_devices": unavailable_devices,
                     **({"terminal_node": branch["terminal_node"]} if branch.get("terminal_node") else {}),
@@ -140,6 +142,9 @@ def analyze_isolation_obligations(candidate_data, config):
                         "branch_index": branch_index,
                         "branch_path_node_ids": branch.get("path_node_ids") or [],
                         "branch_path_edge_labels": branch.get("path_edge_labels") or [],
+                        "branch_path_edge_ids": branch.get("path_edge_ids") or [],
+                        "branch_path_edge_facts": branch.get("path_edge_facts") or [],
+                        "branch_path_node_facts": branch.get("path_node_facts") or [],
                         "basis": "HILT classifies this UniGraph-connected source as instrument or companion context, not a process isolation boundary.",
                     }
                 )
@@ -166,6 +171,9 @@ def analyze_isolation_obligations(candidate_data, config):
                     "branch_index": branch_index,
                     "branch_path_node_ids": branch.get("path_node_ids") or [],
                     "branch_path_edge_labels": branch.get("path_edge_labels") or [],
+                    "branch_path_edge_ids": branch.get("path_edge_ids") or [],
+                    "branch_path_edge_facts": branch.get("path_edge_facts") or [],
+                    "branch_path_node_facts": branch.get("path_node_facts") or [],
                     "basis": (
                         "adaptive UniGraph path reached its first available eligible isolation barrier"
                         if covered

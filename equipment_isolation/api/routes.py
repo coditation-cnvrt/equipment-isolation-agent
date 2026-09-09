@@ -35,9 +35,17 @@ from equipment_isolation.api.models import (
     RunAccepted,
     RunList,
     RunStatus,
+    ReportSourceDefectRequest,
+    ReclassifySourceDefectRequest,
+    RecordSourceDefectRemediationRequest,
+    SourceDefectActionRequest,
+    AddSourceDefectEvidenceRequest,
+    SourceDefectDetail,
+    SourceDefectList,
+    SourceDefectPolicyDetail,
 )
 from equipment_isolation.api.plans import PlanDomainError
-from equipment_isolation.api.events import asset_condition_event_stream
+from equipment_isolation.api.events import asset_condition_event_stream, source_defect_event_stream
 from equipment_isolation.api.runs import RunStore, event_stream
 from equipment_isolation.api.service import (
     authorize_planning_context,
@@ -52,6 +60,7 @@ from equipment_isolation.api.service import (
     list_unigraph_projects,
 )
 from equipment_isolation.api.db import postgres_configured
+from equipment_isolation.domain.source_defects import policy_catalogue
 
 router = APIRouter()
 LOGGER = logging.getLogger(__name__)
@@ -183,6 +192,68 @@ def _authorized_asset_condition(request: Request, condition_id: UUID, authorizat
     return item
 
 
+def _authorize_defect_scope(context: dict, authorization: str) -> None:
+    token = _require_run_read_auth(authorization)
+    try:
+        authorize_planning_context(context, token, asset_system="cnvrt_drawing_entity")
+    except PermissionError:
+        raise HTTPException(status_code=403, detail={"kind": "source_defect_scope_forbidden", "message": "The authenticated user cannot access this exact drawing."}) from None
+    except Exception:
+        LOGGER.exception("Source-defect drawing authorization failed")
+        raise HTTPException(status_code=502, detail={"kind": "source_defect_scope_authorization_failed", "message": "Unable to verify access to this exact drawing."}) from None
+
+
+def _authorized_source_defect(request: Request, defect_id: UUID, authorization: str):
+    item = _plan_repository(request).get_source_defect(str(defect_id))
+    if item is None:
+        raise HTTPException(status_code=404, detail={"kind": "unknown_source_defect", "message": "Unknown source-data defect."})
+    _authorize_defect_scope(item["context"], authorization)
+    return item
+
+
+def _authorize_plan_scope(context: dict, authorization: str) -> None:
+    token = _require_run_read_auth(authorization)
+    try:
+        authorize_planning_context(
+            context, token, asset_system="cnvrt_drawing_entity"
+        )
+    except PermissionError:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "kind": "plan_scope_forbidden",
+                "message": "The authenticated user cannot access this plan's exact drawing.",
+            },
+        ) from None
+    except Exception:
+        LOGGER.exception("Plan drawing authorization failed")
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "kind": "plan_scope_authorization_failed",
+                "message": "Unable to verify access to this plan's exact drawing.",
+            },
+        ) from None
+
+
+def _authorize_persisted_plan(
+    repository,
+    plan_id: UUID,
+    authorization: str,
+    *,
+    version_id: UUID | None = None,
+) -> dict:
+    context = repository.get_plan_authorization_context(
+        str(plan_id), str(version_id) if version_id is not None else None
+    )
+    if context is None:
+        kind = "unknown_plan_version" if version_id is not None else "unknown_plan"
+        message = "Unknown plan version." if version_id is not None else "Unknown plan id."
+        raise HTTPException(status_code=404, detail={"kind": kind, "message": message})
+    _authorize_plan_scope(context, authorization)
+    return context
+
+
 @router.get("/health")
 def health():
     return {
@@ -311,6 +382,141 @@ def asset_condition_detail(
     authorization: str = Header(default=""),
 ):
     return _authorized_asset_condition(request, condition_id, authorization)
+
+
+@router.post("/source-data-defects", response_model=SourceDefectDetail, status_code=201)
+def report_source_defect(request: Request, request_body: ReportSourceDefectRequest, authorization: str = Header(default="")):
+    _authorize_defect_scope(request_body.context.authorization_context(), authorization)
+    try:
+        return _plan_repository(request).create_source_defect(request_body, _actor_id(request))
+    except PlanDomainError as error:
+        _raise_plan_error(error)
+
+
+@router.get("/source-data-defects/policy", response_model=SourceDefectPolicyDetail)
+def source_defect_policy():
+    return policy_catalogue()
+
+
+@router.get("/source-data-defects", response_model=SourceDefectList)
+def list_source_defects(
+    request: Request,
+    cnvrt_project_id: str,
+    collection_id: str,
+    unigraph_project_id: str,
+    job_id: str,
+    state: Literal["open", "reported", "confirmed", "remediation_recorded", "resolved", "rejected", "withdrawn", "all"] = "open",
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    authorization: str = Header(default=""),
+):
+    context = {"cnvrt_project_id": cnvrt_project_id, "collection_id": collection_id, "unigraph_project_id": unigraph_project_id, "job_id": job_id}
+    _authorize_defect_scope(context, authorization)
+    items, total = _plan_repository(request).list_source_defects(context=context, state=state, limit=limit, offset=offset)
+    return {"items": items, "limit": limit, "offset": offset, "total": total}
+
+
+@router.get("/source-data-defects/events")
+def source_defect_events(
+    request: Request,
+    cnvrt_project_id: str,
+    collection_id: str,
+    unigraph_project_id: str,
+    job_id: str,
+    authorization: str = Header(default=""),
+    last_event_id: str = Header(default="", alias="Last-Event-ID"),
+):
+    context = {"cnvrt_project_id": cnvrt_project_id, "collection_id": collection_id, "unigraph_project_id": unigraph_project_id, "job_id": job_id}
+    _authorize_defect_scope(context, authorization)
+    return StreamingResponse(source_defect_event_stream(_plan_repository(request), context, last_event_id=last_event_id), media_type="text/event-stream", headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
+
+
+@router.get("/source-data-defects/{defect_id}", response_model=SourceDefectDetail)
+def source_defect_detail(request: Request, defect_id: UUID, authorization: str = Header(default="")):
+    return _authorized_source_defect(request, defect_id, authorization)
+
+
+def _source_defect_action(request: Request, defect_id: UUID, action: str, body, authorization: str):
+    _authorized_source_defect(request, defect_id, authorization)
+    try:
+        return _plan_repository(request).transition_source_defect(str(defect_id), action, body, _actor_id(request))
+    except PlanDomainError as error:
+        _raise_plan_error(error)
+
+
+@router.post("/source-data-defects/{defect_id}/confirm", response_model=SourceDefectDetail)
+def confirm_source_defect(request: Request, defect_id: UUID, request_body: SourceDefectActionRequest, authorization: str = Header(default="")):
+    return _source_defect_action(request, defect_id, "confirm", request_body, authorization)
+
+
+@router.post("/source-data-defects/{defect_id}/remediation", response_model=SourceDefectDetail)
+def record_source_defect_remediation(request: Request, defect_id: UUID, request_body: RecordSourceDefectRemediationRequest, authorization: str = Header(default="")):
+    return _source_defect_action(request, defect_id, "remediation_recorded", request_body, authorization)
+
+
+@router.post("/source-data-defects/{defect_id}/resolve", response_model=SourceDefectDetail)
+def resolve_source_defect(request: Request, defect_id: UUID, request_body: SourceDefectActionRequest, authorization: str = Header(default="")):
+    return _source_defect_action(request, defect_id, "resolve", request_body, authorization)
+
+
+@router.post("/source-data-defects/{defect_id}/reject", response_model=SourceDefectDetail)
+def reject_source_defect(request: Request, defect_id: UUID, request_body: SourceDefectActionRequest, authorization: str = Header(default="")):
+    return _source_defect_action(request, defect_id, "reject", request_body, authorization)
+
+
+@router.post("/source-data-defects/{defect_id}/withdraw", response_model=SourceDefectDetail)
+def withdraw_source_defect(request: Request, defect_id: UUID, request_body: SourceDefectActionRequest, authorization: str = Header(default="")):
+    return _source_defect_action(request, defect_id, "withdraw", request_body, authorization)
+
+
+@router.post("/source-data-defects/{defect_id}/reopen", response_model=SourceDefectDetail)
+def reopen_source_defect(request: Request, defect_id: UUID, request_body: SourceDefectActionRequest, authorization: str = Header(default="")):
+    return _source_defect_action(request, defect_id, "reopen", request_body, authorization)
+
+
+@router.post("/source-data-defects/{defect_id}/reclassify", response_model=SourceDefectDetail)
+def reclassify_source_defect(request: Request, defect_id: UUID, request_body: ReclassifySourceDefectRequest, authorization: str = Header(default="")):
+    _authorized_source_defect(request, defect_id, authorization)
+    try:
+        return _plan_repository(request).reclassify_source_defect(str(defect_id), request_body, _actor_id(request))
+    except PlanDomainError as error:
+        _raise_plan_error(error)
+
+
+@router.post("/source-data-defects/{defect_id}/comments", response_model=SourceDefectDetail)
+def comment_on_source_defect(request: Request, defect_id: UUID, request_body: SourceDefectActionRequest, authorization: str = Header(default="")):
+    _authorized_source_defect(request, defect_id, authorization)
+    try:
+        return _plan_repository(request).annotate_source_defect(str(defect_id), "commented", request_body, _actor_id(request))
+    except PlanDomainError as error:
+        _raise_plan_error(error)
+
+
+@router.post("/source-data-defects/{defect_id}/evidence", response_model=SourceDefectDetail)
+def add_source_defect_evidence(request: Request, defect_id: UUID, request_body: AddSourceDefectEvidenceRequest, authorization: str = Header(default="")):
+    _authorized_source_defect(request, defect_id, authorization)
+    try:
+        return _plan_repository(request).annotate_source_defect(str(defect_id), "evidence_added", request_body, _actor_id(request))
+    except PlanDomainError as error:
+        _raise_plan_error(error)
+
+
+def _coordinate_source_defect(request: Request, defect_id: UUID, action: str, body, authorization: str):
+    _authorized_source_defect(request, defect_id, authorization)
+    try:
+        return _plan_repository(request).coordinate_source_defect(str(defect_id), action, body, _actor_id(request))
+    except PlanDomainError as error:
+        _raise_plan_error(error)
+
+
+@router.post("/source-data-defects/{defect_id}/claim", response_model=SourceDefectDetail)
+def claim_source_defect(request: Request, defect_id: UUID, request_body: SourceDefectActionRequest, authorization: str = Header(default="")):
+    return _coordinate_source_defect(request, defect_id, "claimed", request_body, authorization)
+
+
+@router.post("/source-data-defects/{defect_id}/release", response_model=SourceDefectDetail)
+def release_source_defect(request: Request, defect_id: UUID, request_body: SourceDefectActionRequest, authorization: str = Header(default="")):
+    return _coordinate_source_defect(request, defect_id, "released", request_body, authorization)
 
 
 @router.post(
@@ -655,8 +861,14 @@ def create_plan_from_run(
     response: Response,
     authorization: str = Header(default=""),
 ):
-    _require_run_read_auth(authorization)
     repository = _plan_repository(request)
+    source_run = repository.get_run(request_body.run_id)
+    if source_run is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"kind": "unknown_run", "message": "Unknown persisted run id."},
+        )
+    _authorize_plan_scope((source_run.get("request") or {}), authorization)
     try:
         plan, created = repository.create_plan_from_run(
             request_body.run_id, request_body.area_code
@@ -694,18 +906,33 @@ def list_plans(
 ):
     _require_run_read_auth(authorization)
     repository = _plan_repository(request)
+    filters = {
+        "lifecycle_state": lifecycle_state or None,
+        "equipment_tag": equipment_tag or None,
+        "job_id": job_id or None,
+        "cnvrt_project_id": cnvrt_project_id or None,
+        "collection_id": collection_id or None,
+        "unigraph_project_id": unigraph_project_id or None,
+        "plan_number": plan_number or None,
+    }
     try:
+        authorized_contexts = []
+        for context in repository.list_plan_authorization_contexts(**filters):
+            try:
+                _authorize_plan_scope(context, authorization)
+            except HTTPException as error:
+                if error.status_code == 403:
+                    continue
+                raise
+            authorized_contexts.append(context)
         items, total = repository.list_plans(
             limit=limit,
             offset=offset,
-            lifecycle_state=lifecycle_state or None,
-            equipment_tag=equipment_tag or None,
-            job_id=job_id or None,
-            cnvrt_project_id=cnvrt_project_id or None,
-            collection_id=collection_id or None,
-            unigraph_project_id=unigraph_project_id or None,
-            plan_number=plan_number or None,
+            **filters,
+            authorized_contexts=authorized_contexts,
         )
+    except HTTPException:
+        raise
     except Exception:
         LOGGER.exception("Plan listing failed")
         raise HTTPException(
@@ -722,8 +949,8 @@ def list_plans(
 def plan_detail(
     request: Request, plan_id: UUID, authorization: str = Header(default="")
 ):
-    _require_run_read_auth(authorization)
     repository = _plan_repository(request)
+    _authorize_persisted_plan(repository, plan_id, authorization)
     try:
         plan = repository.get_plan(str(plan_id))
     except Exception:
@@ -745,27 +972,30 @@ def plan_detail(
 
 @router.post("/isolation-plans/{plan_id}/changes", response_model=ChangeRequestDetail, status_code=201)
 def create_plan_change(request: Request, plan_id: UUID, request_body: CreateChangeRequest, authorization: str = Header(default="")):
-    _require_run_read_auth(authorization)
+    repository = _plan_repository(request)
+    _authorize_persisted_plan(repository, plan_id, authorization)
     try:
-        return _plan_repository(request).create_change(str(plan_id), request_body, _actor_id(request))
+        return repository.create_change(str(plan_id), request_body, _actor_id(request))
     except PlanDomainError as error:
         _raise_plan_error(error)
 
 
 @router.get("/isolation-plans/{plan_id}/changes", response_model=ChangeRequestList)
 def list_plan_changes(request: Request, plan_id: UUID, authorization: str = Header(default="")):
-    _require_run_read_auth(authorization)
+    repository = _plan_repository(request)
+    _authorize_persisted_plan(repository, plan_id, authorization)
     try:
-        return {"items": _plan_repository(request).list_changes(str(plan_id))}
+        return {"items": repository.list_changes(str(plan_id))}
     except PlanDomainError as error:
         _raise_plan_error(error)
 
 
 @router.post("/isolation-plans/{plan_id}/changes/{change_id}/approve", response_model=ChangeRequestDetail)
 def approve_plan_change(request: Request, plan_id: UUID, change_id: UUID, authorization: str = Header(default="")):
-    _require_run_read_auth(authorization)
+    repository = _plan_repository(request)
+    _authorize_persisted_plan(repository, plan_id, authorization)
     try:
-        return _plan_repository(request).approve_change(str(plan_id), str(change_id), _actor_id(request))
+        return repository.approve_change(str(plan_id), str(change_id), _actor_id(request))
     except PlanDomainError as error:
         _raise_plan_error(error)
 
@@ -774,6 +1004,7 @@ def approve_plan_change(request: Request, plan_id: UUID, change_id: UUID, author
 def derive_plan(request: Request, plan_id: UUID, request_body: DerivePlanRequest, authorization: str = Header(default="")):
     token = _require_run_read_auth(authorization)
     repository = _plan_repository(request)
+    _authorize_persisted_plan(repository, plan_id, authorization)
     actor_id = _actor_id(request)
     prepared = None
     try:
@@ -783,6 +1014,8 @@ def derive_plan(request: Request, plan_id: UUID, request_body: DerivePlanRequest
             actor_id,
             trigger=request_body.trigger,
         )
+        if not prepared['request'].get('process_safety_inputs'):
+            raise PlanDomainError('process_safety_inputs_required', 'Start a new run from Workspace with FHR, SIC and PSD.', 409)
         derived_request = DerivedIsolationRunRequest.model_validate(prepared["request"])
         record = _store(request).create(derived_request, token, parent_run_id=prepared["parent_run_id"])
     except PlanDomainError as error:
@@ -799,9 +1032,10 @@ def derive_plan(request: Request, plan_id: UUID, request_body: DerivePlanRequest
 
 @router.get("/isolation-plans/{plan_id}/versions/{version_id}", response_model=PlanVersionContent)
 def plan_version_detail(request: Request, plan_id: UUID, version_id: UUID, authorization: str = Header(default="")):
-    _require_run_read_auth(authorization)
+    repository = _plan_repository(request)
+    _authorize_persisted_plan(repository, plan_id, authorization, version_id=version_id)
     try:
-        item = _plan_repository(request).get_plan_version(str(plan_id), str(version_id))
+        item = repository.get_plan_version(str(plan_id), str(version_id))
     except PlanDomainError as error:
         _raise_plan_error(error)
     if item is None:
@@ -811,9 +1045,10 @@ def plan_version_detail(request: Request, plan_id: UUID, version_id: UUID, autho
 
 @router.get("/isolation-plans/{plan_id}/versions/{version_id}/diff", response_model=PlanVersionDiff)
 def plan_version_diff(request: Request, plan_id: UUID, version_id: UUID, authorization: str = Header(default="")):
-    _require_run_read_auth(authorization)
+    repository = _plan_repository(request)
+    _authorize_persisted_plan(repository, plan_id, authorization, version_id=version_id)
     try:
-        item = _plan_repository(request).get_plan_version_diff(str(plan_id), str(version_id))
+        item = repository.get_plan_version_diff(str(plan_id), str(version_id))
     except PlanDomainError as error:
         _raise_plan_error(error)
     if item is None:
@@ -875,3 +1110,11 @@ def run_events(request: Request, run_id: str, authorization: str = Header(defaul
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get('/planning-context/process-safety-example')
+def process_safety_example(request: Request):
+    """Explicit unapproved example documents; no drawing or approval access granted."""
+    _actor_id(request)
+    from equipment_isolation.fixtures.safety_examples import example_process_inputs
+    return example_process_inputs()

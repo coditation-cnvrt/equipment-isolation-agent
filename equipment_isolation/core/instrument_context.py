@@ -50,7 +50,7 @@ def analyze_instrument_context(validation_data: dict, config, hilt_payload: dict
         client = Plant360Client(config.api)
         try:
             if hilt_payload is None:
-                hilt_payload = client.hilt_graph(job_id)
+                hilt_payload = config.captured_hilt.to_dict()["payload"] if getattr(config, "captured_hilt", None) is not None else client.hilt_graph(job_id)
             if stlm_payload is None:
                 stlm_payload = client.stlm_symbols(job_id)
         except Exception as exc:

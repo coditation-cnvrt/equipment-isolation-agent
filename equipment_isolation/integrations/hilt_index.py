@@ -68,20 +68,110 @@ def _hilt_line_summary(link, nodes_by_id):
     payload = link.get("payload") or {}
     source = link.get("source") or payload.get("from")
     target = link.get("target") or payload.get("to")
+    return {
+        **_hilt_path_link_summary(link),
+        "tag_number": _attr_value((payload.get("piping_network_segment") or {}).get("attributes"), "tag")
+        or _attr_value(payload.get("attributes"), "tag"),
+        "text": _hilt_text_value(payload.get("text")),
+        "graphical_lines": _hilt_graphical_lines(payload.get("graphical_lines")),
+        "connected_nodes": [nodes_by_id.get(_norm(value)) for value in (source, target) if nodes_by_id.get(_norm(value))],
+    }
+
+
+def _hilt_path_link_summary(link):
+    """Project one HILT edge into ordered path facts without inferring service."""
+    payload = link.get("payload") or {}
+    source = link.get("source") or payload.get("from")
+    target = link.get("target") or payload.get("to")
     segment = payload.get("piping_network_segment") or {}
     system = payload.get("piping_network_system") or {}
+    segment_attributes = segment.get("attributes") or []
+    system_attributes = system.get("attributes") or []
+    payload_attributes = payload.get("attributes") or []
+    segment_nominal_diameter = _attr_value(segment_attributes, "Nominal Diameter")
+    system_nominal_diameter = _attr_value(system_attributes, "Nominal Diameter")
+    segment_line_number = _attr_value(segment_attributes, "tag")
+    system_line_number = _attr_value(system_attributes, "LineNumberAssignmentClass")
+    design_pressure_values = _sourced_attribute_values(
+        segment_attributes,
+        system_attributes,
+        payload_attributes,
+        names=("Design Pressure", "DesignPressure"),
+    )
+    operating_pressure_values = _sourced_attribute_values(
+        segment_attributes,
+        system_attributes,
+        payload_attributes,
+        names=("Operating Pressure", "OperatingPressure"),
+    )
+    design_temperature_values = _sourced_attribute_values(
+        segment_attributes,
+        system_attributes,
+        payload_attributes,
+        names=("Design Temperature", "DesignTemperature"),
+    )
+    operating_temperature_values = _sourced_attribute_values(
+        segment_attributes,
+        system_attributes,
+        payload_attributes,
+        names=("Operating Temperature", "OperatingTemperature"),
+    )
+    service_evidence = []
+    for source_kind, source_data, attributes in (
+        ("segment", segment, segment_attributes),
+        ("system", system, system_attributes),
+        ("payload", payload, payload_attributes),
+        ("link", link, []),
+    ):
+        values = list(source_data.items()) + [
+            (attr.get("name"), attr.get("value"))
+            for attr in attributes if isinstance(attr, dict)
+        ]
+        for name, value in values:
+            key = "".join(ch for ch in str(name).casefold() if ch.isalnum())
+            if key not in {"fluidcode", "servicecode"}:
+                continue
+            for code in value if isinstance(value, list) else [value]:
+                if code not in (None, ""):
+                    service_evidence.append({"source_kind": source_kind, "field": str(name), "service_code": code})
+    service_evidence.sort(key=lambda row: (row["source_kind"], row["field"], str(row["service_code"])))
     return {
-        "line_id": payload.get("id") or payload.get("source_id"),
+        "line_id": link.get("id") or payload.get("id") or payload.get("source_id"),
         "source": source,
         "target": target,
         "entity_type": payload.get("entity_type"),
         "entity_class": payload.get("entity_class"),
-        "segment_id": segment.get("id"),
-        "system_id": system.get("id"),
-        "tag_number": _attr_value(segment.get("attributes"), "tag") or _attr_value(payload.get("attributes"), "tag"),
-        "text": _hilt_text_value(payload.get("text")),
-        "graphical_lines": _hilt_graphical_lines(payload.get("graphical_lines")),
-        "connected_nodes": [nodes_by_id.get(_norm(value)) for value in (source, target) if nodes_by_id.get(_norm(value))],
+        "segment_id": segment.get("id") or payload.get("piping_network_segment_id"),
+        "system_id": system.get("id") or payload.get("piping_network_system_id"),
+        "line_number": _consistent_value(segment_line_number, system_line_number),
+        "segment_line_number": segment_line_number,
+        "system_line_number": system_line_number,
+        "nominal_diameter": _consistent_value(segment_nominal_diameter, system_nominal_diameter),
+        "segment_nominal_diameter": segment_nominal_diameter,
+        "system_nominal_diameter": system_nominal_diameter,
+        "fluid_code": _consistent_value(*(row["service_code"] for row in service_evidence)),
+        "service_code_evidence": service_evidence,
+        "service_designation": _attr_value(system_attributes, "ServiceDesignation"),
+        "line_specification": _attr_value(segment_attributes, "Line Specification"),
+        "insulation_code": _attr_value(segment_attributes, "Insulation Code"),
+        "plant_area": _attr_value(segment_attributes, "Plant Area"),
+        "design_pressure": _consistent_value(*design_pressure_values),
+        "segment_design_pressure": design_pressure_values[0],
+        "system_design_pressure": design_pressure_values[1],
+        "payload_design_pressure": design_pressure_values[2],
+        "operating_pressure": _consistent_value(*operating_pressure_values),
+        "segment_operating_pressure": operating_pressure_values[0],
+        "system_operating_pressure": operating_pressure_values[1],
+        "payload_operating_pressure": operating_pressure_values[2],
+        "design_temperature": _consistent_value(*design_temperature_values),
+        "segment_design_temperature": design_temperature_values[0],
+        "system_design_temperature": design_temperature_values[1],
+        "payload_design_temperature": design_temperature_values[2],
+        "operating_temperature": _consistent_value(*operating_temperature_values),
+        "segment_operating_temperature": operating_temperature_values[0],
+        "system_operating_temperature": operating_temperature_values[1],
+        "payload_operating_temperature": operating_temperature_values[2],
+        "flow": payload.get("flow"),
     }
 
 
@@ -106,6 +196,27 @@ def _attr_value(attributes, name):
             if value not in (None, "", []):
                 return str(value)
     return None
+
+
+def _sourced_attribute_values(segment_attributes, system_attributes, payload_attributes, *, names):
+    values = []
+    for attributes in (segment_attributes, system_attributes, payload_attributes):
+        found = None
+        for name in names:
+            value = _attr_value(attributes, name)
+            if value not in (None, ""):
+                found = value
+                break
+        values.append(found)
+    return tuple(values)
+
+
+def _consistent_value(*values):
+    present = [str(value) for value in values if value not in (None, "")]
+    if not present:
+        return None
+    normalized = {" ".join(value.casefold().split()) for value in present}
+    return present[0] if len(normalized) == 1 else None
 
 
 def _hilt_text_value(items):

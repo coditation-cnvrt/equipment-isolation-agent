@@ -7,6 +7,7 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
+from equipment_isolation.domain.path_facts import PATH_FIELDS, path_facts
 from equipment_isolation.agent.session import jsonable
 from equipment_isolation.domain.feedback import PointFeedbackState
 
@@ -87,13 +88,14 @@ def normalized_plan_content(request: dict, result: dict) -> dict:
                 key,
                 {
                     "key": key,
-                    "path_node_ids": membership.get("path_node_ids") or [],
+                    **path_facts(membership),
                     "point_keys": [],
                     "unavailable_point_keys": [],
                 },
             )
-            if not branch["path_node_ids"] and membership.get("path_node_ids"):
-                branch["path_node_ids"] = membership["path_node_ids"]
+            for field in PATH_FIELDS:
+                if not branch[field] and membership.get(field):
+                    branch[field] = membership[field]
             if point.get("available_for_isolation") is False or point.get("availability_status") == "unavailable":
                 branch["unavailable_point_keys"].append(point["key"])
             else:
@@ -104,7 +106,9 @@ def normalized_plan_content(request: dict, result: dict) -> dict:
         branch["unavailable_point_keys"] = sorted(set(branch["unavailable_point_keys"]))
         branch["coverage_status"] = "covered" if branch["point_keys"] else "unresolved"
         branch["topology_signature"] = canonical_hash(
-            branch.get("path_node_ids") or branch["point_keys"] or branch["unavailable_point_keys"]
+            ({key: branch[key] for key in ("path_node_ids", "path_link_ids", "path_edge_ids")}
+             if branch["path_link_ids"] or branch["path_edge_ids"] else
+             branch.get("path_node_ids") or branch["point_keys"] or branch["unavailable_point_keys"])
         )
         branches.append(branch)
 
@@ -140,6 +144,8 @@ def normalized_plan_content(request: dict, result: dict) -> dict:
     return {
         "schema_version": "1.0",
         "context": {key: request.get(key) for key in ("cnvrt_project_id", "collection_id", "unigraph_project_id", "job_id", "job_name", "collection_name")},
+        **({'process_safety_assessment': jsonable(data['process_safety_assessment'])}
+           if data.get('process_safety_assessment') is not None else {}),
         "selected_asset": selected,
         "target_identity": target,
         "work_scope": request.get("work_scope") or {},
@@ -269,17 +275,19 @@ def _branch_memberships(item: dict) -> list[dict]:
             or source.get("source_component_tag")
             or "unassigned"
         )
-        path_node_ids = source.get("branch_path_node_ids") or source.get("path_node_ids") or []
+        facts = path_facts(source)
         existing = memberships.get(branch_key)
         if existing is None:
             memberships[branch_key] = {
                 "branch_key": branch_key,
-                "path_node_ids": jsonable(path_node_ids),
+                **jsonable(facts),
                 "path_order": int(source.get("path_order") or 0),
                 "primary": primary,
             }
-        elif not existing["path_node_ids"] and path_node_ids:
-            existing["path_node_ids"] = jsonable(path_node_ids)
+        else:
+            for field in PATH_FIELDS:
+                if not existing[field] and facts[field]:
+                    existing[field] = jsonable(facts[field])
         if primary:
             existing = memberships[branch_key]
             existing["primary"] = True

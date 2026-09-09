@@ -71,7 +71,7 @@ def analyze_downstream_impact(validation_data: dict, config, max_hops: int = MAX
         }
     client = Plant360Client(config.api)
     try:
-        hilt_payload = client.hilt_graph(job_id)
+        hilt_payload = config.captured_hilt.to_dict()["payload"] if getattr(config, "captured_hilt", None) is not None else client.hilt_graph(job_id)
     except Exception as exc:
         return {
             "status": "unavailable",

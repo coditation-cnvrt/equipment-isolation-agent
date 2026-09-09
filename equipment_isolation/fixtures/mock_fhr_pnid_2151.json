@@ -1,0 +1,205 @@
+{
+  "document": {
+    "title": "Mock Fluid Hazard Register for P&ID 2151",
+    "revision": "MOCK-0.1",
+    "status": "draft_mock_unapproved",
+    "approved_by": null,
+    "approved_date": null,
+    "cnvrt_project_id": 277,
+    "collection_id": 206,
+    "unigraph_project_id": 21,
+    "pnid_job_id": 2151,
+    "warning": "Synthetic development data only. Replace with a client-controlled FHR, current SDS data, and project line-code legend before M1/M3 use."
+  },
+  "fluids": [
+    {
+      "fluid_code": "CDH",
+      "service_description": "CO2 compressor discharge, high-pressure (assumed expansion)",
+      "phase_at_operating": "gas",
+      "nfpa_health": 3,
+      "nfpa_flammability": 0,
+      "nfpa_instability": 0,
+      "special_hazards": [
+        "none"
+      ],
+      "h2s_content_ppm": 0,
+      "benzene_content_pct": 0,
+      "idlh_ppm": 40000,
+      "tlv_twa_ppm": 5000,
+      "flash_point_c": null,
+      "autoignition_temp_c": null,
+      "normal_boiling_point_c": null,
+      "is_asphyxiant": true,
+      "is_cryogenic": false,
+      "is_corrosive": true,
+      "hsc_override": 4,
+      "source_document": "Mock assumption from P&ID 2151 equipment context; OSHA Carbon Dioxide Chemical Data; ICSC 0021; UK HSE Guidance on conveying carbon dioxide in pipelines; verify against project SDS and fluid composition",
+      "revision": "MOCK-0.1",
+      "approved_by": null,
+      "approved_date": null
+    },
+    {
+      "fluid_code": "PC",
+      "service_description": "Water-rich process condensate from CO2 compressor discharge KO vessel (assumed composition)",
+      "phase_at_operating": "liquid",
+      "nfpa_health": 2,
+      "nfpa_flammability": 0,
+      "nfpa_instability": 0,
+      "special_hazards": [
+        "none"
+      ],
+      "h2s_content_ppm": 0,
+      "benzene_content_pct": 0,
+      "idlh_ppm": null,
+      "tlv_twa_ppm": null,
+      "flash_point_c": null,
+      "autoignition_temp_c": null,
+      "normal_boiling_point_c": 100.0,
+      "is_asphyxiant": false,
+      "is_cryogenic": false,
+      "is_corrosive": true,
+      "hsc_override": 4,
+      "source_document": "Mock assumption from P&ID 2151 KO-vessel and stripper/reflux context; water boiling point reference from NIST Chemistry WebBook; composition, contaminants, pH, and SDS require verification",
+      "revision": "MOCK-0.1",
+      "approved_by": null,
+      "approved_date": null
+    },
+    {
+      "fluid_code": "SWR",
+      "service_description": "Sea-water return from CO2 compressor discharge cooler",
+      "phase_at_operating": "liquid",
+      "nfpa_health": 0,
+      "nfpa_flammability": 0,
+      "nfpa_instability": 0,
+      "special_hazards": [
+        "none"
+      ],
+      "h2s_content_ppm": 0,
+      "benzene_content_pct": 0,
+      "idlh_ppm": null,
+      "tlv_twa_ppm": null,
+      "flash_point_c": null,
+      "autoignition_temp_c": null,
+      "normal_boiling_point_c": 100.0,
+      "is_asphyxiant": false,
+      "is_cryogenic": false,
+      "is_corrosive": true,
+      "hsc_override": 3,
+      "source_document": "P&ID 2151 off-page connector identifies SEA WATER RETURN HEADER; mock composition based on NOAA average seawater description; return temperature, treatment chemicals, contamination, and SDS require verification",
+      "revision": "MOCK-0.1",
+      "approved_by": null,
+      "approved_date": null
+    },
+    {
+      "fluid_code": "SWS",
+      "service_description": "Sea-water supply to CO2 compressor discharge cooler",
+      "phase_at_operating": "liquid",
+      "nfpa_health": 0,
+      "nfpa_flammability": 0,
+      "nfpa_instability": 0,
+      "special_hazards": [
+        "none"
+      ],
+      "h2s_content_ppm": 0,
+      "benzene_content_pct": 0,
+      "idlh_ppm": null,
+      "tlv_twa_ppm": null,
+      "flash_point_c": null,
+      "autoignition_temp_c": null,
+      "normal_boiling_point_c": 100.0,
+      "is_asphyxiant": false,
+      "is_cryogenic": false,
+      "is_corrosive": true,
+      "hsc_override": 3,
+      "source_document": "P&ID 2151 off-page connector identifies SEA WATER SUPPLY HEADER; mock composition based on NOAA average seawater description; treatment chemicals and SDS require verification",
+      "revision": "MOCK-0.1",
+      "approved_by": null,
+      "approved_date": null
+    },
+    {
+      "fluid_code": "VRP",
+      "service_description": "CO2-rich process vent/relief to compression vent header (assumed composition)",
+      "phase_at_operating": "gas",
+      "nfpa_health": 3,
+      "nfpa_flammability": 0,
+      "nfpa_instability": 0,
+      "special_hazards": [
+        "none"
+      ],
+      "h2s_content_ppm": 0,
+      "benzene_content_pct": 0,
+      "idlh_ppm": 40000,
+      "tlv_twa_ppm": 5000,
+      "flash_point_c": null,
+      "autoignition_temp_c": null,
+      "normal_boiling_point_c": null,
+      "is_asphyxiant": true,
+      "is_cryogenic": false,
+      "is_corrosive": true,
+      "hsc_override": 4,
+      "source_document": "P&ID 2151 connection to COMPRESSION VENT HEADER; mock CO2-rich assumption; OSHA Carbon Dioxide Chemical Data; ICSC 0021; actual vent composition and project SDS require verification",
+      "revision": "MOCK-0.1",
+      "approved_by": null,
+      "approved_date": null
+    }
+  ],
+  "service_code_map": [
+    {
+      "pid_service_code": "CDH",
+      "fluid_code": "CDH",
+      "unit_scope": "P&ID 2151 / CO2 compressor discharge cooler and KO vessel"
+    },
+    {
+      "pid_service_code": "PC",
+      "fluid_code": "PC",
+      "unit_scope": "P&ID 2151 / CO2 compressor discharge KO vessel"
+    },
+    {
+      "pid_service_code": "SWR",
+      "fluid_code": "SWR",
+      "unit_scope": "P&ID 2151 / sea-water return"
+    },
+    {
+      "pid_service_code": "SWS",
+      "fluid_code": "SWS",
+      "unit_scope": "P&ID 2151 / sea-water supply"
+    },
+    {
+      "pid_service_code": "VRP",
+      "fluid_code": "VRP",
+      "unit_scope": "P&ID 2151 / compression vent header"
+    }
+  ],
+  "research_sources": [
+    {
+      "title": "OSHA Occupational Chemical Database: Carbon Dioxide",
+      "url": "https://www.osha.gov/chemicaldata/183",
+      "used_for": "CO2 PEL/REL and IDLH reference values"
+    },
+    {
+      "title": "International Chemical Safety Card 0021: Carbon Dioxide",
+      "url": "https://inchem.org/documents/icsc/icsc/eics0021.htm",
+      "used_for": "Noncombustibility, asphyxiation, cold-release, and sublimation hazards"
+    },
+    {
+      "title": "UK HSE: Guidance on conveying carbon dioxide in pipelines",
+      "url": "https://www.hse.gov.uk/pipelines/co2conveying-full.htm",
+      "used_for": "Dense-phase behavior, phase-change hazards, and wet-CO2 corrosion"
+    },
+    {
+      "title": "NIST Chemistry WebBook: Carbon Dioxide",
+      "url": "https://webbook.nist.gov/cgi/cbook.cgi?ID=C124389&Mask=4",
+      "used_for": "CO2 phase-property reference"
+    },
+    {
+      "title": "NOAA National Ocean Service: Why is the ocean salty?",
+      "url": "https://oceanservice.noaa.gov/facts/whysalty.html",
+      "used_for": "General seawater composition and typical salinity"
+    },
+    {
+      "title": "NIST Chemistry WebBook: Water",
+      "url": "https://webbook.nist.gov/cgi/cbook.cgi?ID=C7732185&Mask=4",
+      "used_for": "Water normal boiling-point reference"
+    }
+  ]
+}

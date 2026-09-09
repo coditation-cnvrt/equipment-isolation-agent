@@ -7,7 +7,7 @@ from importlib.resources import files
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Text, case, cast, func, inspect, literal, or_, select
+from sqlalchemy import Text, and_, case, cast, func, inspect, literal, or_, select, tuple_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased, load_only
 
@@ -26,6 +26,7 @@ from equipment_isolation.api.db_models import (
     AuditEvent,
     DerivationManifest,
     DerivationManifestFeedback,
+    DerivationManifestSourceDataDefect,
     ExternalRunLink,
     FeedbackApplicationResult,
     FeedbackReviewDecision,
@@ -39,12 +40,26 @@ from equipment_isolation.api.db_models import (
     PathPoint,
     PlanFeedback,
     PlanStep,
+    PlanSourceDependency,
     PlanVersion,
     PlanVersionAssetCondition,
     PlanVersionFeedback,
     PlanWorkScope,
     WorkScopeAsset,
+    SourceDataDefect,
+    SourceDataDefectEvent,
+    SourceDefectPlanImpact,
     isolation_plan_number_seq,
+)
+from equipment_isolation.domain.source_defects import (
+    MATERIAL_STATES,
+    OPEN_STATES,
+    effective_severity,
+    governance_status,
+    match_dependency,
+    policy_snapshot,
+    validate_report,
+    validate_transition,
 )
 from equipment_isolation.api.plans import (
     PlanDomainError,
@@ -67,6 +82,8 @@ from equipment_isolation.domain.feedback import (
 
 
 ASSET_EVENT_REPLAY_OVERLAP = timedelta(minutes=10)
+SOURCE_DEFECT_EVENT_REPLAY_OVERLAP = timedelta(minutes=10)
+_PLAN_SCOPE_KEYS = ("cnvrt_project_id", "collection_id", "job_id")
 
 
 def _migration_config():
@@ -338,6 +355,275 @@ class PostgresRunRepository:
             session.flush()
             return _asset_condition_dict(session, condition)
 
+    def create_source_defect(self, payload, actor_id: str) -> dict:
+        policy = policy_snapshot(payload.category)
+        context = payload.context
+        with self._session_factory.begin() as session:
+            _lock_source_defect_scope(session, context.model_dump())
+            defect = SourceDataDefect(
+                cnvrt_project_id=context.cnvrt_project_id,
+                collection_id=context.collection_id,
+                unigraph_project_id=context.unigraph_project_id,
+                job_id=context.job_id,
+                reported_source_revision=context.reported_source_revision,
+                reported_source_snapshot_hash=context.reported_source_snapshot_hash,
+                category=payload.category,
+                anchor_type=payload.anchor.anchor_type,
+                anchor_id=payload.anchor.anchor_id,
+                anchor_facts=_jsonable(payload.anchor.facts),
+                description=payload.description,
+                state="reported",
+                policy_snapshot=policy,
+                policy_hash=policy["policy_hash"],
+                reported_by=actor_id,
+            )
+            session.add(defect)
+            session.flush()
+            event = _new_source_defect_event(
+                session, defect, "reported", None, "reported", actor_id,
+                {
+                    "comment": payload.comment,
+                    "evidence_refs": payload.evidence_refs,
+                    "description": payload.description,
+                    "anchor": payload.anchor.model_dump(),
+                    "policy_snapshot": policy,
+                    "policy_hash": policy["policy_hash"],
+                },
+            )
+            session.add(event)
+            session.flush()
+            _snapshot_defect_impacts(session, defect, event)
+            session.flush()
+            return _source_defect_dict(session, defect)
+
+    def get_source_defect(self, defect_id: str) -> dict | None:
+        defect_uuid = _uuid(defect_id, "unknown_source_defect")
+        with self._session_factory() as session:
+            defect = session.get(SourceDataDefect, defect_uuid)
+            return _source_defect_dict(session, defect) if defect else None
+
+    def list_source_defects(self, *, context: dict, state: str = "open", limit: int = 100, offset: int = 0) -> tuple[list[dict], int]:
+        filters = [
+            SourceDataDefect.cnvrt_project_id == str(context["cnvrt_project_id"]),
+            SourceDataDefect.collection_id == str(context["collection_id"]),
+            SourceDataDefect.job_id == str(context["job_id"]),
+        ]
+        if state == "open":
+            filters.append(SourceDataDefect.state.in_(OPEN_STATES))
+        elif state != "all":
+            filters.append(SourceDataDefect.state == state)
+        with self._session_factory() as session:
+            base = select(SourceDataDefect).where(*filters)
+            total = int(session.scalar(select(func.count()).select_from(base.subquery())) or 0)
+            rows = session.scalars(base.order_by(SourceDataDefect.updated_at.desc(), SourceDataDefect.defect_id).limit(limit).offset(offset)).all()
+            return [_source_defect_dict(session, row) for row in rows], total
+
+    def transition_source_defect(self, defect_id: str, action: str, payload, actor_id: str) -> dict:
+        transitions = {
+            "confirm": ({"reported"}, "confirmed", "confirmed"),
+            "remediation_recorded": ({"confirmed"}, "remediation_recorded", "remediation_recorded"),
+            "resolve": ({"remediation_recorded"}, "resolved", "resolved"),
+            "reject": ({"reported", "confirmed"}, "rejected", "rejected"),
+            "withdraw": ({"reported"}, "withdrawn", "withdrawn"),
+            "reopen": ({"resolved", "rejected", "withdrawn"}, "reported", "reopened"),
+        }
+        if action not in transitions:
+            raise PlanDomainError("invalid_source_defect_action", "Unknown source defect action.", 422)
+        defect_uuid = _uuid(defect_id, "unknown_source_defect")
+        with self._session_factory.begin() as session:
+            defect = _lock_source_defect_for_update(session, defect_uuid)
+            if defect is None:
+                raise PlanDomainError("unknown_source_defect", "Unknown source-data defect.", 404)
+            if defect.version != payload.expected_version:
+                raise PlanDomainError("source_defect_version_conflict", "The source-data defect was modified by another request.", 409, {"current_version": defect.version})
+            allowed, target, event_type = transitions[action]
+            if defect.state not in allowed:
+                raise PlanDomainError("invalid_source_defect_transition", f"Cannot {action.replace('_', ' ')} a defect in state {defect.state}.", 409)
+            try:
+                validate_transition(defect.policy_snapshot or {}, action, payload.evidence_refs, getattr(payload, "remediation", None))
+            except ValueError as error:
+                kind = "source_defect_reclassification_required" if defect.category == "other" and action == "confirm" else "source_defect_evidence_required"
+                raise PlanDomainError(kind, str(error), 422) from None
+            previous = defect.state
+            defect.state = target
+            defect.version += 1
+            defect.updated_at = datetime.now(timezone.utc)
+            event_payload = {
+                "comment": payload.comment,
+                "evidence_refs": payload.evidence_refs,
+                "policy_snapshot": defect.policy_snapshot,
+                "policy_hash": defect.policy_hash,
+            }
+            remediation = getattr(payload, "remediation", None)
+            if remediation is not None:
+                event_payload["remediation"] = remediation
+            event = _new_source_defect_event(session, defect, event_type, previous, target, actor_id, event_payload)
+            session.add(event)
+            session.flush()
+            _snapshot_defect_impacts(session, defect, event)
+            session.flush()
+            return _source_defect_dict(session, defect)
+
+    def reclassify_source_defect(self, defect_id: str, payload, actor_id: str) -> dict:
+        defect_uuid = _uuid(defect_id, "unknown_source_defect")
+        with self._session_factory.begin() as session:
+            defect = _lock_source_defect_for_update(session, defect_uuid)
+            if defect is None:
+                raise PlanDomainError("unknown_source_defect", "Unknown source-data defect.", 404)
+            if defect.version != payload.expected_version:
+                raise PlanDomainError("source_defect_version_conflict", "The source-data defect was modified by another request.", 409, {"current_version": defect.version})
+            if defect.state not in OPEN_STATES:
+                raise PlanDomainError("invalid_source_defect_transition", "Only an open defect can be reclassified.", 409)
+            if defect.state in MATERIAL_STATES and payload.category == "other":
+                raise PlanDomainError("source_defect_reclassification_required", "A confirmed defect cannot be reclassified as 'other'.", 422)
+            try:
+                policy = policy_snapshot(payload.category)
+                validate_transition(policy, "reclassified", payload.evidence_refs)
+                validate_report(payload.category, payload.anchor.anchor_type, payload.anchor.facts, payload.evidence_refs)
+            except ValueError as error:
+                raise PlanDomainError("invalid_source_defect_reclassification", str(error), 422) from None
+            previous_category = defect.category
+            previous_policy = defect.policy_snapshot or {}
+            previous_anchor = {"anchor_type": defect.anchor_type, "anchor_id": defect.anchor_id, "facts": defect.anchor_facts or {}}
+            defect.category = payload.category
+            defect.anchor_type = payload.anchor.anchor_type
+            defect.anchor_id = payload.anchor.anchor_id
+            defect.anchor_facts = _jsonable(payload.anchor.facts)
+            defect.policy_snapshot = policy
+            defect.policy_hash = policy["policy_hash"]
+            defect.version += 1
+            defect.updated_at = datetime.now(timezone.utc)
+            event = _new_source_defect_event(
+                session, defect, "reclassified", defect.state, defect.state, actor_id,
+                {"from_category": previous_category, "to_category": payload.category,
+                 "comment": payload.comment, "evidence_refs": payload.evidence_refs,
+                 "previous_anchor": previous_anchor, "anchor": payload.anchor.model_dump(),
+                 "previous_policy_snapshot": previous_policy, "policy_snapshot": policy,
+                 "policy_hash": policy["policy_hash"]},
+            )
+            session.add(event)
+            session.flush()
+            _snapshot_defect_impacts(session, defect, event)
+            session.flush()
+            return _source_defect_dict(session, defect)
+
+    def annotate_source_defect(self, defect_id: str, action: str, payload, actor_id: str) -> dict:
+        if action not in {"commented", "evidence_added"}:
+            raise PlanDomainError("invalid_source_defect_action", "Unknown source defect action.", 422)
+        defect_uuid = _uuid(defect_id, "unknown_source_defect")
+        with self._session_factory.begin() as session:
+            defect = _lock_source_defect_for_update(session, defect_uuid)
+            if defect is None:
+                raise PlanDomainError("unknown_source_defect", "Unknown source-data defect.", 404)
+            if defect.version != payload.expected_version:
+                raise PlanDomainError("source_defect_version_conflict", "The source-data defect was modified by another request.", 409, {"current_version": defect.version})
+            try:
+                validate_transition(defect.policy_snapshot or {}, action, payload.evidence_refs)
+            except ValueError as error:
+                raise PlanDomainError("source_defect_evidence_required", str(error), 422) from None
+            defect.version += 1
+            defect.updated_at = datetime.now(timezone.utc)
+            event = _new_source_defect_event(
+                session, defect, action, defect.state, defect.state, actor_id,
+                {"comment": payload.comment, "evidence_refs": payload.evidence_refs,
+                 "policy_snapshot": defect.policy_snapshot, "policy_hash": defect.policy_hash},
+            )
+            session.add(event)
+            session.flush()
+            _snapshot_defect_impacts(session, defect, event)
+            session.flush()
+            return _source_defect_dict(session, defect)
+
+    def coordinate_source_defect(self, defect_id: str, action: str, payload, actor_id: str) -> dict:
+        if action not in {"claimed", "released"}:
+            raise PlanDomainError("invalid_source_defect_action", "Unknown source defect action.", 422)
+        defect_uuid = _uuid(defect_id, "unknown_source_defect")
+        with self._session_factory.begin() as session:
+            defect = _lock_source_defect_for_update(session, defect_uuid)
+            if defect is None:
+                raise PlanDomainError("unknown_source_defect", "Unknown source-data defect.", 404)
+            if defect.version != payload.expected_version:
+                raise PlanDomainError("source_defect_version_conflict", "The source-data defect was modified by another request.", 409, {"current_version": defect.version})
+            previous_claim = {"claimed_by": defect.claimed_by, "claimed_at": defect.claimed_at}
+            if action == "claimed":
+                if defect.claimed_by:
+                    raise PlanDomainError("source_defect_already_claimed", "The source-data defect is already claimed.", 409)
+                defect.claimed_by = actor_id
+                defect.claimed_at = datetime.now(timezone.utc)
+            else:
+                if not defect.claimed_by:
+                    raise PlanDomainError("source_defect_not_claimed", "The source-data defect is not claimed.", 409)
+                defect.claimed_by = None
+                defect.claimed_at = None
+            defect.version += 1
+            defect.updated_at = datetime.now(timezone.utc)
+            event = _new_source_defect_event(
+                session, defect, action, defect.state, defect.state, actor_id,
+                {"comment": payload.comment, "evidence_refs": payload.evidence_refs,
+                 "previous_claim": previous_claim,
+                 "claim": {"claimed_by": defect.claimed_by, "claimed_at": defect.claimed_at},
+                 "policy_snapshot": defect.policy_snapshot, "policy_hash": defect.policy_hash},
+            )
+            session.add(event)
+            session.flush()
+            return _source_defect_dict(session, defect)
+
+    def latest_source_defect_event_id(self, context: dict) -> str:
+        with self._session_factory() as session:
+            event_id = session.scalar(
+                _source_defect_event_scope(select(SourceDataDefectEvent.event_id).join(SourceDataDefect), context)
+                .order_by(SourceDataDefectEvent.occurred_at.desc(), SourceDataDefectEvent.event_id.desc()).limit(1)
+            )
+            return str(event_id) if event_id else ""
+
+    def source_defect_event_replay_state(self, context: dict, after_id: str = "") -> dict:
+        with self._session_factory() as session:
+            cursor = _scoped_source_defect_event(session, context, after_id) if after_id else None
+            if cursor is None:
+                cursor = session.scalar(
+                    _source_defect_event_scope(select(SourceDataDefectEvent).join(SourceDataDefect), context)
+                    .order_by(SourceDataDefectEvent.occurred_at.desc(), SourceDataDefectEvent.event_id.desc()).limit(1)
+                )
+            if cursor is None:
+                return {"cursor_id": "", "cursor_occurred_at": None, "seen_ids": set()}
+            cutoff = cursor.occurred_at - SOURCE_DEFECT_EVENT_REPLAY_OVERLAP
+            seen_ids = {
+                str(event_id) for event_id in session.scalars(
+                    _source_defect_event_scope(select(SourceDataDefectEvent.event_id).join(SourceDataDefect), context)
+                    .where(
+                        SourceDataDefectEvent.occurred_at >= cutoff,
+                        or_(
+                            SourceDataDefectEvent.occurred_at < cursor.occurred_at,
+                            (SourceDataDefectEvent.occurred_at == cursor.occurred_at)
+                            & (cast(SourceDataDefectEvent.event_id, Text) <= str(cursor.event_id)),
+                        ),
+                    )
+                ).all()
+            }
+            return {"cursor_id": str(cursor.event_id), "cursor_occurred_at": cursor.occurred_at, "seen_ids": seen_ids}
+
+    def list_source_defect_events(self, context: dict, *, after_id: str = "", exclude_ids: set[str] | None = None, limit: int = 100) -> list[dict]:
+        with self._session_factory() as session:
+            cursor = _scoped_source_defect_event(session, context, after_id)
+            statement = _source_defect_event_scope(
+                select(SourceDataDefectEvent, SourceDataDefect).join(SourceDataDefect), context
+            )
+            if cursor is not None:
+                statement = statement.where(SourceDataDefectEvent.occurred_at >= cursor.occurred_at - SOURCE_DEFECT_EVENT_REPLAY_OVERLAP)
+            parsed_exclusions = []
+            for item in exclude_ids or set():
+                try:
+                    parsed_exclusions.append(UUID(str(item)))
+                except (TypeError, ValueError):
+                    continue
+            if parsed_exclusions:
+                statement = statement.where(SourceDataDefectEvent.event_id.not_in(parsed_exclusions))
+            rows = session.execute(statement.order_by(SourceDataDefectEvent.occurred_at, SourceDataDefectEvent.event_id).limit(limit)).all()
+            result = []
+            for event, defect in rows:
+                result.append(_source_defect_event_dict(event, defect))
+            return result
+
     def active_asset_conditions_for_run(self, request_payload: dict) -> list[dict]:
         """Return exact-identity active conditions to snapshot into a new run."""
 
@@ -503,34 +789,34 @@ class PostgresRunRepository:
 
     def insert_run(self, record, request_payload: dict) -> None:
         with self._session_factory.begin() as session:
-            session.add(
-                IsolationRun(
-                    run_id=record.run_id,
-                    equipment_tag=record.equipment_tag,
-                    runner=record.runner,
-                    status=record.status,
-                    created_at=_dt(record.created_at),
-                    started_at=_dt(record.started_at),
-                    finished_at=_dt(record.finished_at),
-                    request=_jsonable(request_payload or {}),
-                    agent=_jsonable(record.agent),
-                    result=_jsonable(record.result),
-                    trace=_jsonable(record.trace),
-                    error=_jsonable(record.error),
-                    parent_run_id=getattr(record, "parent_run_id", None),
-                )
-            )
-            context = (request_payload or {}).get("derivation_context") or {}
+            request_payload = dict(request_payload or {})
+            context = request_payload.get("derivation_context") or {}
+            manifest = None
             if context.get("manifest_id"):
-                manifest = session.get(
-                    DerivationManifest, UUID(str(context["manifest_id"]))
+                manifest = session.scalar(
+                    select(DerivationManifest)
+                    .where(DerivationManifest.manifest_id == UUID(str(context["manifest_id"])))
+                    .with_for_update()
                 )
                 if manifest is None or manifest.state != "locked":
-                    raise PlanDomainError(
-                        "invalid_derivation_manifest",
-                        "Derivation manifest is not available.",
-                        409,
-                    )
+                    raise PlanDomainError("invalid_derivation_manifest", "Derivation manifest is not available.", 409)
+                # Older manifests did not capture a complete drawing checkpoint.
+                snapshot = (manifest.trigger_snapshot or {}).get("source_dependency_snapshot")
+            else:
+                snapshot = _capture_source_defect_snapshot(session, request_payload)
+            # Never accept a caller's checkpoint, including one copied from a parent run.
+            request_payload["_source_defect_snapshot"] = snapshot
+            session.add(IsolationRun(
+                run_id=record.run_id, equipment_tag=record.equipment_tag,
+                runner=record.runner, status=record.status,
+                created_at=_dt(record.created_at), started_at=_dt(record.started_at),
+                finished_at=_dt(record.finished_at), request=_jsonable(request_payload),
+                agent=_jsonable(record.agent), result=_jsonable(record.result),
+                trace=_jsonable(record.trace), error=_jsonable(record.error),
+                parent_run_id=getattr(record, "parent_run_id", None),
+            ))
+            if manifest is not None:
+                session.flush()  # Insert the referenced run before updating the manifest FK.
                 manifest.run_id = record.run_id
                 manifest.state = "running"
 
@@ -568,7 +854,23 @@ class PostgresRunRepository:
         with self._session_factory.begin() as session:
             persisted = session.get(IsolationRun, run_id)
             if persisted is not None:
-                persisted.request = _jsonable(request_payload or {})
+                updated = dict(request_payload or {})
+                original = persisted.request or {}
+                if original.get('process_safety_inputs') is not None:
+                    for key in ('cnvrt_project_id', 'collection_id', 'unigraph_project_id', 'job_id', 'selected_asset'):
+                        if updated.get(key) != original.get(key):
+                            raise ValueError('Safety input scope is locked; create a new run to change equipment context')
+                    for key in ('process_safety_inputs', '_captured_hilt', 'work_scope'):
+                        if key in original:
+                            updated[key] = original[key]
+                else:
+                    updated.pop('_captured_hilt', None)
+                    if updated.get('process_safety_inputs') is not None:
+                        raise ValueError('Safety inputs must be captured before dispatch')
+                updated.pop("_source_defect_snapshot", None)
+                if "_source_defect_snapshot" in (persisted.request or {}):
+                    updated["_source_defect_snapshot"] = persisted.request["_source_defect_snapshot"]
+                persisted.request = _jsonable(updated)
 
     def append_event(self, run_id: str, event: dict) -> None:
         with self._session_factory.begin() as session:
@@ -648,12 +950,16 @@ class PostgresRunRepository:
         """Atomically promote one succeeded persisted run into advisory plan v1."""
         with self._session_factory.begin() as session:
             run = session.scalar(
+                select(IsolationRun).where(IsolationRun.run_id == run_id)
+            )
+            if run is None:
+                raise PlanDomainError("unknown_run", "Unknown persisted run id.", 404)
+            _lock_source_defect_scope(session, _planning_context(run.request or {}))
+            run = session.scalar(
                 select(IsolationRun)
                 .where(IsolationRun.run_id == run_id)
                 .with_for_update()
             )
-            if run is None:
-                raise PlanDomainError("unknown_run", "Unknown persisted run id.", 404)
             if run.status != "succeeded":
                 raise PlanDomainError(
                     "run_not_succeeded",
@@ -719,6 +1025,7 @@ class PostgresRunRepository:
                 )
             )
             _persist_normalized_content(session, version, request_payload, run.result)
+            _persist_source_dependency(session, version, request_payload, version.content or {})
             session.flush()
             plan = self._get_plan_with_session(session, plan_row.plan_id)
             return plan, True
@@ -730,6 +1037,68 @@ class PostgresRunRepository:
             return None
         with self._session_factory() as session:
             return self._get_plan_with_session(session, parsed_plan_id)
+
+    def get_plan_authorization_context(
+        self, plan_id: str, version_id: str | None = None
+    ) -> dict | None:
+        plan_uuid = _uuid(plan_id, "unknown_plan")
+        statement = (
+            select(IsolationRun.request)
+            .select_from(PlanVersion)
+            .join(
+                ExternalRunLink,
+                (ExternalRunLink.plan_version_id == PlanVersion.plan_version_id)
+                & (ExternalRunLink.link_role == "derivation"),
+            )
+            .join(IsolationRun, IsolationRun.run_id == ExternalRunLink.run_id)
+            .where(PlanVersion.plan_id == plan_uuid)
+        )
+        if version_id is not None:
+            statement = statement.where(
+                PlanVersion.plan_version_id == _uuid(version_id, "unknown_plan_version")
+            )
+        else:
+            statement = statement.order_by(PlanVersion.version_no.desc()).limit(1)
+        with self._session_factory() as session:
+            request = session.scalar(statement)
+            if request is None:
+                return None
+            return _planning_context(request)
+
+    def list_plan_authorization_contexts(self, **values) -> list[dict]:
+        ranked_versions = select(
+            PlanVersion,
+            func.row_number()
+            .over(
+                partition_by=PlanVersion.plan_id,
+                order_by=PlanVersion.version_no.desc(),
+            )
+            .label("version_rank"),
+        ).subquery()
+        latest_version = aliased(PlanVersion, ranked_versions)
+        filters = _plan_filters(IsolationPlan, IsolationRun, **values)
+        statement = (
+            select(IsolationRun.request)
+            .select_from(IsolationPlan)
+            .join(
+                latest_version,
+                (latest_version.plan_id == IsolationPlan.plan_id)
+                & (ranked_versions.c.version_rank == 1),
+            )
+            .join(
+                ExternalRunLink,
+                (ExternalRunLink.plan_version_id == latest_version.plan_version_id)
+                & (ExternalRunLink.link_role == "derivation"),
+            )
+            .join(IsolationRun, IsolationRun.run_id == ExternalRunLink.run_id)
+            .where(*filters)
+        )
+        with self._session_factory() as session:
+            contexts = {
+                tuple(_planning_context(item).get(key, "") for key in _PLAN_SCOPE_KEYS)
+                for item in session.scalars(statement).all()
+            }
+        return [dict(zip(_PLAN_SCOPE_KEYS, item)) for item in sorted(contexts)]
 
     def _get_plan_with_session(self, session, plan_id: UUID) -> dict | None:
         assurance_status = _assurance_status_expression(IsolationRun)
@@ -772,6 +1141,7 @@ class PostgresRunRepository:
         collection_id: str | None = None,
         unigraph_project_id: str | None = None,
         plan_number: str | None = None,
+        authorized_contexts: list[dict] | None = None,
     ) -> tuple[list[dict], int]:
         ranked_versions = select(
             PlanVersion,
@@ -795,6 +1165,16 @@ class PostgresRunRepository:
             unigraph_project_id=unigraph_project_id,
             plan_number=plan_number,
         )
+        if authorized_contexts is not None:
+            if not authorized_contexts:
+                return [], 0
+            filters.append(or_(*[
+                and_(*[
+                    IsolationRun.request[key].astext == str(context.get(key) or "")
+                    for key in _PLAN_SCOPE_KEYS
+                ])
+                for context in authorized_contexts
+            ]))
         statement = (
             select(
                 *_plan_columns(
@@ -1181,6 +1561,29 @@ class PostgresRunRepository:
             _uuid(parent_version_id, "unknown_plan_version"),
         )
         with self._session_factory.begin() as session:
+            source_run = session.scalar(
+                select(IsolationRun)
+                .join(ExternalRunLink, ExternalRunLink.run_id == IsolationRun.run_id)
+                .where(
+                    ExternalRunLink.plan_version_id == parent_uuid,
+                    ExternalRunLink.link_role == "derivation",
+                )
+            )
+            if source_run is None:
+                raise PlanDomainError(
+                    "source_run_missing",
+                    "Parent plan version has no derivation run.",
+                    409,
+                )
+            if not (source_run.request or {}).get('process_safety_inputs'):
+                raise PlanDomainError(
+                    'process_safety_inputs_required',
+                    'This historical plan has no FHR, SIC or PSD. Start a new document-backed run from Workspace.',
+                    409,
+                )
+            _lock_source_defect_scope(
+                session, _planning_context(source_run.request or {})
+            )
             plan = session.scalar(
                 select(IsolationPlan)
                 .where(IsolationPlan.plan_id == plan_uuid)
@@ -1235,50 +1638,85 @@ class PostgresRunRepository:
                 )
                 .order_by(PlanFeedback.created_at, PlanFeedback.feedback_id)
             ).all()
-            source_run = session.scalar(
-                select(IsolationRun)
-                .join(ExternalRunLink, ExternalRunLink.run_id == IsolationRun.run_id)
-                .where(
-                    ExternalRunLink.plan_version_id == parent_uuid,
-                    ExternalRunLink.link_role == "derivation",
-                )
-            )
-            if source_run is None:
-                raise PlanDomainError(
-                    "source_run_missing",
-                    "Parent plan version has no derivation run.",
-                    409,
-                )
             freshness = _plan_freshness(
                 session, parent.plan_version_id, source_run.request or {}
             )
-            conditions_stale = freshness["status"] == "stale"
-            if trigger == "corrections" and not changes:
-                raise PlanDomainError(
-                    "no_approved_corrections",
-                    "No approved corrections are available for derivation.",
-                    409,
-                )
-            if trigger == "asset_conditions" and not conditions_stale:
-                raise PlanDomainError(
-                    "plan_inputs_current",
-                    "The latest plan version already uses the current shared equipment status.",
-                    409,
-                )
+            asset_conditions_changed = bool(freshness.get("asset_conditions_changed"))
+            source_defects_changed = bool(freshness.get("source_data_defects_changed"))
+            trigger_kind, effective_inputs = _effective_derivation_trigger(
+                trigger,
+                corrections_changed=bool(changes),
+                asset_conditions_changed=asset_conditions_changed,
+                source_defects_changed=source_defects_changed,
+            )
             corrections = [
                 _feedback_to_derivation_input(item) for item in effective_changes
             ]
-            trigger_kind = (
-                "combined"
-                if conditions_stale and changes
-                else "asset_conditions"
-                if conditions_stale
-                else "corrections"
-            )
+            dependency = session.get(PlanSourceDependency, parent_uuid)
+            applicable_defects = session.scalars(
+                select(SourceDataDefect).where(
+                    SourceDataDefect.cnvrt_project_id == str((source_run.request or {}).get("cnvrt_project_id") or ""),
+                    SourceDataDefect.collection_id == str((source_run.request or {}).get("collection_id") or ""),
+                    SourceDataDefect.job_id == str((source_run.request or {}).get("job_id") or ""),
+                    SourceDataDefect.state.in_(MATERIAL_STATES),
+                ).order_by(SourceDataDefect.reported_at, SourceDataDefect.defect_id)
+            ).all()
+            applicable_defects = [item for item in applicable_defects if _defect_match(item, dependency) is not None]
+            defect_links = []
+            for defect in applicable_defects:
+                defect_event = session.scalar(
+                    select(SourceDataDefectEvent)
+                    .where(
+                        SourceDataDefectEvent.defect_id == defect.defect_id,
+                        SourceDataDefectEvent.event_type.in_(("confirmed", "remediation_recorded", "reclassified")),
+                    )
+                    .order_by(SourceDataDefectEvent.defect_version.desc()).limit(1)
+                )
+                if defect_event is not None:
+                    defect_links.append((defect, defect_event, _source_defect_summary(defect)))
+            material_event_snapshots = [
+                item for item in freshness.get("changes") or []
+                if item.get("defect_id") and item.get("material")
+            ]
+            linked_event_snapshots = [
+                {
+                    "event_id": str(defect_event.event_id),
+                    "event_hash": defect_event.event_hash,
+                    "defect_id": str(defect.defect_id),
+                    "event_type": defect_event.event_type,
+                    "state": defect_event.to_state,
+                    "category": defect.category,
+                }
+                for defect, defect_event, _snapshot in defect_links
+            ]
+            defect_event_snapshots = {
+                str(item["event_id"]): item
+                for item in material_event_snapshots + linked_event_snapshots
+                if item.get("event_id")
+            }
+            asset_condition_changes = [
+                item for item in freshness.get("changes") or []
+                if item.get("condition_id")
+            ]
+            source_data_defect_changes = [
+                item for item in freshness.get("changes") or []
+                if item.get("defect_id")
+            ]
             trigger_snapshot = {
+                "source_dependency_snapshot": _capture_source_defect_snapshot(session, source_run.request or {}),
                 "requested_trigger": trigger,
                 "effective_trigger": trigger_kind,
-                "freshness": freshness,
+                "effective_inputs": effective_inputs,
+                "freshness": {
+                    key: value for key, value in freshness.items() if key != "changes"
+                },
+                "asset_condition_changes": asset_condition_changes,
+                "source_data_defect_changes": source_data_defect_changes,
+                "source_data_defects": {
+                    "event_ids": sorted(defect_event_snapshots),
+                    "event_snapshots": list(defect_event_snapshots.values()),
+                    "applicable_defects": [snapshot for _defect, _event, snapshot in defect_links],
+                },
             }
             manifest = DerivationManifest(
                 plan_id=plan_uuid,
@@ -1306,6 +1744,21 @@ class PostgresRunRepository:
                         },
                     )
                 )
+            for defect, defect_event, snapshot in defect_links:
+                session.add(
+                    DerivationManifestSourceDataDefect(
+                        manifest_id=manifest.manifest_id,
+                        defect_id=defect.defect_id,
+                        event_id=defect_event.event_id,
+                        snapshot=_jsonable({
+                            **snapshot,
+                            "event_id": str(defect_event.event_id),
+                            "event_hash": defect_event.event_hash,
+                            "policy_snapshot": defect.policy_snapshot,
+                            "dependency_match": _defect_match(defect, dependency),
+                        }),
+                    )
+                )
             request_payload = dict(source_run.request or {})
             request_payload.pop("derivation_context", None)
             request_payload["approved_corrections"] = corrections
@@ -1325,7 +1778,8 @@ class PostgresRunRepository:
                     "manifest_id": str(manifest.manifest_id),
                     "trigger_kind": trigger_kind,
                     "feedback_ids": [str(row.feedback_id) for row in changes],
-                    "asset_condition_changes": freshness["changes"],
+                    "asset_condition_changes": asset_condition_changes,
+                    "source_data_defect_changes": source_data_defect_changes,
                 },
             )
             return {
@@ -1416,14 +1870,15 @@ class PostgresRunRepository:
     def _complete_derivation(
         self, session, manifest: DerivationManifest, run: IsolationRun
     ) -> None:
-        parent = session.scalar(
-            select(PlanVersion)
-            .where(PlanVersion.plan_version_id == manifest.parent_plan_version_id)
-            .with_for_update()
-        )
+        _lock_source_defect_scope(session, _planning_context(run.request or {}))
         plan = session.scalar(
             select(IsolationPlan)
             .where(IsolationPlan.plan_id == manifest.plan_id)
+            .with_for_update()
+        )
+        parent = session.scalar(
+            select(PlanVersion)
+            .where(PlanVersion.plan_version_id == manifest.parent_plan_version_id)
             .with_for_update()
         )
         if parent is None or plan is None:
@@ -1476,6 +1931,7 @@ class PostgresRunRepository:
         _persist_normalized_content(
             session, version, run.request or {}, run.result or {}
         )
+        _persist_source_dependency(session, version, run.request or {}, content)
         for link in manifest_changes:
             change = session.get(PlanFeedback, link.feedback_id)
             coverage = coverage_by_id.get(str(link.feedback_id)) or {
@@ -1548,6 +2004,45 @@ class PostgresRunRepository:
         with self._session_factory() as session:
             rows = session.execute(statement).all()
             return [{"id": row.id, "event": row.event} for row in rows]
+
+
+def _planning_context(value: dict) -> dict[str, str]:
+    return {
+        key: str((value or {}).get(key) or "").strip()
+        for key in ("cnvrt_project_id", "collection_id", "unigraph_project_id", "job_id")
+    }
+
+
+def _source_defect_context(defect: SourceDataDefect) -> dict[str, str]:
+    return {
+        "cnvrt_project_id": defect.cnvrt_project_id,
+        "collection_id": defect.collection_id,
+        "unigraph_project_id": defect.unigraph_project_id,
+        "job_id": defect.job_id,
+    }
+
+
+def _lock_source_defect_scope(session, context: dict) -> None:
+    """Acquire this before any defect, plan, or plan-version row lock in coupled work."""
+
+    scope = ":".join(str(context.get(key) or "") for key in _PLAN_SCOPE_KEYS)
+    session.execute(
+        select(func.pg_advisory_xact_lock(func.hashtextextended(scope, 0)))
+    )
+
+
+def _lock_source_defect_for_update(session, defect_id: UUID) -> SourceDataDefect | None:
+    observed = session.scalar(
+        select(SourceDataDefect).where(SourceDataDefect.defect_id == defect_id)
+    )
+    if observed is None:
+        return None
+    _lock_source_defect_scope(session, _source_defect_context(observed))
+    return session.scalar(
+        select(SourceDataDefect)
+        .where(SourceDataDefect.defect_id == defect_id)
+        .with_for_update()
+    )
 
 
 def _plan_number_statement():
@@ -1694,7 +2189,7 @@ def _plans_freshness(
         for version_id, context in contexts.items()
         if all(
             context[key]
-            for key in ("cnvrt_project_id", "collection_id", "unigraph_project_id")
+            for key in _PLAN_SCOPE_KEYS
         )
     }
     version_ids = set(valid_contexts)
@@ -1734,6 +2229,67 @@ def _plans_freshness(
             )
         )
 
+    dependency_rows = {
+        row.plan_version_id: row
+        for row in session.scalars(
+            select(PlanSourceDependency).where(PlanSourceDependency.plan_version_id.in_(set(contexts)))
+        ).all()
+    }
+    drawing_keys = {
+        (context["cnvrt_project_id"], context["collection_id"], context["job_id"])
+        for context in valid_contexts.values()
+        if context["job_id"]
+    }
+    defect_rows = session.scalars(
+        select(SourceDataDefect).where(
+            SourceDataDefect.state.in_(OPEN_STATES),
+            tuple_(
+                SourceDataDefect.cnvrt_project_id,
+                SourceDataDefect.collection_id,
+                SourceDataDefect.job_id,
+            ).in_(drawing_keys),
+        )
+    ).all() if drawing_keys else []
+    material_defect_ids = [
+        defect.defect_id for defect in defect_rows if defect.state in MATERIAL_STATES
+    ]
+    material_events_by_defect: dict[UUID, SourceDataDefectEvent] = {}
+    material_event_rows = session.scalars(
+        select(SourceDataDefectEvent)
+        .where(SourceDataDefectEvent.defect_id.in_(material_defect_ids))
+        .order_by(SourceDataDefectEvent.defect_version)
+    ).all() if material_defect_ids else []
+    for event in material_event_rows:
+        if _material_source_defect_event(event):
+            material_events_by_defect[event.defect_id] = event
+    current_defects_by_version: dict[UUID, dict[str, SourceDataDefect]] = {}
+    for version_id, context in valid_contexts.items():
+        dependency = dependency_rows.get(version_id)
+        current_defects_by_version[version_id] = {
+            str(defect.defect_id): defect
+            for defect in defect_rows
+            if _defect_context_matches(defect, context)
+            and _defect_match(defect, dependency) is not None
+        }
+    impact_events_by_version: dict[UUID, list[tuple[SourceDefectPlanImpact, SourceDataDefectEvent]]] = {
+        version_id: [] for version_id in valid_contexts
+    }
+    impact_event_rows = session.execute(
+        select(SourceDefectPlanImpact, SourceDataDefectEvent)
+        .join(SourceDataDefectEvent, SourceDataDefectEvent.event_id == SourceDefectPlanImpact.event_id)
+        .where(SourceDefectPlanImpact.plan_version_id.in_(set(valid_contexts)))
+        .order_by(SourceDataDefectEvent.occurred_at, SourceDataDefectEvent.event_id)
+    ).all() if valid_contexts else []
+    for impact, event in impact_event_rows:
+        dependency = dependency_rows.get(impact.plan_version_id)
+        captured_ids = {str(item) for item in ((dependency.source_defect_event_ids if dependency else []) or [])}
+        if str(event.event_id) in captured_ids:
+            continue
+        watermark_at = dependency.source_defect_event_watermark_at if dependency else None
+        if watermark_at and event.occurred_at < watermark_at - SOURCE_DEFECT_EVENT_REPLAY_OVERLAP:
+            continue
+        impact_events_by_version[impact.plan_version_id].append((impact, event))
+
     current_by_version: dict[UUID, dict[str, dict]] = {}
     removed_ids: set[str] = set()
     for version_id, context in valid_contexts.items():
@@ -1765,6 +2321,10 @@ def _plans_freshness(
                 "reason": None,
                 "evaluated_at": evaluated_at,
                 "changes": [],
+                "governance_readiness": "warning",
+                "source_defects": [],
+                "asset_conditions_changed": False,
+                "source_data_defects_changed": False,
             }
             continue
         captured = captured_by_version[version_id]
@@ -1795,13 +2355,531 @@ def _plans_freshness(
                 }
             )
         changes.sort(key=lambda item: (item["occurred_at"], item["condition_id"]))
+        current_defects = current_defects_by_version.get(version_id, {})
+        durable_defect_events = impact_events_by_version.get(version_id, [])
+        for impact, event in durable_defect_events:
+            snapshot = event.payload or {}
+            change_type = (
+                "source_defect_opened" if event.event_type in {"reported", "reopened"}
+                else "source_defect_closed" if event.event_type in {"resolved", "rejected", "withdrawn"}
+                else "source_defect_changed"
+            )
+            changes.append({
+                "change_type": change_type, "defect_id": str(event.defect_id),
+                "event_id": str(event.event_id),
+                "material": _material_source_defect_event(event),
+                "occurred_at": event.occurred_at,
+                "defect": {
+                    "defect_id": str(event.defect_id), "version": event.defect_version,
+                    "category": snapshot.get("category"), "state": snapshot.get("state", event.to_state),
+                    "severity": (snapshot.get("policy_snapshot") or {}).get("severity"),
+                    "effective_severity": snapshot.get("effective_severity"),
+                    "match_scope": impact.match_scope,
+                },
+            })
+        dependency = dependency_rows.get(version_id)
+        durable_event_ids = {str(event.event_id) for _impact, event in durable_defect_events}
+        reconciled_changes, reconciled_material_change = _reconcile_current_material_defects(
+            current_defects.values(), dependency, material_events_by_defect,
+            durable_event_ids, evaluated_at,
+        )
+        changes.extend(reconciled_changes)
+        changes.sort(key=lambda item: (item["occurred_at"], item.get("condition_id") or item.get("defect_id") or ""))
+        defect_summaries = [_source_defect_summary(item) for item in current_defects.values()]
+        governance = governance_status(defect_summaries)
+        asset_changed = any(item["change_type"] in {"became_unavailable", "returned_to_service"} for item in changes)
+        defect_changed = any(item["change_type"].startswith("source_defect_") for item in changes)
+        material_defect_changed = reconciled_material_change or any(
+            _material_source_defect_event(event)
+            for _impact, event in durable_defect_events
+        )
+        historical_unknown = dependency is None or dependency.manifest_status == "historical_unknown"
+        current_material_defect = any(item.state in MATERIAL_STATES for item in current_defects.values())
+        source_defects_changed = material_defect_changed or (historical_unknown and current_material_defect)
+        governance = _governance_readiness_for_dependency(
+            governance, historical_unknown=historical_unknown,
+            source_defects_changed=source_defects_changed,
+        )
+        reason = None
+        if asset_changed and defect_changed:
+            reason = "governance_inputs_changed"
+        elif asset_changed:
+            reason = "asset_condition_changed"
+        elif defect_changed or source_defects_changed:
+            reason = "source_data_defect_changed"
+        status = _governance_freshness_status(
+            asset_changed=asset_changed,
+            source_defects_changed=source_defects_changed,
+            historical_unknown=historical_unknown,
+        )
         results[version_id] = {
-            "status": "stale" if changes else "fresh",
-            "reason": "asset_condition_changed" if changes else None,
+            "status": status,
+            "reason": reason,
             "evaluated_at": evaluated_at,
             "changes": changes,
+            "governance_readiness": governance,
+            "source_defects": defect_summaries,
+            "asset_conditions_changed": asset_changed,
+            "source_data_defects_changed": source_defects_changed,
         }
     return results
+
+
+def _source_identifiers(value: Any) -> set[str]:
+    """Extract source identities explicitly retained by the normalized projection."""
+
+    identifiers: set[str] = set()
+    scalar_fields = {
+        "uuid", "candidate_id", "drawing_entity_id", "visual_id", "visual_node_id",
+        "source_visual_id", "source_visual_node_id", "link_id", "point_id",
+        "hilt_entity_id",
+    }
+    path_fields = {
+        "path_node_ids", "branch_path_node_ids", "path_link_ids",
+        "branch_path_link_ids", "link_ids",
+    }
+
+    def collect(item: Any) -> None:
+        if not isinstance(item, dict):
+            return
+        for key in scalar_fields:
+            candidate = str(item.get(key) or "").strip()
+            if candidate:
+                identifiers.add(candidate)
+        for key in path_fields:
+            for candidate in item.get(key) or []:
+                candidate = str(candidate or "").strip()
+                if candidate:
+                    identifiers.add(candidate)
+
+    if not isinstance(value, dict):
+        return identifiers
+    collect(value.get("selected_asset"))
+    collect(value.get("target_identity"))
+    for point in value.get("points") or []:
+        collect(point)
+        for membership in point.get("branch_memberships") or []:
+            collect(membership)
+    for branch in value.get("branches") or []:
+        collect(branch)
+    return identifiers
+
+
+def _defect_context_matches(defect: SourceDataDefect, context: dict) -> bool:
+    return all(
+        str(getattr(defect, key)) == str(context.get(key) or "")
+        for key in ("cnvrt_project_id", "collection_id", "job_id")
+    )
+
+
+def _dependency_payload(dependency: PlanSourceDependency | None) -> dict:
+    if dependency is None:
+        return {"manifest_status": "historical_unknown", "exact_anchor_ids": []}
+    return {
+        "manifest_status": dependency.manifest_status,
+        "verified_source_revision": dependency.verified_source_revision,
+        "verified_source_snapshot_hash": dependency.verified_source_snapshot_hash,
+        "exact_anchor_ids": dependency.exact_anchor_ids or [],
+        "provenance": dependency.provenance or {},
+    }
+
+
+def _defect_match(defect: SourceDataDefect, dependency: PlanSourceDependency | None) -> dict | None:
+    return match_dependency(
+        defect.policy_snapshot or policy_snapshot(defect.category),
+        defect.anchor_id,
+        _dependency_payload(dependency),
+        defect.anchor_facts or {},
+    )
+
+
+def _source_defect_summary(defect: SourceDataDefect | None) -> dict:
+    if defect is None:
+        return {}
+    return {
+        "defect_id": str(defect.defect_id),
+        "version": defect.version,
+        "category": defect.category,
+        "state": defect.state,
+        "severity": str((defect.policy_snapshot or {}).get("severity") or "warning"),
+        "effective_severity": effective_severity(defect.policy_snapshot or {}, defect.state),
+        "anchor_type": defect.anchor_type,
+        "anchor_id": defect.anchor_id,
+        "description": defect.description,
+        "updated_at": defect.updated_at,
+    }
+
+
+def _material_source_defect_event(event: SourceDataDefectEvent) -> bool:
+    if event.event_type in {"reported", "reopened", "commented", "evidence_added", "claimed", "released"}:
+        return False
+    snapshot = event.payload or {}
+    policies = [
+        snapshot.get("policy_snapshot") or {},
+        snapshot.get("previous_policy_snapshot") or {},
+    ]
+    severity_is_material = any(
+        str(policy.get("severity") or "") in {"blocking", "warning", "advisory"}
+        for policy in policies
+    )
+    state_is_material = event.from_state in MATERIAL_STATES or event.to_state in MATERIAL_STATES
+    return severity_is_material and state_is_material
+
+
+def _reconcile_current_material_defects(
+    current_defects,
+    dependency: PlanSourceDependency | None,
+    material_events_by_defect: dict[UUID, SourceDataDefectEvent],
+    durable_event_ids: set[str],
+    evaluated_at: datetime,
+) -> tuple[list[dict], bool]:
+    captured_defect_ids = {
+        str(item) for item in ((dependency.source_defect_ids if dependency else []) or [])
+    }
+    captured_event_ids = {
+        str(item) for item in ((dependency.source_defect_event_ids if dependency else []) or [])
+    }
+    captured_snapshots = {
+        str(item.get("defect_id")): item
+        for item in ((dependency.source_defect_snapshots if dependency else []) or [])
+        if isinstance(item, dict) and item.get("defect_id")
+    }
+    changes = []
+    changed = False
+    for defect in current_defects:
+        if defect.state not in MATERIAL_STATES:
+            continue
+        defect_id = str(defect.defect_id)
+        event = material_events_by_defect.get(defect.defect_id)
+        event_id = str(event.event_id) if event is not None else ""
+        captured = captured_snapshots.get(defect_id) or {}
+        if (
+            defect_id in captured_defect_ids
+            and event_id in captured_event_ids
+            and captured.get("state") in MATERIAL_STATES
+            and event is not None
+            and int(captured.get("version") or 0) >= int(event.defect_version)
+        ):
+            continue
+        changed = True
+        if event_id in durable_event_ids:
+            continue
+        match = _defect_match(defect, dependency) or {
+            "match_scope": "drawing_fallback",
+            "resolution": "current_material_defect_fail_closed",
+        }
+        changes.append({
+            "change_type": "source_defect_changed",
+            "defect_id": defect_id,
+            "event_id": event_id or None,
+            "material": True,
+            "occurred_at": (
+                event.occurred_at if event is not None
+                else defect.updated_at or defect.reported_at or evaluated_at
+            ),
+            "defect": {
+                **_source_defect_summary(defect),
+                "match_scope": match["match_scope"],
+                "resolution": match.get("resolution"),
+            },
+        })
+    return changes, changed
+
+
+def _governance_freshness_status(*, asset_changed: bool, source_defects_changed: bool, historical_unknown: bool) -> str:
+    if asset_changed or source_defects_changed:
+        return "stale"
+    if historical_unknown:
+        return "unknown"
+    return "fresh"
+
+
+def _governance_readiness_for_dependency(current: str, *, historical_unknown: bool, source_defects_changed: bool) -> str:
+    if historical_unknown and source_defects_changed:
+        return "blocked"
+    if historical_unknown and current in {"ready", "advisory"}:
+        return "warning"
+    return current
+
+
+def _effective_derivation_trigger(
+    requested: str,
+    *,
+    corrections_changed: bool,
+    asset_conditions_changed: bool,
+    source_defects_changed: bool,
+) -> tuple[str, list[str]]:
+    if requested == "corrections" and not corrections_changed:
+        raise PlanDomainError("no_approved_corrections", "No approved corrections are available for derivation.", 409)
+    if requested == "asset_conditions" and not asset_conditions_changed:
+        raise PlanDomainError("plan_inputs_current", "The latest plan version already uses the current shared equipment status.", 409)
+    if requested == "source_data_defects" and not source_defects_changed:
+        raise PlanDomainError("plan_source_defects_current", "No material source-data defect change affects the latest plan version.", 409)
+    inputs = []
+    if corrections_changed:
+        inputs.append("corrections")
+    if asset_conditions_changed:
+        inputs.append("asset_conditions")
+    if source_defects_changed:
+        inputs.append("source_data_defects")
+    return ("combined" if len(inputs) > 1 else inputs[0]), inputs
+
+
+def _capture_source_defect_snapshot(session, request: dict) -> dict:
+    """Capture drawing governance before execution, under its transaction lock."""
+    context = _planning_context(request)
+    _lock_source_defect_scope(session, context)
+    defects = session.scalars(select(SourceDataDefect).where(
+        SourceDataDefect.cnvrt_project_id == context["cnvrt_project_id"],
+        SourceDataDefect.collection_id == context["collection_id"],
+        SourceDataDefect.job_id == context["job_id"],
+        SourceDataDefect.state.in_(OPEN_STATES),
+    ).order_by(SourceDataDefect.defect_id)).all() if context["job_id"] else []
+    events = session.execute(_source_defect_event_scope(
+        select(SourceDataDefectEvent.event_id, SourceDataDefectEvent.occurred_at)
+        .join(SourceDataDefect), context,
+    ).order_by(SourceDataDefectEvent.occurred_at, SourceDataDefectEvent.event_id)).all()
+    return _jsonable({
+        "context": context,
+        "captured_at": datetime.now(timezone.utc),
+        "defects": [{
+            **_source_defect_summary(item),
+            "policy_snapshot": item.policy_snapshot,
+            "anchor_facts": item.anchor_facts or {},
+        } for item in defects],
+        "event_ids": [str(row.event_id) for row in events],
+        "watermark_id": str(events[-1].event_id) if events else None,
+        "watermark_at": events[-1].occurred_at if events else None,
+    })
+
+
+def _persist_source_dependency(session, version: PlanVersion, request: dict, content: dict) -> None:
+    context = _planning_context(request)
+    identifiers = sorted(_source_identifiers(content))
+    snapshot = (request or {}).get("_source_defect_snapshot")
+    # Late job resolution or legacy runs cannot establish an execution-time checkpoint.
+    known = isinstance(snapshot, dict) and snapshot.get("context") == context and all(context.values())
+    snapshot = snapshot if known else {}
+    status = "incomplete" if known else "historical_unknown"
+    dependency_payload = {"manifest_status": status, "exact_anchor_ids": identifiers}
+    matched = []
+    for item in snapshot.get("defects") or []:
+        match = match_dependency(item["policy_snapshot"], item["anchor_id"], dependency_payload, item.get("anchor_facts"))
+        if match is not None:
+            matched.append({**item, "dependency_match": match})
+    captured_ids = snapshot.get("event_ids") or []
+    dependency = PlanSourceDependency(
+        plan_version_id=version.plan_version_id, context=context,
+        manifest_status=status, verified_source_revision=None, verified_source_snapshot_hash=None,
+        provenance={
+            "verified_source_revision": False, "verified_source_snapshot_hash": False,
+            "derived_identity_manifest_hash": canonical_hash({"context": context, "exact_anchor_ids": identifiers}),
+            "identity_manifest_exhaustive": False,
+            "identity_manifest_reason": "normalized_plan_projection_is_partial",
+            "governance_checkpoint": "run_input" if known else "historical_unknown",
+            "run_input_hash": canonical_hash(request or {}),
+            "plan_projection_hash": canonical_hash(content or {}),
+        },
+        exact_anchor_ids=identifiers,
+        source_defect_ids=[item["defect_id"] for item in matched],
+        source_defect_snapshots=_jsonable(matched), source_defect_event_ids=captured_ids,
+        source_defect_event_watermark_id=UUID(snapshot["watermark_id"]) if snapshot.get("watermark_id") else None,
+        source_defect_event_watermark_at=datetime.fromisoformat(snapshot["watermark_at"]) if snapshot.get("watermark_at") else None,
+    )
+    session.add(dependency)
+    session.flush()
+    # Events during execution predate this plan version, so they have no impact
+    # rows for it yet. Record them without marking them as consumed by the run.
+    events = session.scalars(_source_defect_event_scope(
+        select(SourceDataDefectEvent).join(SourceDataDefect), context,
+    ).where(SourceDataDefectEvent.event_id.not_in([UUID(value) for value in captured_ids]))).all()
+    for event in events:
+        payload = event.payload or {}
+        anchor = payload.get("anchor") or {}
+        match = match_dependency(
+            payload.get("policy_snapshot") or policy_snapshot(payload["category"]),
+            str(anchor.get("anchor_id") or ""), dependency_payload, anchor.get("facts"),
+        )
+        if match is not None:
+            session.add(SourceDefectPlanImpact(
+                event_id=event.event_id, defect_id=event.defect_id,
+                plan_id=version.plan_id, plan_version_id=version.plan_version_id,
+                match_scope=match["match_scope"], snapshot=_jsonable({
+                    "plan_id": str(version.plan_id), "plan_version_id": str(version.plan_version_id),
+                    **match, "defect_state": event.to_state,
+                    "defect_category": payload.get("category"),
+                    "effective_severity": payload.get("effective_severity"),
+                    "policy_snapshot": payload.get("policy_snapshot"),
+                    "source_dependency": dependency_payload,
+                }),
+            ))
+
+
+def _snapshot_defect_impacts(session, defect: SourceDataDefect, event: SourceDataDefectEvent) -> None:
+    rows = session.execute(
+        select(PlanVersion, PlanSourceDependency)
+        .join(PlanSourceDependency, PlanSourceDependency.plan_version_id == PlanVersion.plan_version_id)
+    ).all()
+    prior_impacts = {
+        item.plan_version_id: item
+        for item in session.scalars(
+            select(SourceDefectPlanImpact)
+            .where(SourceDefectPlanImpact.defect_id == defect.defect_id)
+            .order_by(SourceDefectPlanImpact.captured_at, SourceDefectPlanImpact.impact_id)
+        ).all()
+    }
+    for version, dependency in rows:
+        context = dependency.context or {}
+        match = _defect_match(defect, dependency)
+        prior = prior_impacts.get(version.plan_version_id)
+        if match is None and prior is not None:
+            match = {
+                "match_scope": prior.match_scope,
+                "resolution": "previously_impacted",
+                "dependency_status": dependency.manifest_status,
+            }
+        if match is None and str(defect.defect_id) in {str(item) for item in dependency.source_defect_ids or []}:
+            captured = next(
+                (item for item in dependency.source_defect_snapshots or [] if str(item.get("defect_id")) == str(defect.defect_id)),
+                {},
+            )
+            match = captured.get("dependency_match") or {
+                "match_scope": "drawing_fallback",
+                "resolution": "captured_historical_impact",
+                "dependency_status": dependency.manifest_status,
+            }
+        if not _defect_context_matches(defect, context) or match is None:
+            continue
+        session.add(SourceDefectPlanImpact(
+            event_id=event.event_id,
+            defect_id=defect.defect_id,
+            plan_id=version.plan_id,
+            plan_version_id=version.plan_version_id,
+            match_scope=match["match_scope"],
+            snapshot=_jsonable({
+                "plan_id": str(version.plan_id),
+                "plan_version_id": str(version.plan_version_id),
+                **match,
+                "defect_state": defect.state,
+                "defect_category": defect.category,
+                "effective_severity": effective_severity(defect.policy_snapshot or {}, defect.state),
+                "policy_snapshot": defect.policy_snapshot,
+                "source_dependency": _dependency_payload(dependency),
+            }),
+        ))
+
+
+def _new_source_defect_event(
+    session,
+    defect: SourceDataDefect,
+    event_type: str,
+    from_state: str | None,
+    to_state: str,
+    actor_id: str,
+    payload: dict,
+) -> SourceDataDefectEvent:
+    previous_hash = session.scalar(
+        select(SourceDataDefectEvent.event_hash)
+        .where(SourceDataDefectEvent.defect_id == defect.defect_id)
+        .order_by(SourceDataDefectEvent.defect_version.desc()).limit(1)
+    )
+    occurred_at = datetime.now(timezone.utc)
+    snapshot = _jsonable({
+        **payload,
+        "category": defect.category,
+        "state": to_state,
+        "anchor": {"anchor_type": defect.anchor_type, "anchor_id": defect.anchor_id,
+                   "facts": defect.anchor_facts or {}},
+        "effective_severity": effective_severity(defect.policy_snapshot or {}, to_state),
+    })
+    event_hash = canonical_hash({
+        "previous_hash": previous_hash, "defect_id": str(defect.defect_id),
+        "event_type": event_type, "from_state": from_state, "to_state": to_state,
+        "defect_version": defect.version, "actor_id": actor_id,
+        "occurred_at": occurred_at.isoformat(), "payload": snapshot,
+    })
+    return SourceDataDefectEvent(
+        defect_id=defect.defect_id, event_type=event_type, from_state=from_state,
+        to_state=to_state, defect_version=defect.version, actor_id=actor_id,
+        occurred_at=occurred_at, payload=snapshot, previous_hash=previous_hash,
+        event_hash=event_hash,
+    )
+
+
+def _source_defect_event_dict(event: SourceDataDefectEvent, defect: SourceDataDefect) -> dict:
+    snapshot = event.payload or {}
+    return {
+        "event_id": str(event.event_id), "type": "source_data_defect.changed",
+        "event_type": event.event_type, "defect_id": str(defect.defect_id),
+        "version": event.defect_version,
+        "state": snapshot.get("state", event.to_state),
+        "category": snapshot.get("category", defect.category),
+        "occurred_at": event.occurred_at, "payload": snapshot,
+        "previous_hash": event.previous_hash, "event_hash": event.event_hash,
+    }
+
+
+def _source_defect_event_scope(statement, context: dict):
+    return statement.where(
+        SourceDataDefect.cnvrt_project_id == str(context.get("cnvrt_project_id") or ""),
+        SourceDataDefect.collection_id == str(context.get("collection_id") or ""),
+        SourceDataDefect.job_id == str(context.get("job_id") or ""),
+    )
+
+
+def _scoped_source_defect_event(session, context: dict, event_id: str):
+    try:
+        parsed = UUID(str(event_id))
+    except (TypeError, ValueError):
+        return None
+    return session.scalar(
+        _source_defect_event_scope(
+            select(SourceDataDefectEvent).join(SourceDataDefect), context
+        ).where(SourceDataDefectEvent.event_id == parsed)
+    )
+
+
+def _source_defect_dict(session, defect: SourceDataDefect) -> dict:
+    events = session.scalars(
+        select(SourceDataDefectEvent).where(SourceDataDefectEvent.defect_id == defect.defect_id)
+        .order_by(SourceDataDefectEvent.defect_version)
+    ).all()
+    event_ids = [item.event_id for item in events]
+    impacts = session.scalars(
+        select(SourceDefectPlanImpact).where(SourceDefectPlanImpact.event_id.in_(event_ids))
+        .order_by(SourceDefectPlanImpact.captured_at, SourceDefectPlanImpact.impact_id)
+    ).all() if event_ids else []
+    impacts_by_event: dict[UUID, list[dict]] = {}
+    for impact in impacts:
+        impacts_by_event.setdefault(impact.event_id, []).append(impact.snapshot or {})
+    latest_impacts = next(
+        (impacts_by_event[item.event_id] for item in reversed(events) if impacts_by_event.get(item.event_id)),
+        [],
+    )
+    return {
+        "defect_id": str(defect.defect_id), "version": defect.version,
+        "context": {
+            "cnvrt_project_id": defect.cnvrt_project_id, "collection_id": defect.collection_id,
+            "unigraph_project_id": defect.unigraph_project_id, "job_id": defect.job_id,
+            "reported_source_revision": defect.reported_source_revision,
+            "reported_source_snapshot_hash": defect.reported_source_snapshot_hash,
+        },
+        "category": defect.category,
+        "anchor": {"anchor_type": defect.anchor_type, "anchor_id": defect.anchor_id, "facts": defect.anchor_facts or {}},
+        "description": defect.description, "state": defect.state,
+        "policy_snapshot": defect.policy_snapshot or {}, "policy_hash": defect.policy_hash,
+        "reported_by": defect.reported_by, "reported_at": defect.reported_at, "updated_at": defect.updated_at,
+        "claimed_by": defect.claimed_by, "claimed_at": defect.claimed_at,
+        "events": [{
+            "event_id": str(item.event_id), "event_type": item.event_type,
+            "from_state": item.from_state, "to_state": item.to_state,
+            "defect_version": item.defect_version, "actor_id": item.actor_id,
+            "occurred_at": item.occurred_at, "payload": item.payload or {},
+            "impact_snapshot": impacts_by_event.get(item.event_id, []),
+            "previous_hash": item.previous_hash, "event_hash": item.event_hash,
+        } for item in events],
+        "affected_plans": latest_impacts,
+    }
 
 
 def _jsonable(value: Any):

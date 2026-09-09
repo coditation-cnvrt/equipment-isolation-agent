@@ -1,0 +1,287 @@
+{
+  "schema_version": "mock-sic-v0.1",
+  "document": {
+    "title": "Mock Site Isolation Configuration for P&ID 2151",
+    "revision": "MOCK-0.1",
+    "status": "draft_mock_unapproved",
+    "approved_by": null,
+    "approved_date": null,
+    "cnvrt_project_id": 277,
+    "collection_id": 206,
+    "unigraph_project_id": 21,
+    "pnid_job_id": 2151,
+    "warning": "Synthetic development example only. Unapproved, not a plant declaration, isolation procedure or work authorisation. Do not seed or admit to production runs."
+  },
+  "metadata": {
+    "synthetic": true,
+    "research_date": "2026-09-08",
+    "usage": "offline fixture and B1 schema design",
+    "production_admissible": false,
+    "jurisdiction": "Not established; public UK/US guidance is used as design reference, not a compliance determination.",
+    "scope": "Collection 206 example, illustrated by drawing 2151; production site/unit ownership remains unresolved."
+  },
+  "barrier_policy": {
+    "check_valve_role": "none",
+    "actuated_valve_as_barrier": "not_allowed",
+    "soft_seat_permitted_for_hot_work": false,
+    "small_bore_threshold_dn": 50
+  },
+  "escalation_thresholds": {
+    "duration_escalate_days": 7,
+    "positive_isolation_mandatory_days": 30,
+    "unattended_overnight_escalates": true,
+    "shift_change_requires_reprove": true
+  },
+  "matrix": {
+    "base_matrix_reference": "project_requirements_v1_section_6_3",
+    "implementation_reference": "equipment_isolation.domain.isolation_standard.base_required_barrier_configuration",
+    "overrides": [],
+    "provenance": "PROJECT_REQUIREMENTS",
+    "external_standard_equivalence_claim": false
+  },
+  "proving": {
+    "pressure_decay_hold_minutes": null,
+    "acceptance_criterion": null,
+    "re_prove_interval_hours": null,
+    "revalidation_triggers": [
+      "shift_change",
+      "work_resumption_after_suspension",
+      "unattended_interval",
+      "changed_plant_state"
+    ],
+    "test_procedure_reference": null,
+    "status": "site_specific_method_and_criteria_required"
+  },
+  "plant_state": {
+    "validity_hours": 24,
+    "on_expiry": "block_governed_use_pending_operations_redeclaration",
+    "condition_change_requires_redeclaration": true,
+    "field_verification_required": true
+  },
+  "gas_testing": {
+    "required_analytes_for_mock_review": [
+      "CO2",
+      "O2",
+      "other_contaminants_after_SDS_review"
+    ],
+    "acceptance_criteria": {
+      "co2_ppm": null,
+      "oxygen_percent_min": null,
+      "oxygen_percent_max": null,
+      "lel_percent": null,
+      "h2s_ppm": null,
+      "benzene_ppm": null
+    },
+    "retest_interval_minutes": null,
+    "procedure_reference": null,
+    "status": "no_approved_acceptance_criteria"
+  },
+  "purging": {
+    "target_oxygen_percent": null,
+    "volume_changes": null,
+    "permitted_media": [],
+    "approved_procedure_reference": null,
+    "status": "not_specified_no_purge_method_authorised"
+  },
+  "tagging": {
+    "lock_colour_scheme": null,
+    "tag_numbering_format": "MOCK-2151-ISO-{sequence:04d}",
+    "hasp_box_policy": "personal_lock_per_worker_for_mock_group_scenario",
+    "personal_lock_policy": "individual_control_with_documented_transfer",
+    "operational_template": false
+  },
+  "electrical": {
+    "electrical_isolation_mode": "out_of_scope",
+    "separate_authorised_electrical_assessment_required": true
+  },
+  "permits": {
+    "enabled_permit_types": [],
+    "templates": [],
+    "default_validity_hours": null,
+    "signature_blocks": [],
+    "status": "permit_generation_disabled"
+  },
+  "modes": {
+    "emergency_mode_enabled": false
+  },
+  "export": {
+    "cmms_adapter": "canonical"
+  },
+  "unresolved_decisions": [
+    "approved_default_SIC_and_authoritative_approver",
+    "HSC_EC_overlap_precedence",
+    "PSD_reduction_vs_FHR_override_and_UnknownFluid",
+    "one_valve_plus_bleed_topology",
+    "intermediate_bleed_for_two_barrier_cells",
+    "safe_destination_vocabulary_and_positive_fallback_strength",
+    "service_and_operating_PT_source_precedence",
+    "incomplete_fluid_and_two_phase_handling",
+    "global_vs_unit_FHR_mapping_precedence",
+    "proving_criteria_and_retest_intervals",
+    "gas_testing_and_purging_criteria",
+    "site_unit_document_scope"
+  ],
+  "research_sources": [
+    {
+      "source_id": "HSG253",
+      "title": "HSE: The safe isolation of plant and equipment",
+      "url": "https://www.hse.gov.uk/pubns/priced/hsg253.pdf",
+      "locator": "Paragraphs 167-180; Appendix 3, pages 47-48",
+      "used_for": "Proving, monitoring, disposal review and isolation checks."
+    },
+    {
+      "source_id": "HSG250",
+      "title": "HSE: Guidance on permit-to-work systems",
+      "url": "https://www.hse.gov.uk/pubns/priced/hsg250.pdf",
+      "locator": "Paragraphs 22-23; Figure 1, page 24; Appendix 2",
+      "used_for": "Work records, linked certificates, handover and role separation."
+    },
+    {
+      "source_id": "OSHA147",
+      "title": "OSHA: 29 CFR 1910.147",
+      "url": "https://www.osha.gov/laws-regs/regulations/standardnumber/1910/1910.147",
+      "locator": "(c)(4), (d)(5)-(6), (f)(3)-(4)",
+      "used_for": "Energy verification, reaccumulation, personal locks and shift continuity."
+    },
+    {
+      "source_id": "HSE_HANDOVER",
+      "title": "HSE: Shift handover",
+      "url": "https://www.hse.gov.uk/humanfactors/topics/shift-handover.htm",
+      "locator": "Key principles in handover",
+      "used_for": "Outgoing/incoming records and cross-checking."
+    },
+    {
+      "source_id": "NIOSH_CO2",
+      "title": "NIOSH Pocket Guide: Carbon dioxide",
+      "url": "https://www.cdc.gov/niosh/npg/npgd0103.html",
+      "locator": "Exposure limits, IDLH, symptoms",
+      "used_for": "CO2-specific hazard reference; not permit acceptance limits."
+    },
+    {
+      "source_id": "HSE_CO2",
+      "title": "HSE: Guidance on conveying carbon dioxide in pipelines",
+      "url": "https://www.hse.gov.uk/pipelines/co2conveying-full.htm",
+      "locator": "Conveying CO2: corrosion, stream composition, modelling loss of containment",
+      "used_for": "Composition and phase-change review prompts; pipeline guidance is not a plant isolation recipe."
+    },
+    {
+      "source_id": "PROJECT_REQUIREMENTS",
+      "title": "Isolation Planning Agent Requirements v1",
+      "path": "isolation-planning-agent-ux-i1/extracted/Isolation_Planning_Agent_Requirements_v1.md",
+      "locator": "Sections 5.3, 5.4, 5.8, 6.2-6.5",
+      "used_for": "Project-specific sheet/field names, matrix and proposed numeric defaults."
+    },
+    {
+      "source_id": "MOCK_FHR",
+      "title": "Existing mock FHR for P&ID 2151",
+      "path": "mock_fhr_pnid_2151.json",
+      "locator": "document, fluids and service_code_map",
+      "used_for": "Shared context and CDH/PC/SWS/SWR/VRP service vocabulary; assumptions remain unverified."
+    }
+  ],
+  "parameter_provenance": [
+    {
+      "paths": [
+        "/barrier_policy/small_bore_threshold_dn",
+        "/escalation_thresholds/duration_escalate_days",
+        "/escalation_thresholds/positive_isolation_mandatory_days",
+        "/plant_state/validity_hours",
+        "/matrix"
+      ],
+      "basis": "project_specification_default",
+      "source_refs": [
+        "PROJECT_REQUIREMENTS"
+      ],
+      "note": "DN50, 7 days, 30 days and 24 hours are project proposals, not universal HSE/OSHA requirements."
+    },
+    {
+      "paths": [
+        "/barrier_policy/check_valve_role",
+        "/barrier_policy/actuated_valve_as_barrier",
+        "/barrier_policy/soft_seat_permitted_for_hot_work",
+        "/escalation_thresholds/unattended_overnight_escalates"
+      ],
+      "basis": "synthetic_policy_choice",
+      "source_refs": [
+        "PROJECT_REQUIREMENTS"
+      ],
+      "note": "Unapproved test selections; no assertion that public guidance mandates these exact settings."
+    },
+    {
+      "paths": [
+        "/escalation_thresholds/shift_change_requires_reprove",
+        "/proving/revalidation_triggers"
+      ],
+      "basis": "guidance_informed_mock_choice",
+      "source_refs": [
+        "HSG253",
+        "OSHA147"
+      ],
+      "note": "Example triggers; interval and test acceptance remain unset."
+    },
+    {
+      "paths": [
+        "/proving/pressure_decay_hold_minutes",
+        "/proving/acceptance_criterion",
+        "/proving/re_prove_interval_hours"
+      ],
+      "basis": "deliberately_unresolved",
+      "source_refs": [
+        "HSG253"
+      ],
+      "note": "No universal proving duration or acceptable leakage rate imported."
+    },
+    {
+      "paths": [
+        "/plant_state/condition_change_requires_redeclaration",
+        "/plant_state/field_verification_required",
+        "/plant_state/on_expiry"
+      ],
+      "basis": "project_design_choice",
+      "source_refs": [
+        "PROJECT_REQUIREMENTS",
+        "HSE_HANDOVER"
+      ],
+      "note": "This mock never establishes verified plant state."
+    },
+    {
+      "paths": [
+        "/gas_testing",
+        "/purging"
+      ],
+      "basis": "deliberately_unresolved",
+      "source_refs": [
+        "NIOSH_CO2",
+        "HSE_CO2",
+        "PROJECT_REQUIREMENTS"
+      ],
+      "note": "Exposure references are not gas-free, entry or hot-work criteria; no numerical acceptance or purge recipe."
+    },
+    {
+      "paths": [
+        "/tagging/hasp_box_policy",
+        "/tagging/personal_lock_policy"
+      ],
+      "basis": "guidance_informed_mock_choice",
+      "source_refs": [
+        "OSHA147"
+      ],
+      "note": "Model individual participation and transfer responsibility; not an issued lockout procedure."
+    },
+    {
+      "paths": [
+        "/tagging/lock_colour_scheme",
+        "/tagging/tag_numbering_format",
+        "/electrical",
+        "/permits",
+        "/modes",
+        "/export"
+      ],
+      "basis": "synthetic_product_scope_choice",
+      "source_refs": [
+        "PROJECT_REQUIREMENTS"
+      ],
+      "note": "Fixture naming and disabled capabilities only; no approved site conventions."
+    }
+  ]
+}

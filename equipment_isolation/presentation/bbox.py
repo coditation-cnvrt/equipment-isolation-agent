@@ -84,7 +84,7 @@ def resolve_bboxes(candidate_data, config):
         debug["bbox_stlm_error"] = str(exc)
         stlm_payload = None
     try:
-        hilt_payload = client.hilt_graph(job_id)
+        hilt_payload = config.captured_hilt.to_dict()["payload"] if getattr(config, "captured_hilt", None) is not None else client.hilt_graph(job_id)
     except Exception as exc:
         debug["hilt_graph_error"] = str(exc)
         hilt_payload = None

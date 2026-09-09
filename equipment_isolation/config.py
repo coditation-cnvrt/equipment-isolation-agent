@@ -48,6 +48,7 @@ class ApiConfig:
 
 @dataclass(frozen=True)
 class IsolationPolicy:
+    process_safety_inputs: object | None = None
     # Safety ceiling for adaptive branch traversal. Correctness must come from
     # semantic stops (usable barrier, terminal, cycle), not from reaching this
     # number. Hitting the ceiling is therefore reported as unresolved.
@@ -141,6 +142,8 @@ class RunConfig:
     work_scope: WorkScope = field(default_factory=WorkScope)
     selected_asset: SelectedAsset | None = None
     approved_corrections: tuple[dict, ...] = ()
+    process_safety_inputs: object | None = None
+    captured_hilt: object | None = None
     output_dir: Path = Path("output")
 
     @property
