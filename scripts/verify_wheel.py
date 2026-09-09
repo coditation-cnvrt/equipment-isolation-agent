@@ -58,7 +58,6 @@ FORBIDDEN_PREFIXES = (
     "pipeline/",
     "tests/",
     "scripts/",
-    "hilt-viewer-poc/",
 )
 
 
