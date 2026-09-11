@@ -211,7 +211,6 @@ class ControlledInputPostgresTests(unittest.TestCase):
                 first = self.approve()
                 second = self.submit("2")
                 run, _ = self.pinned_run(first)
-                self.finish_run(run)
                 held, competing, release = Event(), Event(), Event()
                 def after_execute(conn, cursor, statement, parameters, context, many):
                     hold_statement = "UPDATE controlled_input SET" if first_operation == "approval" else "INSERT INTO external_run_link"
@@ -231,7 +230,9 @@ class ControlledInputPostgresTests(unittest.TestCase):
                 try:
                     with ThreadPoolExecutor(max_workers=2) as executor:
                         approve = lambda: self.approve(second, first["revision_id"])
-                        promote = lambda: self.repo.create_plan_from_run(run.run_id)[0]
+                        def promote():
+                            self.finish_run(run)
+                            return self.repo.create_plan_from_run(run.run_id)[0]
                         winner = executor.submit(approve if first_operation == "approval" else promote)
                         try:
                             self.assertTrue(held.wait(5))

@@ -825,6 +825,9 @@ class PostgresRunRepository:
             persisted = session.get(IsolationRun, record.run_id)
             if persisted is None:
                 return
+            # Match promotion lock order before changing the run row.
+            if record.status == "succeeded" and not (persisted.request or {}).get("derivation_context"):
+                _lock_source_defect_scope(session, _planning_context(persisted.request or {}))
             persisted.status = record.status
             persisted.started_at = _dt(record.started_at)
             persisted.finished_at = _dt(record.finished_at)
@@ -847,6 +850,10 @@ class PostgresRunRepository:
                     and manifest.child_plan_version_id is None
                 ):
                     self._complete_derivation(session, manifest, persisted)
+            elif record.status == "succeeded" and (persisted.request or {}).get("process_safety_inputs"):
+                session.flush()
+                self._ensure_plan_from_run(session, persisted.run_id)
+
 
     def update_run_request(self, run_id: str, request_payload: dict) -> None:
         """Persist context inferred while a run is still executing."""
@@ -949,86 +956,89 @@ class PostgresRunRepository:
     ) -> tuple[dict, bool]:
         """Atomically promote one succeeded persisted run into advisory plan v1."""
         with self._session_factory.begin() as session:
-            run = session.scalar(
-                select(IsolationRun).where(IsolationRun.run_id == run_id)
-            )
-            if run is None:
-                raise PlanDomainError("unknown_run", "Unknown persisted run id.", 404)
-            _lock_source_defect_scope(session, _planning_context(run.request or {}))
-            run = session.scalar(
-                select(IsolationRun)
-                .where(IsolationRun.run_id == run_id)
-                .with_for_update()
-            )
-            if run.status != "succeeded":
-                raise PlanDomainError(
-                    "run_not_succeeded",
-                    "Only a succeeded isolation run can be saved as a plan.",
-                    409,
-                    {"status": run.status},
-                )
-            if run.result is None:
-                raise PlanDomainError(
-                    "result_not_available",
-                    "The succeeded run has no persisted result.",
-                    409,
-                )
-            validate_promotable_result(run.result)
+            return self._ensure_plan_from_run(session, run_id, area_code)
 
-            existing_plan_id = session.scalar(
-                select(PlanVersion.plan_id)
-                .join(ExternalRunLink)
-                .where(ExternalRunLink.run_id == run_id)
+    def _ensure_plan_from_run(self, session, run_id: str, area_code: str | None = None):
+        run = session.scalar(
+            select(IsolationRun).where(IsolationRun.run_id == run_id)
+        )
+        if run is None:
+            raise PlanDomainError("unknown_run", "Unknown persisted run id.", 404)
+        _lock_source_defect_scope(session, _planning_context(run.request or {}))
+        run = session.scalar(
+            select(IsolationRun)
+            .where(IsolationRun.run_id == run_id)
+            .with_for_update()
+        )
+        if run.status != "succeeded":
+            raise PlanDomainError(
+                "run_not_succeeded",
+                "Only a succeeded isolation run can be saved as a plan.",
+                409,
+                {"status": run.status},
             )
-            if existing_plan_id is not None:
-                plan = self._get_plan_with_session(session, existing_plan_id)
-                return plan, False
+        if run.result is None:
+            raise PlanDomainError(
+                "result_not_available",
+                "The succeeded run has no persisted result.",
+                409,
+            )
+        validate_promotable_result(run.result)
 
-            request_payload = run.request or {}
-            agent_payload = run.agent or {}
-            input_hash = canonical_hash(request_payload)
-            model_hash = canonical_hash(model_fingerprint(run.runner, agent_payload))
-            status = derivation_status(agent_payload)
-            derived_at = run.finished_at or run.created_at
-            plan_number = session.scalar(_plan_number_statement())
+        existing_plan_id = session.scalar(
+            select(PlanVersion.plan_id)
+            .join(ExternalRunLink)
+            .where(ExternalRunLink.run_id == run_id)
+        )
+        if existing_plan_id is not None:
+            plan = self._get_plan_with_session(session, existing_plan_id)
+            return plan, False
 
-            plan_row = IsolationPlan(
-                plan_number=plan_number,
-                mode="advisory",
-                lifecycle_state="draft",
-                area_code=area_code,
+        request_payload = run.request or {}
+        agent_payload = run.agent or {}
+        input_hash = canonical_hash(request_payload)
+        model_hash = canonical_hash(model_fingerprint(run.runner, agent_payload))
+        status = derivation_status(agent_payload)
+        derived_at = run.finished_at or run.created_at
+        plan_number = session.scalar(_plan_number_statement())
+
+        plan_row = IsolationPlan(
+            plan_number=plan_number,
+            mode="advisory",
+            lifecycle_state="draft",
+            area_code=area_code,
+        )
+        session.add(plan_row)
+        session.flush()
+        version = PlanVersion(
+            plan_id=plan_row.plan_id,
+            parent_plan_version_id=None,
+            version_no=1,
+            derivation_status=status,
+            input_hash=input_hash,
+            model_hash=model_hash,
+            derived_at=derived_at,
+            normalization_status="complete",
+            assurance_status=assurance_status(run.result),
+            content=normalized_plan_content(request_payload, run.result),
+        )
+        session.add(version)
+        session.flush()
+        session.add(
+            ExternalRunLink(
+                plan_version_id=version.plan_version_id,
+                run_id=run_id,
+                runner=run.runner,
+                link_role="derivation",
+                result_uri=f"/isolation-runs/{run_id}/result",
+                trace_uri=f"/isolation-runs/{run_id}/trace",
             )
-            session.add(plan_row)
-            session.flush()
-            version = PlanVersion(
-                plan_id=plan_row.plan_id,
-                parent_plan_version_id=None,
-                version_no=1,
-                derivation_status=status,
-                input_hash=input_hash,
-                model_hash=model_hash,
-                derived_at=derived_at,
-                normalization_status="complete",
-                assurance_status=assurance_status(run.result),
-                content=normalized_plan_content(request_payload, run.result),
-            )
-            session.add(version)
-            session.flush()
-            session.add(
-                ExternalRunLink(
-                    plan_version_id=version.plan_version_id,
-                    run_id=run_id,
-                    runner=run.runner,
-                    link_role="derivation",
-                    result_uri=f"/isolation-runs/{run_id}/result",
-                    trace_uri=f"/isolation-runs/{run_id}/trace",
-                )
-            )
-            _persist_normalized_content(session, version, request_payload, run.result)
-            _persist_source_dependency(session, version, request_payload, version.content or {})
-            session.flush()
-            plan = self._get_plan_with_session(session, plan_row.plan_id)
-            return plan, True
+        )
+        _persist_normalized_content(session, version, request_payload, run.result)
+        _persist_source_dependency(session, version, request_payload, version.content or {})
+        session.flush()
+        plan = self._get_plan_with_session(session, plan_row.plan_id)
+        return plan, True
 
     def get_plan(self, plan_id: str) -> dict | None:
         try:

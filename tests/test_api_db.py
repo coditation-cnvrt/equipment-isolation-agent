@@ -195,7 +195,7 @@ class ApiDbTests(unittest.TestCase):
 
     def test_source_defect_plan_transactions_lock_drawing_scope_before_rows(self):
         methods = (
-            PostgresRunRepository.create_plan_from_run,
+            PostgresRunRepository._ensure_plan_from_run,
             PostgresRunRepository.prepare_derivation,
             PostgresRunRepository._complete_derivation,
             _lock_source_defect_for_update,

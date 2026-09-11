@@ -102,3 +102,26 @@ established by editing JSON claims.
 The API remains on port 8088 against the separate local `eia_test_preview_ui`
 database/socket described in `fhr-frontend-preview.md`. UI remains on 5173.
 Configured `.env` files and the original configured database were not changed.
+
+## Automatic draft lifecycle
+
+Completed document-controlled runs now create their advisory draft plan and first
+version in the same PostgreSQL transaction as terminal result persistence. Failure
+to persist the plan rolls back completion; a repeated completion or plan request
+reuses the existing run-to-plan link. Correction derivations retain the existing
+manifest-driven completion path and add a version to their original plan.
+
+The UI automatically resolves the draft through the existing idempotent
+`POST /isolation-plans/from-run` operation when opening a completed result. This
+also creates a draft for eligible historical results that predate automatic draft
+creation. No bulk historical backfill occurs. Queued/failed runs have no completed
+draft. Results without a usable validator assurance status remain ineligible.
+
+Recent Runs is the consolidated history entry point. The manual save form is
+removed; draft loading errors offer a retry. Corrections and freshness use the
+associated plan record. Opening a superseded run preserves its original result
+and directs the user to the latest draft in Recent Runs for corrections, rather
+than attaching the latest version's correction context to an older result.
+
+No new schema migration or HTTP shape is required. Draft remains advisory;
+authorisation and isolation assurance are unchanged.
