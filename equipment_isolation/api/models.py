@@ -6,6 +6,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from equipment_isolation.agent.limits import (
+    DEFAULT_AGENT_MAX_STEPS,
+    HARD_AGENT_MAX_STEPS,
+)
 from equipment_isolation.domain.feedback import validate_feedback_category
 from equipment_isolation.domain.source_defects import validate_report
 
@@ -58,7 +62,11 @@ class IsolationRunRequest(BaseModel):
     selected_asset: SelectedAssetRequest
     process_safety_inputs: dict[str, Any]
     model: str = ""
-    max_steps: int = 16
+    max_steps: int = Field(
+        default=DEFAULT_AGENT_MAX_STEPS,
+        ge=1,
+        le=HARD_AGENT_MAX_STEPS,
+    )
     runner: Literal["agentic"] = "agentic"
 
     @field_validator("process_safety_inputs")

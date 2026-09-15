@@ -1161,7 +1161,9 @@
             "title": "Max Depth"
           },
           "max_steps": {
-            "default": 16,
+            "default": 20,
+            "maximum": 20.0,
+            "minimum": 1.0,
             "title": "Max Steps",
             "type": "integer"
           },

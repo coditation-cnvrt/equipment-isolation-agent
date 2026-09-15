@@ -3,7 +3,7 @@
 Usage:
     uv run equipment-isolation-agent --equipment BT-11 [--job-name pnid_2_bio_final]
                                             [--model gemini-2.5-flash]
-                                            [--max-steps 16] [--output-dir DIR]
+                                            [--max-steps 20] [--output-dir DIR]
 
 The Gemini orchestrator drives the deterministic pipeline as tools. Outputs
 mirror the deterministic runner plus an audit trace of every tool call:
@@ -26,6 +26,10 @@ from equipment_isolation.presentation.output import write_json, write_viewer
 from equipment_isolation.pipeline.config_builder import build_run_config
 from equipment_isolation.pipeline.env import load_dotenv
 
+from equipment_isolation.agent.limits import (
+    DEFAULT_AGENT_MAX_STEPS,
+    validated_agent_max_steps,
+)
 from equipment_isolation.agent.loop import DEFAULT_MODEL
 from equipment_isolation.agent.runner import run_agent_pipeline
 from equipment_isolation.agent.session import jsonable
@@ -56,7 +60,12 @@ def parse_args():
         default=os.environ.get("GEMINI_MODEL") or DEFAULT_MODEL,
         help=f"Gemini model (default: {DEFAULT_MODEL}; override via GEMINI_MODEL env or --model)",
     )
-    parser.add_argument("--max-steps", type=int, default=16, help="Cap on agent tool-calling iterations")
+    parser.add_argument(
+        "--max-steps",
+        type=validated_agent_max_steps,
+        default=DEFAULT_AGENT_MAX_STEPS,
+        help=f"Cap on agent tool-calling iterations (1-{DEFAULT_AGENT_MAX_STEPS})",
+    )
     parser.add_argument("--max-depth", type=int, default=None, help="Safety hop ceiling for adaptive UniGraph branch traversal")
     parser.add_argument("--output-dir", default="output_agent")
     parser.add_argument("--image-url", default="", help="Optional P&ID image URL for HTML overlay")

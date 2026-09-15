@@ -47,7 +47,7 @@ uv run equipment-isolation-eval BT-11 C-02
 |------|---------|
 | Install deps | `uv sync` |
 | Run isolation (deterministic) | `uv run equipment-isolation --equipment <TAG> [--job-name <NAME>] [--job-id <ID>]` |
-| Run isolation (agentic / Gemini) | `uv run equipment-isolation-agent --equipment <TAG> [--model gemini-2.5-flash] [--max-steps 16]` |
+| Run isolation (agentic / Gemini) | `uv run equipment-isolation-agent --equipment <TAG> [--model gemini-2.5-flash] [--max-steps 20]` |
 | Run API service (development) | `uv run fastapi dev --port 8088` |
 | Run API service (production) | `uv run fastapi run --port 8088` |
 | Apply database migrations | `uv run alembic upgrade head` |

@@ -156,6 +156,13 @@ class ApiContractTests(unittest.TestCase):
         )
         self.assertEqual(request.request_schema_version, "1.0")
 
+    def test_request_defaults_to_twenty_agent_steps(self):
+        self.assertEqual(run_request().max_steps, 20)
+
+    def test_request_rejects_agent_steps_above_hard_limit(self):
+        with self.assertRaises(ValidationError):
+            run_request(max_steps=21)
+
     def test_request_models_do_not_expose_upstream_connections(self):
         for model in (IsolationRunRequest, EquipmentListRequest):
             self.assertNotIn("api_base_url", model.model_fields)

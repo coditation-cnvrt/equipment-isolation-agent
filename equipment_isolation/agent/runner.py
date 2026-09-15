@@ -6,6 +6,7 @@ from typing import Any, Callable
 
 from equipment_isolation.pipeline.stages import resolve_project_metadata
 
+from equipment_isolation.agent.limits import DEFAULT_AGENT_MAX_STEPS
 from equipment_isolation.agent.loop import DEFAULT_MODEL, run_agent
 from equipment_isolation.agent.session import AgentSession
 
@@ -24,7 +25,7 @@ def run_agent_pipeline(
     *,
     model: str = DEFAULT_MODEL,
     api_key: str = "",
-    max_steps: int = 16,
+    max_steps: int = DEFAULT_AGENT_MAX_STEPS,
     on_event: Callable | None = None,
     context_refresh: Callable | None = None,
 ) -> AgentRunResult:

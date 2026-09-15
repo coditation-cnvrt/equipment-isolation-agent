@@ -36,6 +36,10 @@ from equipment_isolation.pipeline.env import load_dotenv
 from equipment_isolation.agent.session import AgentSession
 from equipment_isolation.agent.tools import call_tool
 from equipment_isolation.agent.loop import DEFAULT_MODEL, run_agent
+from equipment_isolation.agent.limits import (
+    DEFAULT_AGENT_MAX_STEPS,
+    validated_agent_max_steps,
+)
 
 load_dotenv()
 
@@ -118,7 +122,11 @@ def main():
     parser.add_argument("equipment", nargs="*", help="Equipment tags to evaluate")
     parser.add_argument("--limit", type=int, default=0, help="If >0, take first N equipment tags from the graph")
     parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--max-steps", type=int, default=16)
+    parser.add_argument(
+        "--max-steps",
+        type=validated_agent_max_steps,
+        default=DEFAULT_AGENT_MAX_STEPS,
+    )
     args = parser.parse_args()
 
     tags = args.equipment or list_equipment_tags(args.limit)

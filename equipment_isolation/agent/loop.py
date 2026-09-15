@@ -20,6 +20,10 @@ from typing import Any, Callable
 from google import genai
 from google.genai import errors, types
 
+from equipment_isolation.agent.limits import (
+    DEFAULT_AGENT_MAX_STEPS,
+    validated_agent_max_steps,
+)
 from equipment_isolation.agent.prompts import SYSTEM_PROMPT, user_message
 from equipment_isolation.agent.session import AgentSession
 from equipment_isolation.agent.tools import TOOL_SPECS, call_tool
@@ -53,13 +57,14 @@ def run_agent(
     *,
     model: str = DEFAULT_MODEL,
     api_key: str | None = None,
-    max_steps: int = 16,
+    max_steps: int = DEFAULT_AGENT_MAX_STEPS,
     on_event: Callable | None = None,
 ) -> dict:
     """Run the orchestrator loop. Returns a result dict with transcript, step
     count, and the authoritative assurance_status. Mutates ``session`` with all
     pipeline data + trace.
     """
+    max_steps = validated_agent_max_steps(max_steps)
     client = genai.Client(api_key=api_key or os.environ.get("GEMINI_API_KEY", ""))
     declarations = function_declarations()
     equipment_tag = session.config.equipment_tag
