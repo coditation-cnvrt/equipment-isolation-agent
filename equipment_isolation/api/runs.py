@@ -111,6 +111,9 @@ class RunStore:
         from equipment_isolation.api.models import DerivedIsolationRunRequest, IsolationRunRequest
         model = DerivedIsolationRunRequest if isinstance(request, DerivedIsolationRunRequest) else IsolationRunRequest
         request = model.model_validate(_request_payload(request))
+        governed_inputs = getattr(request, "process_safety_inputs", None) or {}
+        if not governed_inputs.get("controlled_documents") or not getattr(request, "planning_document_sources", None):
+            raise ValueError("Approved FHR, SIC and PSD snapshots must be resolved before dispatch")
         run_id = uuid.uuid4().hex
         request_payload = _request_payload(request)
         if getattr(request, 'process_safety_inputs', None) is not None:
@@ -243,6 +246,7 @@ class RunStore:
                 **({"captured_hilt": record.request["_captured_hilt"]} if "_captured_hilt" in record.request else {}),
             )
             if outcome.get("ok"):
+                self._reconcile_planning_documents(record, auth_token)
                 if not self._mark(
                     record,
                     status="succeeded",
@@ -276,6 +280,47 @@ class RunStore:
                 timer.cancel()
             record.events.put(None)
             self._evict_terminal(record)
+
+    def _reconcile_planning_documents(self, record: RunRecord, auth_token: str) -> None:
+        captured = record.request.get("planning_document_sources")
+        if (
+            not isinstance(captured, dict)
+            or not self.repository
+            or not hasattr(self.repository, "observe_planning_document_set")
+        ):
+            return
+        verification: dict[str, Any]
+        try:
+            from equipment_isolation.integrations.planning_documents import (
+                UniGraphPlanningDocumentClient,
+                planning_document_summary,
+            )
+
+            current = UniGraphPlanningDocumentClient(auth_token).approved_bundle(
+                unigraph_project_id=str(record.request.get("unigraph_project_id") or ""),
+                cnvrt_project_id=str(record.request.get("cnvrt_project_id") or ""),
+            )
+            self.repository.observe_planning_document_set(planning_document_summary(current))
+            verification = {
+                "status": (
+                    "matched"
+                    if current["document_set_token"] == captured.get("document_set_token")
+                    else "changed"
+                ),
+                "captured_document_set_token": captured.get("document_set_token"),
+                "current_document_set_token": current["document_set_token"],
+                "checked_at": time.time(),
+            }
+        except Exception as error:
+            LOGGER.warning("Planning-document completion reconciliation failed for run %s: %s", record.run_id, error)
+            verification = {
+                "status": "unavailable",
+                "captured_document_set_token": captured.get("document_set_token"),
+                "checked_at": time.time(),
+            }
+        refreshed = {**record.request, "_planning_document_completion_verification": verification}
+        self.repository.update_run_request(record.run_id, refreshed)
+        record.request = refreshed
 
     def _set_progress(self, record: RunRecord, *, kind: str, tool: str) -> None:
         with self._lock:

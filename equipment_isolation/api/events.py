@@ -137,3 +137,58 @@ def source_defect_event_stream(
             yield ": heartbeat\n\n"
             last_output = time.monotonic()
         time.sleep(poll_interval)
+
+
+def planning_document_event_stream(
+    repository,
+    cnvrt_project_id: str,
+    *,
+    last_event_id: str = "",
+    poll_interval: float = 1.0,
+    heartbeat_interval: float = 15.0,
+):
+    """Stream committed plant-level FHR/SIC/PSD head changes from PostgreSQL."""
+
+    replay = repository.planning_document_event_replay_state(
+        cnvrt_project_id,
+        str(last_event_id or "").strip(),
+    )
+    cursor = str(replay.get("cursor_id") or "")
+    cursor_received_at = replay.get("cursor_received_at")
+    seen_ids = set(replay.get("seen_ids") or set())
+    yield sse_frame(
+        "ready",
+        {
+            "kind": "ready",
+            "cnvrt_project_id": cnvrt_project_id,
+            "last_event_id": cursor or None,
+        },
+    )
+    last_output = time.monotonic()
+    while True:
+        rows = repository.list_planning_document_events(
+            cnvrt_project_id,
+            after_id=cursor,
+            exclude_ids=set(seen_ids),
+        )
+        for row in rows:
+            event_id = str(row["event_id"])
+            if event_id in seen_ids:
+                continue
+            seen_ids.add(event_id)
+            received_at = row.get("received_at")
+            if cursor_received_at is None or (
+                received_at is not None and received_at >= cursor_received_at
+            ):
+                cursor = event_id
+                cursor_received_at = received_at
+            yield sse_frame(
+                "planning_document.changed",
+                row,
+                event_id=event_id,
+            )
+            last_output = time.monotonic()
+        if time.monotonic() - last_output >= heartbeat_interval:
+            yield ": heartbeat\n\n"
+            last_output = time.monotonic()
+        time.sleep(poll_interval)

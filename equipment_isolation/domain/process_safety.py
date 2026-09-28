@@ -17,7 +17,8 @@ from equipment_isolation.domain.safety_inputs import FrozenJSON, SicProfile, Str
 class ProcessSafetyInputs(FrozenJSON):
     @staticmethod
     def _validate(value):
-        obj(value, ['schema_version', 'fhr', 'sic', 'psd', 'work_scope', 'plan_time', 'unit_scope'], 'process_safety_inputs')
+        obj(value, ['schema_version', 'fhr', 'sic', 'psd', 'work_scope', 'plan_time', 'unit_scope'],
+            'process_safety_inputs', ['controlled_documents'])
         enum(value['schema_version'], {'process-safety-inputs-v1'}, 'schema_version')
         value['work_scope'] = StructuredWorkScope.from_dict(value['work_scope']).to_dict()
         value['sic'] = SicProfile.from_dict(value['sic']).to_dict()
@@ -25,6 +26,20 @@ class ProcessSafetyInputs(FrozenJSON):
         value['plan_time'] = timestamp(value['plan_time'], 'plan_time')
         value['unit_scope'] = string(value['unit_scope'], 'unit_scope')
         FluidHazardRegister.from_dict(value['fhr'])
+        controlled = value.get('controlled_documents')
+        if controlled is not None:
+            obj(controlled, ['schema_version', 'adapter_version', 'source_id', 'cnvrt_project_id',
+                'entry_unigraph_project_id', 'captured_at', 'document_set_token', 'documents'],
+                'controlled_documents')
+            enum(controlled['schema_version'], {'planning-document-set-v1'}, 'controlled_documents.schema_version')
+            if set(controlled['documents']) != {'fhr', 'sic', 'psd'}:
+                invalid('controlled_documents.documents', 'expected fhr, sic and psd')
+            for kind, document in controlled['documents'].items():
+                obj(document, ['source_id', 'cnvrt_project_id', 'document_type', 'register_id',
+                    'revision_id', 'revision_number', 'generation', 'schema_version', 'content_hash',
+                    'original_filename', 'approval'], f'controlled_documents.documents.{kind}')
+                if document['document_type'] != kind or (document.get('approval') or {}).get('decision_type') != 'approved':
+                    invalid(f'controlled_documents.documents.{kind}', 'current approved revision evidence required')
         ctx = value['psd']['context']
         if value['sic']['context'] != {k: ctx[k] for k in ('cnvrt_project_id', 'collection_id')}:
             invalid('sic.context', 'must match PSD context')
@@ -49,9 +64,17 @@ def assess_process_paths(data, inputs: ProcessSafetyInputs):
         validity_hours=sic.to_dict()['parameters']['plant_state']['validity_hours']).to_dict()
     exposure = derive_ec(scope, sic)
     # A supplied approval name/flag is not a trusted repository revision pin.
-    blockers = {'fhr_repository_approval_required', 'sic_repository_approval_required',
-                'policy_precedence_unapproved', 'live_graph_snapshot_completeness_unverified'}
-    blockers.update(sic.blockers); blockers.update(state['blockers'])
+    governed = value.get('controlled_documents') is not None
+    blockers = {'live_graph_snapshot_completeness_unverified'}
+    if not governed:
+        blockers.update({'fhr_repository_approval_required', 'sic_repository_approval_required',
+                         'policy_precedence_unapproved'})
+    sic_blockers = set(sic.blockers)
+    state_blockers = set(state['blockers'])
+    if governed:
+        sic_blockers.discard('sic_approval_not_integrated')
+        state_blockers.discard('psd_operations_authority_not_integrated')
+    blockers.update(sic_blockers); blockers.update(state_blockers)
     paths = {}
     for candidate in data.get('candidates') or []:
         occurrences = candidate.get('source_paths') or [candidate]

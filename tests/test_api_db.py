@@ -135,7 +135,7 @@ class ApiDbTests(unittest.TestCase):
         return repository, patched_inspection()
 
     def test_packaged_migration_has_one_expected_head(self):
-        self.assertEqual(migration_head_revision(), "0010_planning_previews")
+        self.assertEqual(migration_head_revision(), "0011_unigraph_planning_documents")
 
     def test_migration_config_and_template_are_package_resources(self):
         migration_package = files("equipment_isolation.api.migrations")
@@ -154,6 +154,7 @@ class ApiDbTests(unittest.TestCase):
         self.assertTrue(migration_package.joinpath("versions", "0007_asset_condition_derivation_triggers.py").is_file())
         self.assertTrue(migration_package.joinpath("versions", "0008_source_data_defects.py").is_file())
         self.assertTrue(migration_package.joinpath("versions", "0009_controlled_inputs_controlled_inputs.py").is_file())
+        self.assertTrue(migration_package.joinpath("versions", "0011_unigraph_planning_documents.py").is_file())
         self.assertEqual(
             _migration_config().get_main_option("script_location"),
             str(migration_package),
@@ -162,7 +163,7 @@ class ApiDbTests(unittest.TestCase):
     def test_orm_metadata_owns_all_application_tables(self):
         self.assertEqual(
             set(Base.metadata.tables),
-            {"isolation_runs", "isolation_run_events", "isolation_plan", "plan_version", "external_run_link", "asset_reference", "asset_condition", "asset_condition_event", "plan_version_asset_condition", "source_data_defect", "source_data_defect_event", "plan_source_dependency", "source_defect_plan_impact", "derivation_manifest_source_data_defect", "work_scope", "work_scope_asset", "input_snapshot", "isolation_branch", "isolation_point", "path_point", "plan_step", "finding", "plan_feedback", "feedback_review_decision", "derivation_manifest", "derivation_manifest_feedback", "plan_version_feedback", "feedback_application_result", "audit_event", "controlled_input", "controlled_input_revision", "run_input_manifest", "run_input_manifest_item", "plan_version_invalidation", "planning_preview"},
+            {"isolation_runs", "isolation_run_events", "isolation_plan", "plan_version", "external_run_link", "asset_reference", "asset_condition", "asset_condition_event", "plan_version_asset_condition", "source_data_defect", "source_data_defect_event", "plan_source_dependency", "source_defect_plan_impact", "derivation_manifest_source_data_defect", "work_scope", "work_scope_asset", "input_snapshot", "isolation_branch", "isolation_point", "path_point", "plan_step", "finding", "plan_feedback", "feedback_review_decision", "derivation_manifest", "derivation_manifest_feedback", "plan_version_feedback", "feedback_application_result", "audit_event", "controlled_input", "controlled_input_revision", "run_input_manifest", "run_input_manifest_item", "plan_version_invalidation", "planning_preview", "planning_document_head", "plan_version_planning_document", "planning_document_event_receipt"},
         )
         self.assertIn("isolation_plan_number_seq", Base.metadata._sequences)
         trigger_constraints = {
@@ -246,7 +247,7 @@ class ApiDbTests(unittest.TestCase):
             "plan_version",
             "external_run_link",
         )
-        repository, connection_patch = self._ready_repository(tables, ("0010_planning_previews",))
+        repository, connection_patch = self._ready_repository(tables, ("0011_unigraph_planning_documents",))
         with connection_patch:
             repository.check_ready()
 
@@ -260,7 +261,7 @@ class ApiDbTests(unittest.TestCase):
             "external_run_link",
         )
         repository, connection_patch = self._ready_repository(tables, ("old_revision",))
-        with connection_patch, self.assertRaisesRegex(RuntimeError, "expected 0010_planning_previews"):
+        with connection_patch, self.assertRaisesRegex(RuntimeError, "expected 0011_unigraph_planning_documents"):
             repository.check_ready()
 
     def test_asset_scope_separates_reused_external_ids(self):

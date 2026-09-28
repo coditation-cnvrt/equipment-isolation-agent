@@ -9,7 +9,15 @@ from pydantic import ValidationError
 
 from equipment_isolation.api.models import CreateChangeRequest, DerivePlanRequest
 from equipment_isolation.api.plans import PlanDomainError
-from equipment_isolation.api.routes import approve_plan_change, create_plan_change, derive_plan, list_plan_changes
+from equipment_isolation.api.routes import (
+    approve_plan_change,
+    create_plan_change,
+    derive_plan,
+    list_plan_changes,
+    plan_version_input_diff,
+)
+from equipment_isolation.integrations.planning_documents import PlanningDocumentError
+from tests.planning_document_fixtures import approved_manifest
 
 
 PLAN_ID = UUID("5fbaf888-bf86-4b23-b428-a609156c2f14")
@@ -64,6 +72,29 @@ class Repository:
     def fail_derivation_launch(self, manifest_id, actor_id, error):
         self.failed_manifest = (manifest_id, actor_id, error)
 
+    def observe_planning_document_set(self, manifest):
+        self.calls.append(("observe_planning_document_set", manifest["document_set_token"]))
+
+    def get_plan_planning_document_snapshot(self, plan_id, version_id):
+        if plan_id != str(PLAN_ID) or version_id != VERSION_ID:
+            return None
+        manifest = approved_manifest()
+        return {
+            "context": self.get_plan_authorization_context(plan_id, version_id),
+            "documents": [
+                {
+                    key: value
+                    for key, value in document.items()
+                    if key in {
+                        "source_id", "cnvrt_project_id", "entry_unigraph_project_id",
+                        "document_type", "register_id", "revision_id", "revision_number",
+                        "generation", "schema_version", "content_hash",
+                    }
+                } | {"source_snapshot": document["normalized_content"]}
+                for document in manifest["documents"].values()
+            ],
+        }
+
 
 class Store:
     def __init__(self):
@@ -85,6 +116,12 @@ class PlanCorrectionRouteTests(unittest.TestCase):
         patcher = mock.patch("equipment_isolation.api.routes.authorize_planning_context")
         self.authorize = patcher.start()
         self.addCleanup(patcher.stop)
+        planning = mock.patch(
+            "equipment_isolation.api.routes._resolve_planning_inputs",
+            side_effect=lambda request_body, _token: (request_body.process_safety_inputs, approved_manifest()),
+        )
+        planning.start()
+        self.addCleanup(planning.stop)
 
     def request(self, user_id="7"):
         store = Store()
@@ -193,10 +230,8 @@ class PlanCorrectionRouteTests(unittest.TestCase):
             ),
             authorization="Bearer token",
         )
-        self.assertEqual(
-            request.app.state.run_store.repository.calls[-1][-1],
-            "asset_conditions",
-        )
+        prepare = next(call for call in request.app.state.run_store.repository.calls if call[0] == "prepare_derivation")
+        self.assertEqual(prepare[-1], "asset_conditions")
 
     def test_source_defect_derivation_trigger_is_forwarded(self):
         request = self.request("8")
@@ -206,7 +241,8 @@ class PlanCorrectionRouteTests(unittest.TestCase):
             DerivePlanRequest(parent_plan_version_id=VERSION_ID, trigger="source_data_defects"),
             authorization="Bearer token",
         )
-        self.assertEqual(request.app.state.run_store.repository.calls[-1][-1], "source_data_defects")
+        prepare = next(call for call in request.app.state.run_store.repository.calls if call[0] == "prepare_derivation")
+        self.assertEqual(prepare[-1], "source_data_defects")
 
     def test_derivation_launch_failure_releases_manifest(self):
         request = self.request("8")
@@ -217,6 +253,31 @@ class PlanCorrectionRouteTests(unittest.TestCase):
         failed = request.app.state.run_store.repository.failed_manifest
         self.assertEqual(failed[0], "f2ddaa35-795e-4dc8-a72d-1a330a14255f")
         self.assertEqual(failed[1], "8")
+
+    def test_planning_input_diff_compares_captured_and_current_documents(self):
+        request = self.request("8")
+        manifest = approved_manifest()
+        with mock.patch("equipment_isolation.api.routes.UniGraphPlanningDocumentClient") as client:
+            client.return_value.approved_bundle.return_value = manifest
+            result = plan_version_input_diff(
+                request, PLAN_ID, UUID(VERSION_ID), authorization="Bearer token"
+            )
+        self.assertEqual(result["verification_status"], "verified")
+        self.assertEqual({item["status"] for item in result["documents"]}, {"current"})
+        self.assertEqual(result["current_document_set_token"], manifest["document_set_token"])
+
+    def test_planning_input_diff_preserves_history_when_current_verification_fails(self):
+        request = self.request("8")
+        with mock.patch("equipment_isolation.api.routes.UniGraphPlanningDocumentClient") as client:
+            client.return_value.approved_bundle.side_effect = PlanningDocumentError(
+                "planning_documents_missing", "Approved documents are missing", 409
+            )
+            result = plan_version_input_diff(
+                request, PLAN_ID, UUID(VERSION_ID), authorization="Bearer token"
+            )
+        self.assertEqual(result["verification_status"], "unavailable")
+        self.assertEqual(result["error"]["kind"], "planning_documents_missing")
+        self.assertEqual({item["status"] for item in result["documents"]}, {"unavailable"})
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timezone
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -28,6 +29,7 @@ from equipment_isolation.api.models import (
     IsolationRunRequest,
     PlanVersionContent,
     PlanVersionDiff,
+    PlanningInputDiff,
     PlanningCollectionList,
     PlanningDrawingList,
     PlanningProjectList,
@@ -45,7 +47,11 @@ from equipment_isolation.api.models import (
     SourceDefectPolicyDetail,
 )
 from equipment_isolation.api.plans import PlanDomainError
-from equipment_isolation.api.events import asset_condition_event_stream, source_defect_event_stream
+from equipment_isolation.api.events import (
+    asset_condition_event_stream,
+    planning_document_event_stream,
+    source_defect_event_stream,
+)
 from equipment_isolation.api.runs import RunStore, event_stream
 from equipment_isolation.api.service import (
     authorize_planning_context,
@@ -61,6 +67,14 @@ from equipment_isolation.api.service import (
 )
 from equipment_isolation.api.db import postgres_configured
 from equipment_isolation.domain.source_defects import policy_catalogue
+from equipment_isolation.integrations.planning_documents import (
+    DOCUMENT_TYPES,
+    PlanningDocumentError,
+    UniGraphPlanningDocumentClient,
+    adapt_process_safety_inputs,
+    planning_document_summary,
+    planning_input_diff,
+)
 
 router = APIRouter()
 LOGGER = logging.getLogger(__name__)
@@ -85,6 +99,59 @@ def _plan_repository(request: Request):
 
 def _raise_plan_error(error: PlanDomainError) -> None:
     raise HTTPException(status_code=error.status_code, detail=error.detail()) from None
+
+
+def _raise_planning_document_error(error: PlanningDocumentError) -> None:
+    raise HTTPException(
+        status_code=error.status_code,
+        detail={"kind": error.code, "message": str(error), **error.details},
+    ) from None
+
+
+def _structured_work_scope(request_body: IsolationRunRequest) -> dict:
+    if request_body.process_safety_inputs:
+        return request_body.process_safety_inputs["work_scope"]
+    scope = request_body.work_scope
+    return {
+        "schema_version": "work-scope-v1",
+        "activity_type": "Equipment isolation",
+        "expected_duration_days": 1,
+        "shift_coverage": "single_shift",
+        "containment_break": scope.intrusive_work,
+        "continuously_attended": True,
+        "personnel_enter_boundary": scope.confined_space_entry,
+        "hot_work_on_or_within_boundary": scope.hot_work,
+        "equipment_leaves_site": False,
+    }
+
+
+def _resolve_planning_inputs(request_body: IsolationRunRequest, token: str) -> tuple[dict, dict]:
+    manifest = UniGraphPlanningDocumentClient(token).approved_bundle(
+        unigraph_project_id=request_body.unigraph_project_id,
+        cnvrt_project_id=request_body.cnvrt_project_id,
+    )
+    expected = str(request_body.expected_planning_document_set or "").strip()
+    if expected and expected != manifest["document_set_token"]:
+        raise PlanningDocumentError(
+            "planning_documents_changed",
+            "Approved planning documents changed; review them before starting the run",
+            409,
+            {"current_document_set_token": manifest["document_set_token"]},
+        )
+    context = {
+        "cnvrt_project_id": request_body.cnvrt_project_id,
+        "collection_id": request_body.collection_id,
+        "unigraph_project_id": request_body.unigraph_project_id,
+        "job_id": request_body.job_id,
+    }
+    inputs = adapt_process_safety_inputs(
+        manifest,
+        context=context,
+        work_scope=_structured_work_scope(request_body),
+        plan_time=None,
+        unit_scope=(request_body.process_safety_inputs or {}).get("unit_scope", ""),
+    )
+    return inputs, manifest
 
 
 def _run_record(request: Request, run_id: str):
@@ -799,7 +866,20 @@ def create_run(
             },
         )
     try:
-        record = _store(request).create(request_body, token)
+        safety_inputs, document_manifest = _resolve_planning_inputs(request_body, token)
+        governed_request = request_body.model_copy(update={
+            "process_safety_inputs": safety_inputs,
+            "expected_planning_document_set": document_manifest["document_set_token"],
+            "planning_document_sources": document_manifest,
+        })
+        repository = getattr(_store(request), "repository", None)
+        if repository and hasattr(repository, "observe_planning_document_set"):
+            repository.observe_planning_document_set(planning_document_summary(document_manifest))
+        record = _store(request).create(governed_request, token)
+    except PlanningDocumentError as error:
+        _raise_planning_document_error(error)
+    except PlanDomainError as error:
+        _raise_plan_error(error)
     except Exception:
         LOGGER.exception("Run creation persistence failed")
         raise HTTPException(
@@ -814,6 +894,77 @@ def create_run(
         status=record.status,
         status_url=f"/isolation-runs/{record.run_id}",
         events_url=f"/isolation-runs/{record.run_id}/events",
+    )
+
+
+@router.get("/planning-context/planning-documents")
+def planning_context_documents(
+    request: Request,
+    cnvrt_project_id: str,
+    collection_id: str,
+    unigraph_project_id: str,
+    job_id: str,
+    authorization: str = Header(default=""),
+):
+    token = _plant360_token(authorization)
+    if not token:
+        raise HTTPException(status_code=401, detail={"kind": "missing_auth_token", "message": "Bearer token required."})
+    try:
+        manifest = UniGraphPlanningDocumentClient(token).approved_bundle(
+            unigraph_project_id=unigraph_project_id,
+            cnvrt_project_id=cnvrt_project_id,
+        )
+        inputs = adapt_process_safety_inputs(
+            manifest,
+            context={"cnvrt_project_id": cnvrt_project_id, "collection_id": collection_id,
+                     "unigraph_project_id": unigraph_project_id, "job_id": job_id},
+            work_scope={
+                "schema_version": "work-scope-v1", "activity_type": "Equipment inspection",
+                "expected_duration_days": 1, "shift_coverage": "single_shift",
+                "containment_break": True, "continuously_attended": True,
+                "personnel_enter_boundary": False, "hot_work_on_or_within_boundary": False,
+                "equipment_leaves_site": False,
+            },
+        )
+        summary = planning_document_summary(manifest)
+        repository = getattr(_store(request), "repository", None)
+        if repository and hasattr(repository, "observe_planning_document_set"):
+            repository.observe_planning_document_set(summary)
+        return {"documents": summary, "process_safety_inputs": inputs}
+    except PlanningDocumentError as error:
+        _raise_planning_document_error(error)
+    except PlanDomainError as error:
+        _raise_plan_error(error)
+
+
+@router.get("/planning-context/planning-documents/events")
+def planning_context_document_events(
+    request: Request,
+    cnvrt_project_id: str,
+    collection_id: str,
+    unigraph_project_id: str,
+    job_id: str,
+    authorization: str = Header(default=""),
+    last_event_id: str = Header(default="", alias="Last-Event-ID"),
+):
+    context = {
+        "cnvrt_project_id": cnvrt_project_id,
+        "collection_id": collection_id,
+        "unigraph_project_id": unigraph_project_id,
+        "job_id": job_id,
+    }
+    _authorize_asset_scope(context, authorization)
+    return StreamingResponse(
+        planning_document_event_stream(
+            _plan_repository(request),
+            cnvrt_project_id,
+            last_event_id=last_event_id,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
@@ -1016,8 +1167,25 @@ def derive_plan(request: Request, plan_id: UUID, request_body: DerivePlanRequest
         )
         if not prepared['request'].get('process_safety_inputs'):
             raise PlanDomainError('process_safety_inputs_required', 'Start a new run from Workspace with FHR, SIC and PSD.', 409)
-        derived_request = DerivedIsolationRunRequest.model_validate(prepared["request"])
+        derived_request = DerivedIsolationRunRequest.model_validate({
+            **prepared["request"],
+            "expected_planning_document_set": "",
+        })
+        safety_inputs, document_manifest = _resolve_planning_inputs(derived_request, token)
+        derived_request = derived_request.model_copy(update={
+            "process_safety_inputs": safety_inputs,
+            "expected_planning_document_set": document_manifest["document_set_token"],
+            "planning_document_sources": document_manifest,
+        })
+        repository.observe_planning_document_set(planning_document_summary(document_manifest))
         record = _store(request).create(derived_request, token, parent_run_id=prepared["parent_run_id"])
+    except PlanningDocumentError as error:
+        if prepared is not None:
+            repository.fail_derivation_launch(
+                prepared["manifest_id"], actor_id,
+                {"kind": error.code, "message": str(error)},
+            )
+        _raise_planning_document_error(error)
     except PlanDomainError as error:
         if prepared is not None:
             repository.fail_derivation_launch(prepared["manifest_id"], actor_id, {"kind": error.kind, "message": error.message})
@@ -1054,6 +1222,81 @@ def plan_version_diff(request: Request, plan_id: UUID, version_id: UUID, authori
     if item is None:
         raise HTTPException(status_code=404, detail={"kind": "unknown_plan_version", "message": "Unknown plan version."})
     return item
+
+
+@router.get(
+    "/isolation-plans/{plan_id}/versions/{version_id}/input-diff",
+    response_model=PlanningInputDiff,
+)
+def plan_version_input_diff(
+    request: Request,
+    plan_id: UUID,
+    version_id: UUID,
+    authorization: str = Header(default=""),
+):
+    token = _require_run_read_auth(authorization)
+    repository = _plan_repository(request)
+    _authorize_persisted_plan(repository, plan_id, authorization, version_id=version_id)
+    try:
+        snapshot = repository.get_plan_planning_document_snapshot(str(plan_id), str(version_id))
+    except PlanDomainError as error:
+        _raise_plan_error(error)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail={"kind": "unknown_plan_version", "message": "Unknown plan version."})
+    evaluated_at = datetime.now(timezone.utc)
+    captured = snapshot["documents"]
+    if len(captured) != len(DOCUMENT_TYPES):
+        return {
+            "plan_id": str(plan_id),
+            "plan_version_id": str(version_id),
+            "verification_status": "historical_unknown",
+            "evaluated_at": evaluated_at,
+            "documents": [],
+            "error": {"kind": "planning_document_pins_missing", "message": "This historical version has no complete governed planning-document snapshot."},
+        }
+    context = snapshot["context"]
+    try:
+        manifest = UniGraphPlanningDocumentClient(token).approved_bundle(
+            unigraph_project_id=context["unigraph_project_id"],
+            cnvrt_project_id=context["cnvrt_project_id"],
+        )
+        captured_sources = {str(item["source_id"]).rstrip("/") for item in captured}
+        if captured_sources != {str(manifest["source_id"]).rstrip("/")}:
+            raise PlanningDocumentError(
+                "planning_document_source_changed",
+                "The configured UniGraph source differs from the source pinned by this plan version",
+                409,
+            )
+        repository.observe_planning_document_set(planning_document_summary(manifest))
+    except (PlanningDocumentError, PlanDomainError) as error:
+        error_kind = error.code if isinstance(error, PlanningDocumentError) else error.kind
+        error_message = str(error) if isinstance(error, PlanningDocumentError) else error.message
+        return {
+            "plan_id": str(plan_id),
+            "plan_version_id": str(version_id),
+            "verification_status": "unavailable",
+            "evaluated_at": evaluated_at,
+            "documents": [
+                {
+                    "document_type": item["document_type"],
+                    "status": "unavailable",
+                    "captured_reference": {key: item[key] for key in (
+                        "source_id", "cnvrt_project_id", "document_type", "register_id",
+                        "revision_id", "revision_number", "generation", "schema_version", "content_hash",
+                    )},
+                }
+                for item in captured
+            ],
+            "error": {"kind": error_kind, "message": error_message},
+        }
+    return {
+        "plan_id": str(plan_id),
+        "plan_version_id": str(version_id),
+        "verification_status": "verified",
+        "evaluated_at": evaluated_at,
+        "current_document_set_token": manifest["document_set_token"],
+        "documents": planning_input_diff(captured, manifest),
+    }
 
 
 @router.get("/isolation-runs/{run_id}", response_model=RunStatus)
@@ -1110,11 +1353,3 @@ def run_events(request: Request, run_id: str, authorization: str = Header(defaul
             "X-Accel-Buffering": "no",
         },
     )
-
-
-@router.get('/planning-context/process-safety-example')
-def process_safety_example(request: Request):
-    """Explicit unapproved example documents; no drawing or approval access granted."""
-    _actor_id(request)
-    from equipment_isolation.fixtures.safety_examples import example_process_inputs
-    return example_process_inputs()

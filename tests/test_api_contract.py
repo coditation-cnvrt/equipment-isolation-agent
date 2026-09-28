@@ -2,6 +2,7 @@ from tests.run_request_fixtures import run_request, captured_hilt
 import os
 import time
 import unittest
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest import mock
 
@@ -9,7 +10,13 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from equipment_isolation.api.app import _validate_server_side_environment
-from equipment_isolation.api.models import EquipmentListRequest, IsolationRunRequest, RunStatus, SelectedAssetRequest
+from equipment_isolation.api.models import (
+    EquipmentListRequest,
+    IsolationRunRequest,
+    PlanningInputDiff,
+    RunStatus,
+    SelectedAssetRequest,
+)
 from equipment_isolation.api.routes import (
     create_run,
     equipment,
@@ -34,6 +41,8 @@ from equipment_isolation.api.service import (
     list_unigraph_projects,
 )
 from equipment_isolation.api.runs import RunRecord, RunStore, _error_detail
+from equipment_isolation.integrations.planning_documents import adapt_process_safety_inputs
+from tests.planning_document_fixtures import approved_manifest
 
 
 def _payload(tag="P3"):
@@ -66,9 +75,41 @@ class _Result:
 
 
 class ApiContractTests(unittest.TestCase):
+    def test_planning_input_diff_does_not_require_plan_version_summary(self):
+        response = PlanningInputDiff.model_validate({
+            "plan_id": "plan-1",
+            "plan_version_id": "version-1",
+            "verification_status": "historical_unknown",
+            "evaluated_at": datetime.now(timezone.utc),
+            "documents": [],
+        })
+
+        self.assertEqual(response.plan_version_id, "version-1")
+
     def setUp(self):
         capture = mock.patch('equipment_isolation.api.service.capture_run_hilt', side_effect=captured_hilt)
         capture.start(); self.addCleanup(capture.stop)
+        def resolve_documents(request_body, _token):
+            manifest = approved_manifest()
+            manifest["entry_unigraph_project_id"] = request_body.unigraph_project_id
+            for document in manifest["documents"].values():
+                document["entry_unigraph_project_id"] = request_body.unigraph_project_id
+            inputs = adapt_process_safety_inputs(
+                manifest,
+                context={
+                    "cnvrt_project_id": request_body.cnvrt_project_id,
+                    "collection_id": request_body.collection_id,
+                    "unigraph_project_id": request_body.unigraph_project_id,
+                    "job_id": request_body.job_id,
+                },
+                work_scope=request_body.process_safety_inputs["work_scope"],
+                plan_time="2026-09-17T08:00:00+00:00",
+            )
+            return inputs, manifest
+        planning = mock.patch('equipment_isolation.api.routes._resolve_planning_inputs', side_effect=resolve_documents)
+        planning.start(); self.addCleanup(planning.stop)
+        completion = mock.patch.object(RunStore, '_reconcile_planning_documents')
+        completion.start(); self.addCleanup(completion.stop)
         self.old_env = dict(os.environ)
         os.environ["EIA_MAX_CONCURRENT_RUNS"] = "1"
         os.environ["GEMINI_API_KEY"] = "gemini-key"

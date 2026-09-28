@@ -1,18 +1,26 @@
 """Document-backed request fixtures for API lifecycle tests."""
 from equipment_isolation.api.models import IsolationRunRequest
-from equipment_isolation.fixtures.safety_examples import example_process_inputs
 from equipment_isolation.domain.hilt_run_capture import HiltRunCapture
+from equipment_isolation.integrations.planning_documents import adapt_process_safety_inputs
+from tests.planning_document_fixtures import approved_manifest, WORK_SCOPE
 
 
 def run_request(model=IsolationRunRequest, **overrides):
     body = dict(equipment_tag='P3', job_id='2151', cnvrt_project_id='277', collection_id='206', unigraph_project_id='15')
     body.update(overrides)
-    inputs = example_process_inputs()
-    inputs['psd']['context'] = {key: str(body[key]) for key in ('cnvrt_project_id', 'collection_id', 'unigraph_project_id', 'job_id')}
-    inputs['sic']['context'] = {key: str(body[key]) for key in ('cnvrt_project_id', 'collection_id')}
-    for source, target in [('cnvrt_project_id','cnvrt_project_id'),('collection_id','collection_id'),('job_id','pnid_job_id')]:
-        inputs['fhr']['document'][target] = body[source]
+    manifest = approved_manifest()
+    manifest['entry_unigraph_project_id'] = str(body['unigraph_project_id'])
+    for document in manifest['documents'].values():
+        document['entry_unigraph_project_id'] = str(body['unigraph_project_id'])
+    inputs = adapt_process_safety_inputs(
+        manifest,
+        context={key: str(body[key]) for key in ('cnvrt_project_id', 'collection_id', 'unigraph_project_id', 'job_id')},
+        work_scope=WORK_SCOPE,
+        plan_time='2026-09-17T08:00:00+00:00',
+    )
     body.setdefault('process_safety_inputs', inputs)
+    body.setdefault('planning_document_sources', manifest)
+    body.setdefault('expected_planning_document_set', manifest['document_set_token'])
     body.setdefault('selected_asset', dict(hilt_entity_id='test-equipment', tag=body['equipment_tag'], selection_source='hilt_equipment_list'))
     return model(**body)
 

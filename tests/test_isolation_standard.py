@@ -48,7 +48,7 @@ class FluidHazardRegisterTests(unittest.TestCase):
         self.assertEqual(resolution.conservative_hsc, HazardSeverityClass.EXTREME)
         self.assertTrue(resolution.blocks_authorisation)
 
-    def test_multiple_scoped_meanings_fail_closed_until_precedence_is_approved(self):
+    def test_exact_unit_scope_precedes_other_scoped_meanings(self):
         payload = _approved_fhr()
         payload["fluids"].append(
             {
@@ -64,6 +64,26 @@ class FluidHazardRegisterTests(unittest.TestCase):
         register = FluidHazardRegister.from_dict(payload)
 
         resolution = register.resolve_fluid("W", unit_scope="Utilities")
+
+        self.assertEqual(resolution.status, FluidResolutionStatus.RESOLVED)
+        self.assertEqual(resolution.fluid.fluid_code, "COOLING_WATER")
+
+    def test_multiple_scoped_meanings_without_exact_scope_fail_closed(self):
+        payload = _approved_fhr()
+        payload["fluids"].append(
+            {
+                **payload["fluids"][0],
+                "fluid_code": "PROCESS_WATER",
+                "service_description": "Process water",
+            }
+        )
+        payload["service_code_map"] = [
+            {"pid_service_code": "W", "fluid_code": "COOLING_WATER", "unit_scope": "Utilities"},
+            {"pid_service_code": "W", "fluid_code": "PROCESS_WATER", "unit_scope": "Process"},
+        ]
+        register = FluidHazardRegister.from_dict(payload)
+
+        resolution = register.resolve_fluid("W")
 
         self.assertEqual(resolution.status, FluidResolutionStatus.BLOCKED)
         self.assertEqual(resolution.gap_code, "fhr_mapping_scope_ambiguous")

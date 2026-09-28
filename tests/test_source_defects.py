@@ -430,6 +430,69 @@ class SourceDefectTests(unittest.TestCase):
         self.assertEqual(freshness["status"], "unknown")
         self.assertEqual(freshness["governance_readiness"], "warning")
 
+    def test_failed_completion_verification_makes_current_documents_unknown(self):
+        now = datetime(2026, 9, 18, tzinfo=timezone.utc)
+        version_id = UUID("4bb4be1a-2fef-4a32-ad98-138873199ba7")
+        dependency = SimpleNamespace(
+            plan_version_id=version_id, manifest_status="complete",
+            exact_anchor_ids=[], source_defect_ids=[], source_defect_event_ids=[],
+            source_defect_snapshots=[], source_defect_event_watermark_at=now,
+            verified_source_revision=None, verified_source_snapshot_hash=None,
+            provenance={},
+        )
+        documents = [
+            SimpleNamespace(
+                plan_version_id=version_id,
+                source_id="http://unigraph.example/plantgraph",
+                cnvrt_project_id="277",
+                document_type=document_type,
+                generation=1,
+                revision_id=index,
+                content_hash=f"sha256:{document_type * 32}",
+            )
+            for index, document_type in enumerate(("fhr", "sic", "psd"), start=1)
+        ]
+        heads = [
+            SimpleNamespace(
+                source_id=document.source_id,
+                cnvrt_project_id=document.cnvrt_project_id,
+                document_type=document.document_type,
+                generation=document.generation,
+                revision_id=document.revision_id,
+                content_hash=document.content_hash,
+                event_id=None,
+                observed_at=now,
+            )
+            for document in documents
+        ]
+
+        def rows(values):
+            result = mock.MagicMock()
+            result.all.return_value = values
+            return result
+
+        session = mock.MagicMock()
+        session.execute.side_effect = [rows([]), rows([]), rows([])]
+        session.scalars.side_effect = [
+            rows([dependency]), rows(documents), rows(heads), rows([]),
+        ]
+        freshness = _plans_freshness(session, [(version_id, {
+            "cnvrt_project_id": "277", "collection_id": "206",
+            "unigraph_project_id": "15", "job_id": "2151",
+            "_planning_document_completion_verification": {"status": "unavailable"},
+        })])[version_id]
+
+        self.assertEqual(freshness["status"], "unknown")
+        self.assertEqual(freshness["governance_readiness"], "warning")
+        self.assertEqual(
+            freshness["reason"], "planning_document_verification_unavailable"
+        )
+        self.assertFalse(freshness["planning_documents_changed"])
+        self.assertEqual(
+            [item["status"] for item in freshness["planning_documents"]],
+            ["current", "current", "current"],
+        )
+
     def test_current_material_defect_missing_from_capture_is_stale_without_impact_row(self):
         now = datetime(2026, 9, 7, tzinfo=timezone.utc)
         version_id = UUID("4bb4be1a-2fef-4a32-ad98-138873199ba7")
@@ -464,7 +527,7 @@ class SourceDefectTests(unittest.TestCase):
 
         session = mock.MagicMock()
         session.execute.side_effect = [rows([]), rows([]), rows([])]
-        session.scalars.side_effect = [rows([dependency]), rows([defect]), rows([event])]
+        session.scalars.side_effect = [rows([dependency]), rows([]), rows([defect]), rows([event])]
         freshness = _plans_freshness(session, [(version_id, {
             "cnvrt_project_id": "277", "collection_id": "206",
             "unigraph_project_id": "15", "job_id": "2151",

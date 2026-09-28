@@ -247,15 +247,22 @@ class FluidHazardRegister:
             return _unresolved_fluid(code, "fhr_mapping_missing", FluidResolutionStatus.UNKNOWN)
 
         scope = _scope_key(unit_scope)
-        if len(matches) > 1:
-            # Global/specific precedence is not defined by the requirements.
+        exact = [mapping for mapping in matches if _scope_key(mapping.unit_scope) == scope and scope]
+        global_rows = [mapping for mapping in matches if not _scope_key(mapping.unit_scope)]
+        if len(exact) == 1:
+            mapping = exact[0]
+        elif len(exact) > 1 or len(global_rows) > 1:
             return _unresolved_fluid(code, "fhr_mapping_scope_ambiguous", FluidResolutionStatus.BLOCKED)
-
-        mapping = matches[0]
-        mapping_scope = _scope_key(mapping.unit_scope)
-        if mapping_scope and not scope:
-            return _unresolved_fluid(code, "fhr_unit_scope_required", FluidResolutionStatus.BLOCKED)
-        if mapping_scope and mapping_scope != scope:
+        elif len(global_rows) == 1:
+            mapping = global_rows[0]
+        elif len(matches) == 1:
+            # The plant has one unambiguous meaning for this service code. Its
+            # descriptive unit annotation remains provenance, not a requirement
+            # for callers to reproduce free text exactly.
+            mapping = matches[0]
+        elif len({mapping.fluid_code for mapping in matches}) > 1:
+            return _unresolved_fluid(code, "fhr_mapping_scope_ambiguous", FluidResolutionStatus.BLOCKED)
+        else:
             return _unresolved_fluid(code, "fhr_mapping_missing_for_unit", FluidResolutionStatus.UNKNOWN)
 
         fluid = next(item for item in self.fluids if item.fluid_code == mapping.fluid_code)

@@ -7,16 +7,18 @@ from equipment_isolation.api.models import IsolationRunRequest
 from equipment_isolation.api.service import config_from_run_request, capture_run_hilt
 from equipment_isolation.core.validator import validate
 from equipment_isolation.domain.process_safety import ProcessSafetyInputs
-from equipment_isolation.fixtures.safety_examples import example_process_inputs
 from equipment_isolation.integrations.hilt_topology import _hilt_index, _nearest_branch_devices
 from equipment_isolation.presentation.payload import build_final_payload
 from equipment_isolation.api.plans import normalized_plan_content
+from tests.planning_document_fixtures import approved_manifest, governed_inputs
 
 
 def request():
+    manifest = approved_manifest()
     return IsolationRunRequest(equipment_tag='P3', job_id='2151', cnvrt_project_id='277', collection_id='206', unigraph_project_id='21',
         selected_asset={'hilt_entity_id':'E', 'tag':'P3', 'entity_class':'vessel', 'selection_source':'hilt_equipment_list'},
-        process_safety_inputs=example_process_inputs())
+        process_safety_inputs=governed_inputs(manifest), planning_document_sources=manifest,
+        expected_planning_document_set=manifest['document_set_token'])
 
 
 def graph():
@@ -29,15 +31,17 @@ def graph():
 
 
 class ProcessSafetyIntegrationTests(unittest.TestCase):
-    def test_new_run_requires_documents_and_structural_identity(self):
-        for key in ('process_safety_inputs', 'selected_asset'):
-            for missing in (True, False):
-                with self.subTest(key=key, omitted=missing):
-                    body = request().model_dump()
-                    if missing: body.pop(key)
-                    else: body[key] = None
-                    with self.assertRaises(ValueError):
-                        IsolationRunRequest.model_validate(body)
+    def test_public_request_allows_server_resolved_documents_but_requires_structural_identity(self):
+        body = request().model_dump()
+        body.pop('process_safety_inputs')
+        self.assertIsNone(IsolationRunRequest.model_validate(body).process_safety_inputs)
+        for missing in (True, False):
+            with self.subTest(omitted=missing):
+                body = request().model_dump()
+                if missing: body.pop('selected_asset')
+                else: body['selected_asset'] = None
+                with self.assertRaises(ValueError):
+                    IsolationRunRequest.model_validate(body)
 
     def test_dispatch_rejects_legacy_payload_before_capture_or_persistence(self):
         from equipment_isolation.api.runs import RunStore

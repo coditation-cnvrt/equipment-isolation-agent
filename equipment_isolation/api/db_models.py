@@ -382,6 +382,69 @@ class PlanSourceDependency(Base):
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+class PlanningDocumentHead(Base):
+    __tablename__ = "planning_document_head"
+    __table_args__ = (
+        CheckConstraint("document_type IN ('fhr','sic','psd')", name="planning_document_head_type_check"),
+        CheckConstraint("generation >= 0", name="planning_document_head_generation_check"),
+    )
+    source_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    cnvrt_project_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    document_type: Mapped[str] = mapped_column(Text, primary_key=True)
+    register_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    revision_id: Mapped[int | None] = mapped_column(BigInteger)
+    generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    content_hash: Mapped[str | None] = mapped_column(Text)
+    event_id: Mapped[str | None] = mapped_column(Text)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PlanVersionPlanningDocument(Base):
+    __tablename__ = "plan_version_planning_document"
+    __table_args__ = (
+        CheckConstraint("document_type IN ('fhr','sic','psd')", name="plan_version_planning_document_type_check"),
+        CheckConstraint("generation >= 0", name="plan_version_planning_document_generation_check"),
+        Index(
+            "plan_version_planning_document_head_idx",
+            "source_id", "cnvrt_project_id", "document_type", "generation",
+        ),
+    )
+    plan_version_id: Mapped[UUID] = mapped_column(
+        ForeignKey("plan_version.plan_version_id", ondelete="CASCADE"), primary_key=True
+    )
+    document_type: Mapped[str] = mapped_column(Text, primary_key=True)
+    source_id: Mapped[str] = mapped_column(Text, nullable=False)
+    cnvrt_project_id: Mapped[str] = mapped_column(Text, nullable=False)
+    entry_unigraph_project_id: Mapped[str] = mapped_column(Text, nullable=False)
+    register_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    revision_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    revision_number: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    schema_version: Mapped[str] = mapped_column(Text, nullable=False)
+    content_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    adapted_content_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    approval_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    source_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PlanningDocumentEventReceipt(Base):
+    __tablename__ = "planning_document_event_receipt"
+    __table_args__ = (
+        CheckConstraint("status IN ('processed','ignored','quarantined')", name="planning_document_event_receipt_status_check"),
+        Index("planning_document_event_receipt_change_idx", "change_id"),
+    )
+    source_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    event_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    change_id: Mapped[str | None] = mapped_column(Text)
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    error: Mapped[str | None] = mapped_column(Text)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class SourceDefectPlanImpact(Base):
     __tablename__ = "source_defect_plan_impact"
     __table_args__ = (
@@ -556,7 +619,7 @@ class DerivationManifest(Base):
     __table_args__ = (
         CheckConstraint("state IN ('locked','running','completed','failed')", name="derivation_manifest_state_check"),
         CheckConstraint(
-            "trigger_kind IN ('corrections','asset_conditions','source_data_defects','combined')",
+            "trigger_kind IN ('corrections','asset_conditions','source_data_defects','planning_inputs','combined')",
             name="derivation_manifest_trigger_kind_check",
         ),
     )

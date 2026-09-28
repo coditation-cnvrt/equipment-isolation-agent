@@ -60,7 +60,9 @@ class IsolationRunRequest(BaseModel):
     )
     work_scope: WorkScopeRequest = Field(default_factory=WorkScopeRequest)
     selected_asset: SelectedAssetRequest
-    process_safety_inputs: dict[str, Any]
+    process_safety_inputs: dict[str, Any] | None = None
+    expected_planning_document_set: str = ""
+    planning_document_sources: dict[str, Any] | None = None
     model: str = ""
     max_steps: int = Field(
         default=DEFAULT_AGENT_MAX_STEPS,
@@ -72,6 +74,8 @@ class IsolationRunRequest(BaseModel):
     @field_validator("process_safety_inputs")
     @classmethod
     def _safety_inputs(cls, value):
+        if value is None:
+            return None
         from equipment_isolation.domain.process_safety import ProcessSafetyInputs
         return ProcessSafetyInputs.from_dict(value).to_dict()
 
@@ -561,7 +565,11 @@ class PlanVersionSummary(BaseModel):
 
 
 class PlanFreshnessChange(BaseModel):
-    change_type: Literal["became_unavailable", "returned_to_service", "source_defect_opened", "source_defect_changed", "source_defect_closed"]
+    change_type: Literal[
+        "became_unavailable", "returned_to_service", "source_defect_opened",
+        "source_defect_changed", "source_defect_closed",
+        "planning_document_changed", "planning_document_withdrawn",
+    ]
     condition_id: str | None = None
     defect_id: str | None = None
     occurred_at: datetime
@@ -569,17 +577,24 @@ class PlanFreshnessChange(BaseModel):
     defect: dict[str, Any] | None = None
     event_id: str | None = None
     material: bool | None = None
+    document: dict[str, Any] | None = None
 
 
 class PlanFreshness(BaseModel):
     status: Literal["fresh", "stale", "unknown"]
-    reason: Literal["asset_condition_changed", "source_data_defect_changed", "governance_inputs_changed"] | None = None
+    reason: Literal[
+        "asset_condition_changed", "source_data_defect_changed",
+        "planning_documents_changed", "governance_inputs_changed",
+        "planning_document_verification_unavailable",
+    ] | None = None
     evaluated_at: datetime
     changes: list[PlanFreshnessChange] = Field(default_factory=list)
     governance_readiness: Literal["ready", "advisory", "warning", "blocked"] = "ready"
     source_defects: list[dict[str, Any]] = Field(default_factory=list)
     asset_conditions_changed: bool = False
     source_data_defects_changed: bool = False
+    planning_documents_changed: bool = False
+    planning_documents: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class IsolationPlanSummary(BaseModel):
@@ -710,7 +725,7 @@ class ChangeRequestList(BaseModel):
 
 class DerivePlanRequest(BaseModel):
     parent_plan_version_id: str
-    trigger: Literal["corrections", "asset_conditions", "source_data_defects"] = "corrections"
+    trigger: Literal["corrections", "asset_conditions", "source_data_defects", "planning_inputs"] = "corrections"
 
 
 class DerivationAccepted(BaseModel):
@@ -745,3 +760,29 @@ class PlanVersionDiff(BaseModel):
     to_version_id: str
     sections: dict[str, dict[str, list[DiffItem]]]
     summary: dict[str, int]
+
+
+class PlanningInputValueChange(BaseModel):
+    path: str
+    before: Any = None
+    after: Any = None
+    significance: Literal["potentially_safety_significant"] = "potentially_safety_significant"
+
+
+class PlanningInputDocumentDiff(BaseModel):
+    document_type: Literal["fhr", "sic", "psd"]
+    status: Literal["current", "changed", "unavailable"]
+    captured_reference: dict[str, Any]
+    current_reference: dict[str, Any] | None = None
+    changes: list[PlanningInputValueChange] = Field(default_factory=list)
+    truncated: bool = False
+
+
+class PlanningInputDiff(BaseModel):
+    plan_id: str
+    plan_version_id: str
+    verification_status: Literal["verified", "unavailable", "historical_unknown"]
+    evaluated_at: datetime
+    current_document_set_token: str | None = None
+    documents: list[PlanningInputDocumentDiff] = Field(default_factory=list)
+    error: dict[str, Any] | None = None

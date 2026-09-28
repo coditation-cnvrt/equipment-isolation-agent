@@ -804,7 +804,8 @@
             "enum": [
               "corrections",
               "asset_conditions",
-              "source_data_defects"
+              "source_data_defects",
+              "planning_inputs"
             ],
             "title": "Trigger",
             "type": "string"
@@ -1137,6 +1138,11 @@
             "title": "Equipment Tag",
             "type": "string"
           },
+          "expected_planning_document_set": {
+            "default": "",
+            "title": "Expected Planning Document Set",
+            "type": "string"
+          },
           "job_id": {
             "default": "",
             "title": "Job Id",
@@ -1172,10 +1178,29 @@
             "title": "Model",
             "type": "string"
           },
+          "planning_document_sources": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planning Document Sources"
+          },
           "process_safety_inputs": {
-            "additionalProperties": true,
-            "title": "Process Safety Inputs",
-            "type": "object"
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Process Safety Inputs"
           },
           "request_schema_version": {
             "const": "1.0",
@@ -1211,8 +1236,7 @@
           "cnvrt_project_id",
           "collection_id",
           "unigraph_project_id",
-          "selected_asset",
-          "process_safety_inputs"
+          "selected_asset"
         ],
         "title": "IsolationRunRequest",
         "type": "object"
@@ -1247,13 +1271,28 @@
             "title": "Governance Readiness",
             "type": "string"
           },
+          "planning_documents": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Planning Documents",
+            "type": "array"
+          },
+          "planning_documents_changed": {
+            "default": false,
+            "title": "Planning Documents Changed",
+            "type": "boolean"
+          },
           "reason": {
             "anyOf": [
               {
                 "enum": [
                   "asset_condition_changed",
                   "source_data_defect_changed",
-                  "governance_inputs_changed"
+                  "planning_documents_changed",
+                  "governance_inputs_changed",
+                  "planning_document_verification_unavailable"
                 ],
                 "type": "string"
               },
@@ -1311,7 +1350,9 @@
               "returned_to_service",
               "source_defect_opened",
               "source_defect_changed",
-              "source_defect_closed"
+              "source_defect_closed",
+              "planning_document_changed",
+              "planning_document_withdrawn"
             ],
             "title": "Change Type",
             "type": "string"
@@ -1349,6 +1390,18 @@
               }
             ],
             "title": "Defect Id"
+          },
+          "document": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document"
           },
           "event_id": {
             "anyOf": [
@@ -1762,6 +1815,153 @@
           "items"
         ],
         "title": "PlanningDrawingList",
+        "type": "object"
+      },
+      "PlanningInputDiff": {
+        "properties": {
+          "current_document_set_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Document Set Token"
+          },
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/PlanningInputDocumentDiff"
+            },
+            "title": "Documents",
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "evaluated_at": {
+            "format": "date-time",
+            "title": "Evaluated At",
+            "type": "string"
+          },
+          "plan_id": {
+            "title": "Plan Id",
+            "type": "string"
+          },
+          "plan_version_id": {
+            "title": "Plan Version Id",
+            "type": "string"
+          },
+          "verification_status": {
+            "enum": [
+              "verified",
+              "unavailable",
+              "historical_unknown"
+            ],
+            "title": "Verification Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan_id",
+          "plan_version_id",
+          "verification_status",
+          "evaluated_at"
+        ],
+        "title": "PlanningInputDiff",
+        "type": "object"
+      },
+      "PlanningInputDocumentDiff": {
+        "properties": {
+          "captured_reference": {
+            "additionalProperties": true,
+            "title": "Captured Reference",
+            "type": "object"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/PlanningInputValueChange"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "current_reference": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Reference"
+          },
+          "document_type": {
+            "enum": [
+              "fhr",
+              "sic",
+              "psd"
+            ],
+            "title": "Document Type",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "current",
+              "changed",
+              "unavailable"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "document_type",
+          "status",
+          "captured_reference"
+        ],
+        "title": "PlanningInputDocumentDiff",
+        "type": "object"
+      },
+      "PlanningInputValueChange": {
+        "properties": {
+          "after": {
+            "title": "After"
+          },
+          "before": {
+            "title": "Before"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "significance": {
+            "const": "potentially_safety_significant",
+            "default": "potentially_safety_significant",
+            "title": "Significance",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "title": "PlanningInputValueChange",
         "type": "object"
       },
       "PlanningProject": {
@@ -3935,6 +4135,66 @@
         "summary": "Plan Version Diff"
       }
     },
+    "/isolation-plans/{plan_id}/versions/{version_id}/input-diff": {
+      "get": {
+        "operationId": "plan_version_input_diff_isolation_plans__plan_id__versions__version_id__input_diff_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plan_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Plan Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanningInputDiff"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Plan Version Input Diff"
+      }
+    },
     "/isolation-runs": {
       "get": {
         "operationId": "list_runs_isolation_runs_get",
@@ -4399,10 +4659,57 @@
         "summary": "Planning Context Hilt Graph"
       }
     },
-    "/planning-context/process-safety-example": {
+    "/planning-context/planning-documents": {
       "get": {
-        "description": "Explicit unapproved example documents; no drawing or approval access granted.",
-        "operationId": "process_safety_example_planning_context_process_safety_example_get",
+        "operationId": "planning_context_documents_planning_context_planning_documents_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cnvrt_project_id",
+            "required": true,
+            "schema": {
+              "title": "Cnvrt Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "collection_id",
+            "required": true,
+            "schema": {
+              "title": "Collection Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "unigraph_project_id",
+            "required": true,
+            "schema": {
+              "title": "Unigraph Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -4411,9 +4718,103 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
-        "summary": "Process Safety Example"
+        "summary": "Planning Context Documents"
+      }
+    },
+    "/planning-context/planning-documents/events": {
+      "get": {
+        "operationId": "planning_context_document_events_planning_context_planning_documents_events_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cnvrt_project_id",
+            "required": true,
+            "schema": {
+              "title": "Cnvrt Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "collection_id",
+            "required": true,
+            "schema": {
+              "title": "Collection Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "unigraph_project_id",
+            "required": true,
+            "schema": {
+              "title": "Unigraph Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Authorization",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Last-Event-ID",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Last-Event-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Planning Context Document Events"
       }
     },
     "/planning-context/projects": {

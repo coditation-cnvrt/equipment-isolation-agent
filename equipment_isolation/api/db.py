@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from importlib.resources import files
 from typing import Any
@@ -39,11 +40,14 @@ from equipment_isolation.api.db_models import (
     NormalizedIsolationPoint,
     PathPoint,
     PlanFeedback,
+    PlanningDocumentEventReceipt,
+    PlanningDocumentHead,
     PlanStep,
     PlanSourceDependency,
     PlanVersion,
     PlanVersionAssetCondition,
     PlanVersionFeedback,
+    PlanVersionPlanningDocument,
     PlanWorkScope,
     WorkScopeAsset,
     SourceDataDefect,
@@ -83,6 +87,7 @@ from equipment_isolation.domain.feedback import (
 
 ASSET_EVENT_REPLAY_OVERLAP = timedelta(minutes=10)
 SOURCE_DEFECT_EVENT_REPLAY_OVERLAP = timedelta(minutes=10)
+PLANNING_DOCUMENT_EVENT_REPLAY_OVERLAP = timedelta(minutes=10)
 _PLAN_SCOPE_KEYS = ("cnvrt_project_id", "collection_id", "job_id")
 
 
@@ -170,6 +175,291 @@ class PostgresRunRepository:
                 "Run `uv run alembic upgrade head`, or verify an existing current-schema "
                 "database before stamping the baseline."
             )
+
+    def observe_planning_document_set(self, manifest: dict) -> None:
+        """Reconcile current plant heads from one verified atomic HTTP bundle."""
+
+        rows = _planning_document_head_rows(manifest)
+        with self._session_factory.begin() as session:
+            for row in rows:
+                key = (row["source_id"], row["cnvrt_project_id"], row["document_type"])
+                current = session.scalar(
+                    select(PlanningDocumentHead)
+                    .where(
+                        PlanningDocumentHead.source_id == key[0],
+                        PlanningDocumentHead.cnvrt_project_id == key[1],
+                        PlanningDocumentHead.document_type == key[2],
+                    )
+                    .with_for_update()
+                )
+                if current is None:
+                    session.add(PlanningDocumentHead(**row))
+                    continue
+                if row["generation"] < current.generation:
+                    raise PlanDomainError(
+                        "planning_document_head_stale",
+                        "UniGraph returned a planning-document head older than an observed event.",
+                        409,
+                        {
+                            "document_type": row["document_type"],
+                            "returned_generation": row["generation"],
+                            "observed_generation": current.generation,
+                        },
+                    )
+                if row["generation"] == current.generation and (
+                    row["revision_id"] != current.revision_id
+                    or row["content_hash"] != current.content_hash
+                    or row["register_id"] != current.register_id
+                ):
+                    raise PlanDomainError(
+                        "planning_document_head_conflict",
+                        "UniGraph returned conflicting planning-document heads for one generation.",
+                        409,
+                        {"document_type": row["document_type"], "generation": row["generation"]},
+                    )
+                current.register_id = row["register_id"]
+                current.revision_id = row["revision_id"]
+                if row["generation"] > current.generation:
+                    current.event_id = None
+                current.generation = row["generation"]
+                current.content_hash = row["content_hash"]
+                current.observed_at = row["observed_at"]
+
+    def apply_planning_document_event(self, payload: dict, *, source_id: str) -> dict:
+        """Record one broker delivery and advance a head only for a newer generation."""
+
+        try:
+            event = _validated_planning_document_event(payload, source_id=source_id)
+        except PlanDomainError as validation_error:
+            event_id = str((payload or {}).get("event_id") or f"invalid-{canonical_hash(payload or {})}")
+            key = (str(source_id).rstrip("/"), event_id)
+            with self._session_factory.begin() as session:
+                existing = session.get(PlanningDocumentEventReceipt, key)
+                if existing is not None:
+                    return _planning_document_receipt_dict(existing, duplicate=True)
+                receipt = PlanningDocumentEventReceipt(
+                    source_id=key[0], event_id=event_id,
+                    change_id=str((payload or {}).get("change_id") or "") or None,
+                    event_type=str((payload or {}).get("event_type") or "invalid"),
+                    status="quarantined", payload=_jsonable(payload or {}),
+                    error=validation_error.kind, processed_at=datetime.now(timezone.utc),
+                )
+                session.add(receipt)
+                session.flush()
+                return _planning_document_receipt_dict(receipt, duplicate=False)
+        key = (event["source_id"], event["event_id"])
+        with self._session_factory.begin() as session:
+            existing = session.get(PlanningDocumentEventReceipt, key)
+            if existing is not None:
+                return _planning_document_receipt_dict(existing, duplicate=True)
+
+            status = "ignored"
+            error = None
+            if event["event_type"] in {
+                "unigraph.planning_document.current_changed",
+                "unigraph.planning_document.revision.withdrawn",
+            }:
+                head_key = (
+                    event["source_id"], event["cnvrt_project_id"], event["document_type"]
+                )
+                head = session.scalar(
+                    select(PlanningDocumentHead)
+                    .where(
+                        PlanningDocumentHead.source_id == head_key[0],
+                        PlanningDocumentHead.cnvrt_project_id == head_key[1],
+                        PlanningDocumentHead.document_type == head_key[2],
+                    )
+                    .with_for_update()
+                )
+                if head is not None and event["generation"] < head.generation:
+                    status = "ignored"
+                elif head is not None and event["generation"] == head.generation:
+                    same = (
+                        event["document_id"] == head.register_id
+                        and event["current_revision_id"] == head.revision_id
+                        and event.get("content_hash") == head.content_hash
+                    )
+                    status = "ignored" if same else "quarantined"
+                    if not same:
+                        error = "same_generation_conflict"
+                else:
+                    values = {
+                        "source_id": event["source_id"],
+                        "cnvrt_project_id": event["cnvrt_project_id"],
+                        "document_type": event["document_type"],
+                        "register_id": event["document_id"],
+                        "revision_id": event["current_revision_id"],
+                        "generation": event["generation"],
+                        "content_hash": event.get("content_hash"),
+                        "event_id": event["event_id"],
+                        "observed_at": event["updated_at"],
+                    }
+                    if head is None:
+                        session.add(PlanningDocumentHead(**values))
+                    else:
+                        for name, value in values.items():
+                            setattr(head, name, value)
+                    status = "processed"
+
+            receipt = PlanningDocumentEventReceipt(
+                source_id=event["source_id"],
+                event_id=event["event_id"],
+                change_id=event.get("change_id"),
+                event_type=event["event_type"],
+                status=status,
+                payload=_jsonable(payload),
+                error=error,
+                processed_at=datetime.now(timezone.utc),
+            )
+            session.add(receipt)
+            session.flush()
+            return _planning_document_receipt_dict(receipt, duplicate=False)
+
+    def planning_document_event_diagnostics(self) -> dict:
+        with self._session_factory() as session:
+            counts = dict(
+                session.execute(
+                    select(
+                        PlanningDocumentEventReceipt.status,
+                        func.count(PlanningDocumentEventReceipt.event_id),
+                    ).group_by(PlanningDocumentEventReceipt.status)
+                ).all()
+            )
+            latest = session.scalar(
+                select(PlanningDocumentEventReceipt)
+                .order_by(PlanningDocumentEventReceipt.received_at.desc())
+                .limit(1)
+            )
+            return {
+                "counts": {key: int(counts.get(key, 0)) for key in ("processed", "ignored", "quarantined")},
+                "last_received_at": _ts(latest.received_at) if latest else None,
+                "last_event_id": latest.event_id if latest else None,
+            }
+
+    def planning_document_event_replay_state(
+        self,
+        cnvrt_project_id: str,
+        after_id: str = "",
+    ) -> dict:
+        """Establish a plant-scoped cursor for committed document-head changes."""
+
+        plant_id = str(cnvrt_project_id or "").strip()
+        with self._session_factory() as session:
+            base = (
+                select(PlanningDocumentEventReceipt)
+                .where(
+                    PlanningDocumentEventReceipt.status == "processed",
+                    PlanningDocumentEventReceipt.payload["cnvrt_project_id"].astext
+                    == plant_id,
+                )
+            )
+            cursor = None
+            if after_id:
+                cursor = session.scalar(
+                    base.where(PlanningDocumentEventReceipt.event_id == after_id)
+                    .order_by(PlanningDocumentEventReceipt.received_at.desc())
+                    .limit(1)
+                )
+            if cursor is None:
+                cursor = session.scalar(
+                    base.order_by(
+                        PlanningDocumentEventReceipt.received_at.desc(),
+                        PlanningDocumentEventReceipt.event_id.desc(),
+                    ).limit(1)
+                )
+            if cursor is None:
+                return {
+                    "cursor_id": "",
+                    "cursor_received_at": None,
+                    "seen_ids": set(),
+                }
+            cutoff = cursor.received_at - PLANNING_DOCUMENT_EVENT_REPLAY_OVERLAP
+            seen_ids = {
+                str(event_id)
+                for event_id in session.scalars(
+                    select(PlanningDocumentEventReceipt.event_id).where(
+                        PlanningDocumentEventReceipt.status == "processed",
+                        PlanningDocumentEventReceipt.payload[
+                            "cnvrt_project_id"
+                        ].astext
+                        == plant_id,
+                        PlanningDocumentEventReceipt.received_at >= cutoff,
+                        or_(
+                            PlanningDocumentEventReceipt.received_at
+                            < cursor.received_at,
+                            and_(
+                                PlanningDocumentEventReceipt.received_at
+                                == cursor.received_at,
+                                PlanningDocumentEventReceipt.event_id
+                                <= cursor.event_id,
+                            ),
+                        ),
+                    )
+                ).all()
+            }
+            return {
+                "cursor_id": cursor.event_id,
+                "cursor_received_at": cursor.received_at,
+                "seen_ids": seen_ids,
+            }
+
+    def list_planning_document_events(
+        self,
+        cnvrt_project_id: str,
+        *,
+        after_id: str = "",
+        exclude_ids: set[str] | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        """Return committed head changes for one CNVRT plant."""
+
+        plant_id = str(cnvrt_project_id or "").strip()
+        with self._session_factory() as session:
+            cursor = None
+            if after_id:
+                cursor = session.scalar(
+                    select(PlanningDocumentEventReceipt)
+                    .where(
+                        PlanningDocumentEventReceipt.status == "processed",
+                        PlanningDocumentEventReceipt.payload[
+                            "cnvrt_project_id"
+                        ].astext
+                        == plant_id,
+                        PlanningDocumentEventReceipt.event_id == after_id,
+                    )
+                    .order_by(PlanningDocumentEventReceipt.received_at.desc())
+                    .limit(1)
+                )
+            statement = select(PlanningDocumentEventReceipt).where(
+                PlanningDocumentEventReceipt.status == "processed",
+                PlanningDocumentEventReceipt.payload["cnvrt_project_id"].astext
+                == plant_id,
+            )
+            if cursor is not None:
+                statement = statement.where(
+                    PlanningDocumentEventReceipt.received_at
+                    >= cursor.received_at - PLANNING_DOCUMENT_EVENT_REPLAY_OVERLAP
+                )
+            if exclude_ids:
+                statement = statement.where(
+                    PlanningDocumentEventReceipt.event_id.not_in(exclude_ids)
+                )
+            rows = session.scalars(
+                statement.order_by(
+                    PlanningDocumentEventReceipt.received_at,
+                    PlanningDocumentEventReceipt.event_id,
+                ).limit(limit)
+            ).all()
+            return [
+                {
+                    **deepcopy(receipt.payload or {}),
+                    "event_id": receipt.event_id,
+                    "event_type": receipt.event_type,
+                    "status": receipt.status,
+                    "received_at": receipt.received_at,
+                }
+                for receipt in rows
+            ]
 
     def create_asset_condition(self, payload, actor_id: str) -> dict:
         context = payload.asset.context()
@@ -867,7 +1157,10 @@ class PostgresRunRepository:
                     for key in ('cnvrt_project_id', 'collection_id', 'unigraph_project_id', 'job_id', 'selected_asset'):
                         if updated.get(key) != original.get(key):
                             raise ValueError('Safety input scope is locked; create a new run to change equipment context')
-                    for key in ('process_safety_inputs', '_captured_hilt', 'work_scope'):
+                    for key in (
+                        'process_safety_inputs', '_captured_hilt', 'work_scope',
+                        'expected_planning_document_set', 'planning_document_sources',
+                    ):
                         if key in original:
                             updated[key] = original[key]
                 else:
@@ -1036,6 +1329,7 @@ class PostgresRunRepository:
         )
         _persist_normalized_content(session, version, request_payload, run.result)
         _persist_source_dependency(session, version, request_payload, version.content or {})
+        _persist_planning_document_dependencies(session, version, request_payload)
         session.flush()
         plan = self._get_plan_with_session(session, plan_row.plan_id)
         return plan, True
@@ -1653,11 +1947,13 @@ class PostgresRunRepository:
             )
             asset_conditions_changed = bool(freshness.get("asset_conditions_changed"))
             source_defects_changed = bool(freshness.get("source_data_defects_changed"))
+            planning_documents_changed = bool(freshness.get("planning_documents_changed"))
             trigger_kind, effective_inputs = _effective_derivation_trigger(
                 trigger,
                 corrections_changed=bool(changes),
                 asset_conditions_changed=asset_conditions_changed,
                 source_defects_changed=source_defects_changed,
+                planning_documents_changed=planning_documents_changed,
             )
             corrections = [
                 _feedback_to_derivation_input(item) for item in effective_changes
@@ -1722,6 +2018,10 @@ class PostgresRunRepository:
                 },
                 "asset_condition_changes": asset_condition_changes,
                 "source_data_defect_changes": source_data_defect_changes,
+                "planning_document_changes": [
+                    item for item in freshness.get("changes") or []
+                    if item.get("document")
+                ],
                 "source_data_defects": {
                     "event_ids": sorted(defect_event_snapshots),
                     "event_snapshots": list(defect_event_snapshots.values()),
@@ -1790,6 +2090,7 @@ class PostgresRunRepository:
                     "feedback_ids": [str(row.feedback_id) for row in changes],
                     "asset_condition_changes": asset_condition_changes,
                     "source_data_defect_changes": source_data_defect_changes,
+                    "planning_document_changes": trigger_snapshot["planning_document_changes"],
                 },
             )
             return {
@@ -1877,6 +2178,56 @@ class PostgresRunRepository:
                 **diff,
             }
 
+    def get_plan_planning_document_snapshot(self, plan_id: str, version_id: str) -> dict | None:
+        """Return authorized-route support data for historical/current input comparison."""
+
+        plan_uuid, version_uuid = (
+            _uuid(plan_id, "unknown_plan"),
+            _uuid(version_id, "unknown_plan_version"),
+        )
+        with self._session_factory() as session:
+            version = session.scalar(
+                select(PlanVersion).where(
+                    PlanVersion.plan_id == plan_uuid,
+                    PlanVersion.plan_version_id == version_uuid,
+                )
+            )
+            if version is None:
+                return None
+            request_payload = session.scalar(
+                select(IsolationRun.request)
+                .select_from(ExternalRunLink)
+                .join(IsolationRun, IsolationRun.run_id == ExternalRunLink.run_id)
+                .where(
+                    ExternalRunLink.plan_version_id == version_uuid,
+                    ExternalRunLink.link_role == "derivation",
+                )
+            ) or {}
+            rows = list(session.scalars(
+                select(PlanVersionPlanningDocument)
+                .where(PlanVersionPlanningDocument.plan_version_id == version_uuid)
+                .order_by(PlanVersionPlanningDocument.document_type)
+            ).all())
+            return {
+                "context": _planning_context(request_payload),
+                "documents": [
+                    {
+                        "source_id": row.source_id,
+                        "cnvrt_project_id": row.cnvrt_project_id,
+                        "entry_unigraph_project_id": row.entry_unigraph_project_id,
+                        "document_type": row.document_type,
+                        "register_id": row.register_id,
+                        "revision_id": row.revision_id,
+                        "revision_number": row.revision_number,
+                        "generation": row.generation,
+                        "schema_version": row.schema_version,
+                        "content_hash": row.content_hash,
+                        "source_snapshot": deepcopy(row.source_snapshot),
+                    }
+                    for row in rows
+                ],
+            }
+
     def _complete_derivation(
         self, session, manifest: DerivationManifest, run: IsolationRun
     ) -> None:
@@ -1942,6 +2293,7 @@ class PostgresRunRepository:
             session, version, run.request or {}, run.result or {}
         )
         _persist_source_dependency(session, version, run.request or {}, content)
+        _persist_planning_document_dependencies(session, version, run.request or {})
         for link in manifest_changes:
             change = session.get(PlanFeedback, link.feedback_id)
             coverage = coverage_by_id.get(str(link.feedback_id)) or {
@@ -2245,6 +2597,35 @@ def _plans_freshness(
             select(PlanSourceDependency).where(PlanSourceDependency.plan_version_id.in_(set(contexts)))
         ).all()
     }
+    planning_document_rows: dict[UUID, list[PlanVersionPlanningDocument]] = {
+        version_id: [] for version_id in contexts
+    }
+    for row in session.scalars(
+        select(PlanVersionPlanningDocument).where(
+            PlanVersionPlanningDocument.plan_version_id.in_(set(contexts))
+        )
+    ).all():
+        planning_document_rows.setdefault(row.plan_version_id, []).append(row)
+    planning_head_keys = {
+        (row.source_id, row.cnvrt_project_id, row.document_type)
+        for rows in planning_document_rows.values()
+        for row in rows
+    }
+    planning_heads = {
+        (row.source_id, row.cnvrt_project_id, row.document_type): row
+        for row in (
+            session.scalars(
+                select(PlanningDocumentHead).where(
+                    tuple_(
+                        PlanningDocumentHead.source_id,
+                        PlanningDocumentHead.cnvrt_project_id,
+                        PlanningDocumentHead.document_type,
+                    ).in_(planning_head_keys)
+                )
+            ).all()
+            if planning_head_keys else []
+        )
+    }
     drawing_keys = {
         (context["cnvrt_project_id"], context["collection_id"], context["job_id"])
         for context in valid_contexts.values()
@@ -2335,6 +2716,8 @@ def _plans_freshness(
                 "source_defects": [],
                 "asset_conditions_changed": False,
                 "source_data_defects_changed": False,
+                "planning_documents_changed": False,
+                "planning_documents": [],
             }
             continue
         captured = captured_by_version[version_id]
@@ -2406,21 +2789,83 @@ def _plans_freshness(
         historical_unknown = dependency is None or dependency.manifest_status == "historical_unknown"
         current_material_defect = any(item.state in MATERIAL_STATES for item in current_defects.values())
         source_defects_changed = material_defect_changed or (historical_unknown and current_material_defect)
+        document_dependencies = planning_document_rows.get(version_id, [])
+        document_status = []
+        planning_documents_changed = False
+        completion_verification = (_request or {}).get(
+            "_planning_document_completion_verification"
+        )
+        completion_unverified = bool(
+            isinstance(completion_verification, dict)
+            and completion_verification.get("status") == "unavailable"
+        )
+        planning_documents_unknown = (
+            len(document_dependencies) != len(_PLANNING_DOCUMENT_TYPES)
+            or completion_unverified
+        )
+        for dependency_document in sorted(document_dependencies, key=lambda item: item.document_type):
+            head = planning_heads.get((
+                dependency_document.source_id,
+                dependency_document.cnvrt_project_id,
+                dependency_document.document_type,
+            ))
+            changed = bool(
+                head is not None
+                and (
+                    head.generation != dependency_document.generation
+                    or head.revision_id != dependency_document.revision_id
+                    or head.content_hash != dependency_document.content_hash
+                )
+            )
+            planning_documents_changed = planning_documents_changed or changed
+            planning_documents_unknown = planning_documents_unknown or head is None
+            document_status.append({
+                "document_type": dependency_document.document_type,
+                "captured_generation": dependency_document.generation,
+                "captured_revision_id": dependency_document.revision_id,
+                "current_generation": head.generation if head is not None else None,
+                "current_revision_id": head.revision_id if head is not None else None,
+                "status": "changed" if changed else "unknown" if head is None else "current",
+            })
+            if changed:
+                changes.append({
+                    "change_type": (
+                        "planning_document_withdrawn"
+                        if head.revision_id is None else "planning_document_changed"
+                    ),
+                    "event_id": head.event_id,
+                    "occurred_at": head.observed_at,
+                    "document": {
+                        "document_type": dependency_document.document_type,
+                        "captured_generation": dependency_document.generation,
+                        "captured_revision_id": dependency_document.revision_id,
+                        "current_generation": head.generation,
+                        "current_revision_id": head.revision_id,
+                    },
+                })
+        changes.sort(key=lambda item: (item["occurred_at"], item.get("condition_id") or item.get("defect_id") or item.get("event_id") or ""))
         governance = _governance_readiness_for_dependency(
-            governance, historical_unknown=historical_unknown,
-            source_defects_changed=source_defects_changed,
+            governance,
+            historical_unknown=historical_unknown or planning_documents_unknown,
+            source_defects_changed=source_defects_changed or planning_documents_changed,
         )
         reason = None
-        if asset_changed and defect_changed:
+        changed_input_count = sum((asset_changed, bool(defect_changed or source_defects_changed), planning_documents_changed))
+        if changed_input_count > 1:
             reason = "governance_inputs_changed"
+        elif planning_documents_changed:
+            reason = "planning_documents_changed"
         elif asset_changed:
             reason = "asset_condition_changed"
         elif defect_changed or source_defects_changed:
             reason = "source_data_defect_changed"
+        elif completion_unverified:
+            reason = "planning_document_verification_unavailable"
         status = _governance_freshness_status(
             asset_changed=asset_changed,
             source_defects_changed=source_defects_changed,
-            historical_unknown=historical_unknown,
+            planning_documents_changed=planning_documents_changed,
+            historical_unknown=historical_unknown or planning_documents_unknown,
         )
         results[version_id] = {
             "status": status,
@@ -2431,6 +2876,8 @@ def _plans_freshness(
             "source_defects": defect_summaries,
             "asset_conditions_changed": asset_changed,
             "source_data_defects_changed": source_defects_changed,
+            "planning_documents_changed": planning_documents_changed,
+            "planning_documents": document_status,
         }
     return results
 
@@ -2596,8 +3043,14 @@ def _reconcile_current_material_defects(
     return changes, changed
 
 
-def _governance_freshness_status(*, asset_changed: bool, source_defects_changed: bool, historical_unknown: bool) -> str:
-    if asset_changed or source_defects_changed:
+def _governance_freshness_status(
+    *,
+    asset_changed: bool,
+    source_defects_changed: bool,
+    historical_unknown: bool,
+    planning_documents_changed: bool = False,
+) -> str:
+    if asset_changed or source_defects_changed or planning_documents_changed:
         return "stale"
     if historical_unknown:
         return "unknown"
@@ -2618,6 +3071,7 @@ def _effective_derivation_trigger(
     corrections_changed: bool,
     asset_conditions_changed: bool,
     source_defects_changed: bool,
+    planning_documents_changed: bool = False,
 ) -> tuple[str, list[str]]:
     if requested == "corrections" and not corrections_changed:
         raise PlanDomainError("no_approved_corrections", "No approved corrections are available for derivation.", 409)
@@ -2625,6 +3079,8 @@ def _effective_derivation_trigger(
         raise PlanDomainError("plan_inputs_current", "The latest plan version already uses the current shared equipment status.", 409)
     if requested == "source_data_defects" and not source_defects_changed:
         raise PlanDomainError("plan_source_defects_current", "No material source-data defect change affects the latest plan version.", 409)
+    if requested == "planning_inputs" and not planning_documents_changed:
+        raise PlanDomainError("plan_documents_current", "The latest plan version already uses the current approved planning documents.", 409)
     inputs = []
     if corrections_changed:
         inputs.append("corrections")
@@ -2632,6 +3088,8 @@ def _effective_derivation_trigger(
         inputs.append("asset_conditions")
     if source_defects_changed:
         inputs.append("source_data_defects")
+    if planning_documents_changed:
+        inputs.append("planning_inputs")
     return ("combined" if len(inputs) > 1 else inputs[0]), inputs
 
 
@@ -2661,6 +3119,175 @@ def _capture_source_defect_snapshot(session, request: dict) -> dict:
         "watermark_id": str(events[-1].event_id) if events else None,
         "watermark_at": events[-1].occurred_at if events else None,
     })
+
+
+_PLANNING_DOCUMENT_TYPES = ("fhr", "sic", "psd")
+_PLANNING_DOCUMENT_EVENT_TYPES = {
+    "unigraph.planning_document.revision.validated",
+    "unigraph.planning_document.revision.rejected",
+    "unigraph.planning_document.current_changed",
+    "unigraph.planning_document.revision.withdrawn",
+    "unigraph.graph.version.published",
+}
+
+
+def _planning_document_head_rows(manifest: dict) -> list[dict]:
+    if not isinstance(manifest, dict):
+        raise PlanDomainError("planning_document_manifest_invalid", "Planning-document manifest is invalid.", 409)
+    documents = manifest.get("documents")
+    source_id = str(manifest.get("source_id") or "").rstrip("/")
+    plant_id = str(manifest.get("cnvrt_project_id") or "")
+    if not source_id or not plant_id or not isinstance(documents, dict):
+        raise PlanDomainError("planning_document_manifest_invalid", "Planning-document source identity is incomplete.", 409)
+    if set(documents) != set(_PLANNING_DOCUMENT_TYPES):
+        raise PlanDomainError("planning_document_manifest_invalid", "FHR, SIC and PSD heads are required.", 409)
+    try:
+        observed_at = datetime.fromisoformat(str(manifest.get("captured_at") or "").replace("Z", "+00:00"))
+    except ValueError as error:
+        raise PlanDomainError("planning_document_manifest_invalid", "Planning-document capture time is invalid.", 409) from error
+    rows = []
+    for kind in _PLANNING_DOCUMENT_TYPES:
+        document = documents[kind]
+        if (
+            not isinstance(document, dict)
+            or document.get("document_type") != kind
+            or str(document.get("source_id") or "").rstrip("/") != source_id
+            or str(document.get("cnvrt_project_id") or "") != plant_id
+        ):
+            raise PlanDomainError("planning_document_manifest_invalid", f"{kind.upper()} source identity is invalid.", 409)
+        try:
+            rows.append({
+                "source_id": source_id,
+                "cnvrt_project_id": plant_id,
+                "document_type": kind,
+                "register_id": int(document["register_id"]),
+                "revision_id": int(document["revision_id"]),
+                "generation": int(document["generation"]),
+                "content_hash": str(document["content_hash"]),
+                "event_id": None,
+                "observed_at": observed_at,
+            })
+        except (KeyError, TypeError, ValueError) as error:
+            raise PlanDomainError("planning_document_manifest_invalid", f"{kind.upper()} head is invalid.", 409) from error
+    return rows
+
+
+def _validated_planning_document_event(payload: dict, *, source_id: str) -> dict:
+    if not isinstance(payload, dict):
+        raise PlanDomainError("planning_document_event_invalid", "Event payload must be an object.", 422)
+    event_type = str(payload.get("event_type") or "")
+    event_id = str(payload.get("event_id") or "")
+    normalized_source = str(source_id or "").rstrip("/")
+    if not normalized_source or not event_id or event_type not in _PLANNING_DOCUMENT_EVENT_TYPES:
+        raise PlanDomainError("planning_document_event_invalid", "Event identity or type is invalid.", 422)
+    if int(payload.get("event_version") or 0) != 1:
+        raise PlanDomainError("planning_document_event_invalid", "Unsupported event version.", 422)
+    result = {
+        **payload,
+        "source_id": normalized_source,
+        "event_id": event_id,
+        "event_type": event_type,
+        "change_id": str(payload.get("change_id") or "") or None,
+    }
+    if event_type not in {
+        "unigraph.planning_document.current_changed",
+        "unigraph.planning_document.revision.withdrawn",
+    }:
+        return result
+    kind = str(payload.get("document_type") or "")
+    try:
+        updated_at = datetime.fromisoformat(str(payload["updated_at"]).replace("Z", "+00:00"))
+        result.update(
+            cnvrt_project_id=str(payload["cnvrt_project_id"]),
+            unigraph_project_id=str(payload["unigraph_project_id"]),
+            document_type=kind,
+            document_id=int(payload["document_id"]),
+            generation=int(payload["generation"]),
+            current_revision_id=(
+                int(payload["current_revision_id"])
+                if payload.get("current_revision_id") is not None else None
+            ),
+            previous_revision_id=(
+                int(payload["previous_revision_id"])
+                if payload.get("previous_revision_id") is not None else None
+            ),
+            decision_id=int(payload["decision_id"]),
+            content_hash=(str(payload["content_hash"]) if payload.get("content_hash") else None),
+            updated_at=updated_at,
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise PlanDomainError("planning_document_event_invalid", "Document-head event fields are invalid.", 422) from error
+    if (
+        kind not in _PLANNING_DOCUMENT_TYPES
+        or result["generation"] < 1
+        or not result["cnvrt_project_id"]
+        or not result["unigraph_project_id"]
+        or result["updated_at"].utcoffset() is None
+    ):
+        raise PlanDomainError("planning_document_event_invalid", "Document type or generation is invalid.", 422)
+    withdrawn = event_type.endswith("revision.withdrawn")
+    if withdrawn != (result["current_revision_id"] is None):
+        raise PlanDomainError("planning_document_event_invalid", "Document head does not match event type.", 422)
+    if not withdrawn and not result["content_hash"]:
+        raise PlanDomainError("planning_document_event_invalid", "Current document content hash is required.", 422)
+    return result
+
+
+def _planning_document_receipt_dict(receipt: PlanningDocumentEventReceipt, *, duplicate: bool) -> dict:
+    return {
+        "source_id": receipt.source_id,
+        "event_id": receipt.event_id,
+        "change_id": receipt.change_id,
+        "event_type": receipt.event_type,
+        "status": receipt.status,
+        "error": receipt.error,
+        "duplicate": duplicate,
+    }
+
+
+def _persist_planning_document_dependencies(session, version: PlanVersion, request: dict) -> None:
+    manifest = (request or {}).get("planning_document_sources")
+    if not isinstance(manifest, dict):
+        return
+    rows = _planning_document_head_rows(manifest)
+    inputs = (request or {}).get("process_safety_inputs") or {}
+    documents = manifest["documents"]
+    for row in rows:
+        kind = row["document_type"]
+        document = documents[kind]
+        normalized = document.get("normalized_content")
+        if not isinstance(normalized, dict):
+            raise PlanDomainError(
+                "planning_document_snapshot_missing",
+                f"The exact {kind.upper()} normalized source snapshot was not retained.",
+                409,
+            )
+        adapted = inputs.get(kind)
+        if not isinstance(adapted, dict):
+            raise PlanDomainError(
+                "planning_document_snapshot_missing",
+                f"The adapted {kind.upper()} run input was not retained.",
+                409,
+            )
+        session.add(
+            PlanVersionPlanningDocument(
+                plan_version_id=version.plan_version_id,
+                document_type=kind,
+                source_id=row["source_id"],
+                cnvrt_project_id=row["cnvrt_project_id"],
+                entry_unigraph_project_id=str(document["entry_unigraph_project_id"]),
+                register_id=row["register_id"],
+                revision_id=row["revision_id"],
+                revision_number=int(document["revision_number"]),
+                generation=row["generation"],
+                schema_version=str(document["schema_version"]),
+                content_hash=row["content_hash"],
+                adapted_content_hash=canonical_hash(adapted),
+                approval_snapshot=_jsonable(document.get("approval") or {}),
+                source_snapshot=_jsonable(normalized),
+                captured_at=row["observed_at"],
+            )
+        )
 
 
 def _persist_source_dependency(session, version: PlanVersion, request: dict, content: dict) -> None:

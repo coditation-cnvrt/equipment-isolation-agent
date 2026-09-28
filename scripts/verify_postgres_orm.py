@@ -24,11 +24,16 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, func, inspect, select
+from sqlalchemy import create_engine, func, inspect, select, text
+from sqlalchemy.exc import DBAPIError
 
 from equipment_isolation.api.database import database_url, postgres_config_from_env
 from equipment_isolation.api.db import PostgresRunRepository, _get_or_create_asset
-from equipment_isolation.api.db_models import PathPoint, PlanVersionAssetCondition
+from equipment_isolation.api.db_models import (
+    PathPoint,
+    PlanVersionAssetCondition,
+    PlanVersionPlanningDocument,
+)
 from equipment_isolation.api.models import (
     AssetConditionActionRequest,
     AssetConditionAssetRequest,
@@ -37,6 +42,7 @@ from equipment_isolation.api.models import (
 )
 from equipment_isolation.api.plans import PlanDomainError
 from equipment_isolation.pipeline.env import load_dotenv
+from tests.run_request_fixtures import run_request
 
 
 APP_TABLES = (
@@ -62,6 +68,9 @@ APP_TABLES = (
     "plan_version",
     "plan_version_asset_condition",
     "plan_version_feedback",
+    "plan_version_planning_document",
+    "planning_document_event_receipt",
+    "planning_document_head",
     "work_scope",
     "work_scope_asset",
 )
@@ -137,14 +146,20 @@ def _repository_smoke(repository: PostgresRunRepository) -> None:
         trace=None,
         error=None,
     )
-    request = {
-        "equipment_tag": run.equipment_tag,
-        "job_id": "9001",
-        "job_name": "ORM smoke",
-        "cnvrt_project_id": "277",
-        "collection_id": "206",
-        "unigraph_project_id": "15",
-    }
+    request = run_request(
+        equipment_tag=run.equipment_tag,
+        job_id="9001",
+        job_name="ORM smoke",
+        cnvrt_project_id="277",
+        collection_id="206",
+        unigraph_project_id="15",
+        selected_asset={
+            "hilt_entity_id": "orm-smoke-equipment",
+            "tag": run.equipment_tag,
+            "selection_source": "hilt_equipment_list",
+        },
+    ).model_dump()
+    repository.observe_planning_document_set(request["planning_document_sources"])
     condition = repository.create_asset_condition(
         CreateAssetConditionRequest(
             asset=AssetConditionAssetRequest(
@@ -190,8 +205,8 @@ def _repository_smoke(repository: PostgresRunRepository) -> None:
 
     plan, created = repository.create_plan_from_run(run_id, "ORM smoke area")
     _require(
-        created and plan["latest_version"]["source_run"]["run_id"] == run_id,
-        "Plan promotion failed",
+        not created and plan["latest_version"]["source_run"]["run_id"] == run_id,
+        f"Plan promotion failed: created={created!r}, source_run={plan.get('latest_version', {}).get('source_run')!r}",
     )
     duplicate, created_again = repository.create_plan_from_run(run_id)
     _require(
@@ -334,6 +349,128 @@ def _repository_smoke(repository: PostgresRunRepository) -> None:
         first = _get_or_create_asset(session, "unigraph_candidate", "reused-vertex", "XV-P15", "gate_valve", {"unigraph_project_id": "15"})
         second = _get_or_create_asset(session, "unigraph_candidate", "reused-vertex", "XV-P27", "gate_valve", {"unigraph_project_id": "27"})
         _require(first.asset_ref_id != second.asset_ref_id, "Asset identities collided across UniGraph projects")
+
+    fhr = request["planning_document_sources"]["documents"]["fhr"]
+    replacement = {
+        "event_id": "orm-smoke-fhr-generation-2",
+        "change_id": "orm-smoke-fhr-change-2",
+        "event_type": "unigraph.planning_document.current_changed",
+        "event_version": 1,
+        "unigraph_project_id": int(request["unigraph_project_id"]),
+        "cnvrt_project_id": int(request["cnvrt_project_id"]),
+        "document_id": fhr["register_id"],
+        "document_type": "fhr",
+        "revision_id": fhr["revision_id"] + 100,
+        "current_revision_id": fhr["revision_id"] + 100,
+        "previous_revision_id": fhr["revision_id"],
+        "content_hash": "f" * 64,
+        "generation": fhr["generation"] + 1,
+        "decision_id": 9002,
+        "reason": "Disposable database replacement smoke test.",
+        "updated_at": "2026-09-17T10:00:00+00:00",
+    }
+    processed = repository.apply_planning_document_event(
+        replacement,
+        source_id=request["planning_document_sources"]["source_id"],
+    )
+    _require(processed["status"] == "processed", "Document replacement was not processed")
+    duplicate = repository.apply_planning_document_event(
+        replacement,
+        source_id=request["planning_document_sources"]["source_id"],
+    )
+    _require(duplicate["duplicate"], "Document event was not idempotent")
+    fanout = repository.apply_planning_document_event(
+        {
+            **replacement,
+            "event_id": "orm-smoke-fhr-generation-2-project-16",
+            "unigraph_project_id": 16,
+        },
+        source_id=request["planning_document_sources"]["source_id"],
+    )
+    _require(
+        fanout["status"] == "ignored" and not fanout["duplicate"],
+        "Multi-project fan-out produced a second plant-head change",
+    )
+    late = repository.apply_planning_document_event(
+        {
+            **replacement,
+            "event_id": "orm-smoke-fhr-late-generation-1",
+            "generation": fhr["generation"],
+            "current_revision_id": fhr["revision_id"],
+            "revision_id": fhr["revision_id"],
+            "previous_revision_id": None,
+            "content_hash": fhr["content_hash"],
+        },
+        source_id=request["planning_document_sources"]["source_id"],
+    )
+    _require(late["status"] == "ignored", "Late document event rolled the head back")
+    conflict = repository.apply_planning_document_event(
+        {**replacement, "event_id": "orm-smoke-fhr-conflict", "content_hash": "e" * 64},
+        source_id=request["planning_document_sources"]["source_id"],
+    )
+    _require(
+        conflict["status"] == "quarantined" and conflict["error"] == "same_generation_conflict",
+        "Conflicting same-generation document event was not quarantined",
+    )
+    stale = repository.get_plan(plan["plan_id"])["freshness"]
+    _require(
+        stale["status"] == "stale" and stale["planning_documents_changed"],
+        "Approved document replacement did not make the plan stale",
+    )
+    withdrawal = {
+        **replacement,
+        "event_id": "orm-smoke-fhr-withdrawal-generation-3",
+        "change_id": "orm-smoke-fhr-change-3",
+        "event_type": "unigraph.planning_document.revision.withdrawn",
+        "generation": fhr["generation"] + 2,
+        "revision_id": None,
+        "current_revision_id": None,
+        "previous_revision_id": replacement["current_revision_id"],
+        "content_hash": None,
+        "decision_id": 9003,
+        "reason": "Disposable database withdrawal smoke test.",
+        "updated_at": "2026-09-17T10:05:00+00:00",
+    }
+    withdrawn = repository.apply_planning_document_event(
+        withdrawal,
+        source_id=request["planning_document_sources"]["source_id"],
+    )
+    _require(withdrawn["status"] == "processed", "Document withdrawal was not processed")
+    replay = repository.planning_document_event_replay_state("277")
+    _require(
+        replay["cursor_id"] == withdrawal["event_id"],
+        "Planning-document SSE cursor did not use the committed plant event",
+    )
+    replayed = repository.list_planning_document_events(
+        "277", after_id=replay["cursor_id"], exclude_ids=set()
+    )
+    _require(
+        [event["event_id"] for event in replayed]
+        == [replacement["event_id"], withdrawal["event_id"]],
+        "Planning-document event replay did not return committed plant changes in order",
+    )
+    with repository._session_factory() as session:
+        snapshot = session.scalar(select(PlanVersionPlanningDocument).limit(1))
+        snapshot_version_id = snapshot.plan_version_id
+        snapshot_type = snapshot.document_type
+    for statement, parameters in (
+        (
+            "UPDATE plan_version_planning_document SET content_hash = :hash "
+            "WHERE plan_version_id = :version_id AND document_type = :document_type",
+            {"hash": "0" * 64, "version_id": snapshot_version_id, "document_type": snapshot_type},
+        ),
+        (
+            "DELETE FROM planning_document_event_receipt WHERE event_id = :event_id",
+            {"event_id": replacement["event_id"]},
+        ),
+    ):
+        try:
+            with repository._engine.begin() as connection:
+                connection.execute(text(statement), parameters)
+        except DBAPIError:
+            pass
+        else:
+            raise RuntimeError("Immutable planning-document evidence accepted direct mutation")
 
 
 async def _lifespan_smoke() -> None:
